@@ -1,4 +1,8 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.14"
+# dependencies = ["requests>=2.32"]
+# ///
 """Show what the plug is doing: relay state, why, power draw and recent charges."""
 
 from __future__ import annotations
@@ -13,7 +17,7 @@ from pathlib import Path
 import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from deploy import ROOT, SCRIPT_NAME, Shelly, load_env  # noqa: E402
+from deploy import ROOT, SCRIPT_NAME, Shelly, load_env  # ty: ignore[unresolved-import]
 
 
 def fmt(ts: int | None) -> str:
@@ -26,8 +30,10 @@ def main() -> int:
     dev = Shelly(cfg["host"], os.environ.get("SHELLY_PASSWORD") or None)
 
     sw = dev.call("Switch.GetStatus", {"id": 0})
-    print(f"Relay: {'ON' if sw.get('output') else 'off'}  {sw.get('apower', 0):.0f} W  "
-          f"total {sw.get('aenergy', {}).get('total', 0) / 1000:.2f} kWh")
+    print(
+        f"Relay: {'ON' if sw.get('output') else 'off'}  {sw.get('apower', 0):.0f} W  "
+        f"total {sw.get('aenergy', {}).get('total', 0) / 1000:.2f} kWh"
+    )
 
     scripts = dev.call("Script.List").get("scripts", [])
     script = next((s for s in scripts if s.get("name") == SCRIPT_NAME), None)
@@ -37,7 +43,9 @@ def main() -> int:
     if not script.get("running"):
         print("grid-gate is installed but not running.")
         return 1
-    r = requests.get(f"http://{cfg['host']}/script/{script['id']}/status", auth=dev.auth, timeout=10)
+    r = requests.get(
+        f"http://{cfg['host']}/script/{script['id']}/status", auth=dev.auth, timeout=10
+    )
     st = r.json()
     print(f"Reason: {st['reason']}   live index: {st['index']}")
     windows = ", ".join(f"{fmt(s)} to {fmt(e)}" for s, e in st["planWindows"])

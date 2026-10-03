@@ -28,12 +28,13 @@ Grid-aware charging for a Jackery Explorer 3000 v2 with a 250 W panel in a San F
 From a computer on your home Wi-Fi:
 
 ```sh
-pip install -r tools/requirements.txt
 cp config/device.example.toml config/device.toml   # set host
 cp .env.example .env                                # WattTime login for the live-index fallback
-python tools/deploy.py
-python tools/status.py
+uv run tools/deploy.py
+uv run tools/status.py
 ```
+
+Both tools are [uv scripts](https://docs.astral.sh/uv/guides/scripts/): uv installs their dependencies on first run.
 
 `deploy.py` sets the plug's timezone, writes settings into the plug's key-value store (secrets never go in the repo), uploads the script in 1 KB chunks, enables it on boot and starts it.
 
@@ -44,16 +45,22 @@ GitHub Pages serves a small status page at https://ficke.github.io/solar-farm/ w
 ## Dry run without the plug
 
 ```sh
-node device/sim.js            # what the plug would do over the next 24 h with the live plan
-node device/sim.js --stale    # same, if the plan stopped updating (fallback rules)
+bun device/sim.js            # what the plug would do over the next 24 h with the live plan
+bun device/sim.js --stale    # same, if the plan stopped updating (fallback rules)
 ```
 
 ## Development
 
+Tools: [uv](https://docs.astral.sh/uv/) for Python (it installs Python 3.14 itself), [Bun](https://bun.sh) for the plug script's tests, and optionally [just](https://just.systems) for the shortcuts in `justfile`.
+
 ```sh
-cd device && npm install && npm test        # script logic under a fake Shelly runtime
-cd planner && pip install -e '.[dev]' && pytest
+uv sync                                  # Python 3.14 + all dependencies into .venv
+uv run pytest                            # planner tests
+uv run ruff check . && uv run ty check   # lint and type check
+cd device && bun install && bun test     # script logic under a fake Shelly runtime
 ```
+
+Or `just check` to run everything CI runs. The repo is a uv workspace: the root `pyproject.toml` holds the shared Ruff, ty and pytest settings and one `uv.lock`; `planner/` is a member package.
 
 The script must stay ES5: the test suite parses it with `ecmaVersion: 5`.
 

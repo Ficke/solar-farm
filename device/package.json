@@ -3,7 +3,8 @@
   "private": true,
   "description": "Shelly script that gates grid power to the Jackery",
   "scripts": {
-    "test": "node --test test/*.test.js"
+    "test": "bun test",
+    "sim": "bun sim.js"
   },
   "devDependencies": {
     "acorn": "^8.12.0"

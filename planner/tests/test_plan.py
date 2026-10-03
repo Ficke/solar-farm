@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from planner.plan import PACIFIC, build_plan
 from planner.watttime import parse_forecast, parse_signal_index
@@ -14,7 +14,7 @@ def forecast_from(start: datetime, values_by_hour: dict[int, float], hours: int 
 
 
 # 2026-10-03 07:00 PDT
-NOW = datetime(2026, 10, 3, 14, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 10, 3, 14, 0, tzinfo=UTC)
 
 
 def local_hours(plan):
@@ -52,7 +52,7 @@ def test_skips_blocks_already_past():
 def test_parse_forecast():
     body = {"data": [{"point_time": "2026-10-03T17:30:00+00:00", "value": 812.5}]}
     [(t, v)] = parse_forecast(body)
-    assert t == datetime(2026, 10, 3, 17, 30, tzinfo=timezone.utc)
+    assert t == datetime(2026, 10, 3, 17, 30, tzinfo=UTC)
     assert v == 812.5
 
 

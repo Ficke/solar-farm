@@ -1,0 +1,28 @@
+[project]
+name = "solar-farm"
+version = "0.1.0"
+description = "Grid-aware charging for a Jackery Explorer 3000 v2"
+requires-python = ">=3.14"
+dependencies = ["solar-farm-planner"]
+
+[dependency-groups]
+dev = ["pytest>=8.4", "ruff>=0.13", "ty>=0.0.1a21"]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+solar-farm-planner = { workspace = true }
+
+[tool.uv.workspace]
+members = ["planner"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.pytest.ini_options]
+testpaths = ["planner/tests"]

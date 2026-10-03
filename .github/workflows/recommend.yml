@@ -15,18 +15,18 @@ jobs:
   recommend:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
         with:
-          python-version: "3.12"
-      - run: pip install ./planner
+          enable-cache: true
+      - run: uv sync --locked --no-dev
       - name: Fetch telemetry
         run: |
           git fetch --depth 1 origin gh-pages || exit 0
           git worktree add out origin/gh-pages
       - name: Recommend
         working-directory: planner
-        run: python -m planner.main recommend --data ../out/data --out ../recommendation.md
+        run: uv run --no-sync python -m planner.main recommend --data ../out/data --out ../recommendation.md
       - name: Post
         env:
           GH_TOKEN: ${{ github.token }}

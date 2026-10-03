@@ -41,7 +41,7 @@ def build_plan(
             continue
         candidates.append((sum(values) / len(values), start))
 
-    wanted = int(round(budget_hours * 60 / block_minutes))
+    wanted = round(budget_hours * 60 / block_minutes)
     chosen = sorted(start for _, start in sorted(candidates)[:wanted])
 
     windows: list[list[int]] = []

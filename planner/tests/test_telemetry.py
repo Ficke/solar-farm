@@ -1,9 +1,10 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
-from planner import telemetry
 from planner.jackery import parse_properties
 
-START = datetime(2026, 10, 1, 7, 0, tzinfo=timezone.utc)  # midnight PDT
+from planner import telemetry
+
+START = datetime(2026, 10, 1, 7, 0, tzinfo=UTC)  # midnight PDT
 
 
 def day_of_samples(day_offset: int, peak_w: float):
