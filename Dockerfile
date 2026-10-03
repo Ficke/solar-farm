@@ -1,6 +1,13 @@
 # Server image for both Cloud Run services (solar-web and solar-edge).
 # SOLAR_ROLE, set per service in infra/run.tf, picks which routes it serves.
 
+FROM mirror.gcr.io/oven/bun:1 AS web
+WORKDIR /web
+COPY web/package.json web/bun.lock ./
+RUN bun install --frozen-lockfile
+COPY web ./
+RUN bun run build
+
 FROM mirror.gcr.io/library/python:3.14-slim AS build
 COPY --from=ghcr.io/astral-sh/uv:0.12 /uv /bin/uv
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
@@ -21,6 +28,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 FROM mirror.gcr.io/library/python:3.14-slim
 RUN useradd --system --no-create-home app
 COPY --from=build /app/.venv /app/.venv
+COPY --from=web /web/dist /app/web/dist
 ENV PATH=/app/.venv/bin:$PATH PYTHONUNBUFFERED=1 SOLAR_WEB_DIST=/app/web/dist
 USER app
 CMD ["sh", "-c", "exec uvicorn solar_server.app:main --factory --host 0.0.0.0 --port ${PORT:-8080}"]
