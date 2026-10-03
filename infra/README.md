@@ -2,7 +2,7 @@
 
 Everything in the `solar-farm-510518` project is defined here in [OpenTofu](https://opentofu.org). There are two parts:
 
-- **`bootstrap/`**: the part CI can't create for itself. That's the state bucket, keyless GitHub access (Workload Identity Federation) and a $5 budget alert. You run it once by hand.
+- **`bootstrap/`**: the part CI can't create for itself. That's the state bucket, keyless GitHub access (Workload Identity Federation) and a $5 budget alert. You run it once from your machine.
 - **`./`**: everything else. That's the APIs, Firestore, Secret Manager, Artifact Registry, the two Cloud Run services, IAP, Cloud Scheduler and the deploy account. The Infra workflow applies it on every push to `main` that touches `infra/`.
 
 | Resource | What it's for |
@@ -18,30 +18,43 @@ The server code doesn't exist yet. Until it does, both services run Google's pla
 
 ## One-time setup
 
-Run these in [Cloud Shell](https://shell.cloud.google.com) (it's already signed in as you).
+Run everything from your local clone of this repo.
 
-**1. Link billing and create the state bucket**
+**1. Install the tools and sign in**
+
+On a Mac with Homebrew (Homebrew checks each download's integrity itself):
 
 ```sh
+brew install opentofu gh
+brew install --cask gcloud-cli
+```
+
+On Linux, install [OpenTofu from its apt or rpm repository](https://opentofu.org/docs/intro/install/) and the [gcloud CLI](https://cloud.google.com/sdk/docs/install).
+
+```sh
+gcloud auth login                         # for gcloud commands
+gcloud auth application-default login     # for OpenTofu
 gcloud config set project solar-farm-510518
-gcloud billing accounts list                       # note the ACCOUNT_ID
+gh auth login                             # for setting GitHub variables and secrets below
+```
+
+**2. Link billing, create the state bucket, apply the bootstrap**
+
+From the repo root:
+
+```sh
+gcloud billing accounts list              # note the ACCOUNT_ID
 gcloud billing projects link solar-farm-510518 --billing-account=ACCOUNT_ID
 gcloud storage buckets create gs://solar-farm-510518-tofu-state \
   --location=US --uniform-bucket-level-access --public-access-prevention
+
+tofu -chdir=infra/bootstrap init
+tofu -chdir=infra/bootstrap apply -var billing_account=ACCOUNT_ID
+
+gh variable set DASHBOARD_USERS --body '["you@gmail.com"]'
 ```
 
-**2. Install OpenTofu and apply the bootstrap**
-
-```sh
-sudo apt-get update -qq && sudo apt-get install -y -qq gnupg   # lets the installer check OpenTofu's signature
-curl -fsSL https://get.opentofu.org/install-opentofu.sh -o install-opentofu.sh
-sh install-opentofu.sh --install-method standalone && rm install-opentofu.sh
-git clone https://github.com/Ficke/solar-farm && cd solar-farm/infra/bootstrap
-tofu init
-tofu apply -var billing_account=ACCOUNT_ID
-```
-
-Then add one GitHub variable under **Settings > Secrets and variables > Actions > Variables**: `DASHBOARD_USERS`, set to `["you@gmail.com"]` (a JSON list). The workflows already know the two values the bootstrap prints, since they're fixed names in this project.
+The workflows already know the two values the bootstrap prints, since they're fixed names in this project.
 
 **3. Create the sign-in client for IAP**
 
@@ -50,17 +63,28 @@ A project without a Google Workspace organization has to supply its own OAuth cl
 1. Go to [Google Auth Platform](https://console.cloud.google.com/auth/overview?project=solar-farm-510518) and click **Get started**. Set the app name to "Solar Farm", use your Gmail for both email fields, and choose **External** for the audience.
 2. Under **Audience > Test users**, add your Gmail. Leave the app in Testing mode, so only test users can sign in.
 3. Under **Clients > Create client**, choose **Web application** and name it "IAP". Create it, then edit it. Add the authorized redirect URI `https://iap.googleapis.com/v1/oauth/clientIds/CLIENT_ID:handleRedirect`, where CLIENT_ID is the client ID you were just shown.
-4. Add two GitHub **secrets**: `IAP_OAUTH_CLIENT_ID` and `IAP_OAUTH_CLIENT_SECRET`.
+4. Store the client in GitHub. Each command prompts you to paste the value:
+
+   ```sh
+   gh secret set IAP_OAUTH_CLIENT_ID
+   gh secret set IAP_OAUTH_CLIENT_SECRET
+   ```
 
 The existing secrets `WATTTIME_USERNAME`, `WATTTIME_PASSWORD`, `JACKERY_EMAIL`, `JACKERY_PASSWORD` and `JACKERY_SN` get copied into Secret Manager on each apply.
 
 **4. Apply the rest**
 
-Merge to `main`, or run **Actions > Infra > Run workflow**. The dashboard URL appears in the run log as `dashboard_url`.
+Merge to `main`, or run it now:
+
+```sh
+gh workflow run infra.yml && gh run watch
+```
+
+The dashboard URL appears in the run log as `dashboard_url`.
 
 ## Changing things
 
-Edit the `.tf` files and open a PR. CI checks formatting and validates the config, and merging applies it. To preview locally, copy `terraform.tfvars.example` to `terraform.tfvars` (git-ignored) and run `tofu init && tofu plan` from Cloud Shell.
+Edit the `.tf` files and open a PR. CI checks formatting and validates the config, and merging applies it. To preview locally, copy `terraform.tfvars.example` to `terraform.tfvars` (git-ignored) and run `tofu -chdir=infra init && tofu -chdir=infra plan`.
 
 ## Notes
 
