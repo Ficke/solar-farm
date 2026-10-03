@@ -33,7 +33,9 @@ gcloud storage buckets create gs://solar-farm-510518-tofu-state \
 **2. Install OpenTofu and apply the bootstrap**
 
 ```sh
-curl -fsSL https://get.opentofu.org/install-opentofu.sh | sh -s -- --install-method standalone
+sudo apt-get update -qq && sudo apt-get install -y -qq gnupg   # lets the installer check OpenTofu's signature
+curl -fsSL https://get.opentofu.org/install-opentofu.sh -o install-opentofu.sh
+sh install-opentofu.sh --install-method standalone && rm install-opentofu.sh
 git clone https://github.com/Ficke/solar-farm && cd solar-farm/infra/bootstrap
 tofu init
 tofu apply -var billing_account=ACCOUNT_ID
