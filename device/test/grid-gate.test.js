@@ -151,3 +151,51 @@ test("no report is sent without a report URL", () => {
   const h = load({ kvs: { "gg.plug_key": "k3y" } });
   assert.ok(!h.calls.some((c) => c.method === "HTTP.Request" && c.params.method === "POST"));
 });
+
+test("plan and index fetches never share a tick", () => {
+  const h = load({
+    kvs: {
+      "gg.plan_url": "https://solar-edge.example.run.app/plug/plan",
+      "gg.report_url": "https://solar-edge.example.run.app/plug/report",
+      "gg.plug_key": "k3y",
+      "gg.wt_auth": "dXNlcjpwYXNz"
+    },
+    responses: {
+      "HTTP.Request": (p) => ({ code: p.method === "POST" ? 204 : 503, body: "" })
+    }
+  });
+
+  const startupUrls = h.calls
+    .filter((c) => c.method === "HTTP.Request")
+    .map((c) => c.params.url);
+  assert.deepEqual(startupUrls, [
+    "https://solar-edge.example.run.app/plug/plan",
+    "https://solar-edge.example.run.app/plug/report"
+  ]);
+
+  for (let i = 0; i < 5; i++) h.timers[0].fn();
+  const latestUrls = h.calls
+    .filter((c) => c.method === "HTTP.Request")
+    .slice(-2)
+    .map((c) => c.params.url);
+  assert.deepEqual(latestUrls, [
+    "https://api.watttime.org/login",
+    "https://solar-edge.example.run.app/plug/report"
+  ]);
+});
+
+test("a failed relay change is retried on the next tick", () => {
+  const plan = { generated_at: NOW - 60, windows: [[NOW - 60, NOW + 120]] };
+  const h = load({
+    switchSetFails: true,
+    kvs: { "gg.plan_url": "https://example.com/plan" },
+    responses: { "HTTP.GET": { code: 200, body: JSON.stringify(plan) } }
+  });
+
+  assert.equal(h.device.sw.output, false);
+  assert.equal(h.calls.filter((c) => c.method === "Switch.Set").length, 1);
+
+  h.device.sys.unixtime = NOW + 60;
+  h.timers[0].fn();
+  assert.equal(h.calls.filter((c) => c.method === "Switch.Set").length, 2);
+});

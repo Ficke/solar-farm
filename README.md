@@ -21,7 +21,7 @@ Grid-aware charging for a Jackery Explorer 3000 v2 with a 250 W panel in a San F
 3. **Repository secrets** (Settings > Secrets and variables > Actions): `WATTTIME_USERNAME`, `WATTTIME_PASSWORD`, and optionally `JACKERY_EMAIL`, `JACKERY_PASSWORD`, `JACKERY_SN`. The Infra workflow copies them into Google Secret Manager.
 4. **Google Cloud:** follow [`infra/README.md`](infra/README.md).
 5. **Jackery app:** Self-powered on, reserve 80%, Quiet Charging on (keeps the charge rate well under the plug's 15 A rating).
-6. **Plug:** keep it in Wi-Fi mode and note its IP address.
+6. **Plug:** keep it in Wi-Fi mode, reserve its IP address in the router's DHCP settings and note that address.
 
 ## Deploying to the plug
 

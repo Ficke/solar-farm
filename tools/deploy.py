@@ -21,6 +21,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import tomllib
 from pathlib import Path
 
@@ -33,6 +34,7 @@ SCRIPT_NAME = "grid-gate"
 CHUNK = 1024
 PROJECT = "solar-farm-510518"
 SENSITIVE_KVS_KEYS = {"gg.plug_key", "gg.wt_auth"}
+READ_ONLY_METHODS = {"Shelly.GetDeviceInfo", "Script.GetStatus", "Script.List", "Switch.GetStatus"}
 
 
 def load_env(path: Path) -> None:
@@ -58,17 +60,34 @@ class Shelly:
                 shown["value"] = "…"
             print(f"[dry-run] {method} {json.dumps(shown)}")
             return {}
-        r = requests.post(
-            self.url,
-            json={"id": 1, "method": method, "params": params or {}},
-            auth=self.auth,
-            timeout=15,
-        )
+        attempts = 3 if method in READ_ONLY_METHODS else 1
+        for attempt in range(attempts):
+            try:
+                r = requests.post(
+                    self.url,
+                    json={"id": 1, "method": method, "params": params or {}},
+                    auth=self.auth,
+                    timeout=15,
+                )
+                break
+            except requests.ConnectionError, requests.Timeout:
+                if attempt + 1 == attempts:
+                    raise
+                time.sleep(attempt + 1)
         r.raise_for_status()
         body = r.json()
         if "error" in body:
             raise RuntimeError(f"{method}: {body['error']}")
         return body.get("result", {})
+
+
+def verify_script(dev: Shelly, script_id: int) -> None:
+    time.sleep(2)
+    status = dev.call("Script.GetStatus", {"id": script_id})
+    if status.get("running"):
+        return
+    detail = status.get("error_msg") or "no device error was reported"
+    raise RuntimeError(f"{SCRIPT_NAME} stopped after deployment: {detail}")
 
 
 def secret_value(env_name: str, secret_id: str) -> str | None:
@@ -155,6 +174,8 @@ def deploy(dev: Shelly, cfg: dict) -> None:
         dev.call("Script.PutCode", {"id": script_id, "code": code[i : i + CHUNK], "append": i > 0})
     dev.call("Script.SetConfig", {"id": script_id, "config": {"enable": True}})
     dev.call("Script.Start", {"id": script_id})
+    if not dev.dry_run:
+        verify_script(dev, script_id)
     print(f"Deployed {SCRIPT_NAME} as script {script_id} ({len(code)} bytes).")
     print(f"Status: http://{cfg['host']}/script/{script_id}/status")
 
