@@ -1,4 +1,4 @@
-"""A local server with a day of made-up readings, for working on the dashboard.
+"""A local server with three days of made-up readings, for working on the dashboard.
 
 uv run uvicorn solar_server.dev:app --port 8000
 """
@@ -6,23 +6,46 @@ uv run uvicorn solar_server.dev:app --port 8000
 from __future__ import annotations
 
 import math
+import random
 import time
+from datetime import UTC, datetime
+
+from planner.plan import PACIFIC, build_plan
 
 from solar_server.app import create_app
 from solar_server.config import Settings
-from solar_server.store import PLUG, SAMPLES, MemoryStore
+from solar_server.store import FORECASTS, PLANS, PLUG, SAMPLES, MemoryStore
+
+STEP = 300
+
+
+def _hour(t: int) -> float:
+    d = datetime.fromtimestamp(t, PACIFIC)
+    return d.hour + d.minute / 60
+
+
+def _moer(t: int) -> float:
+    # California's marginal rate is mostly gas (~950) with midday stretches
+    # where curtailed solar sets it near zero.
+    h = _hour(t)
+    return 0.0 if 10.5 <= h < 14 else 950 + 40 * math.sin(t / 5000)
+
+
+def _aoer(t: int) -> float:
+    h = _hour(t)
+    return 430 - 200 * max(0.0, math.sin(math.pi * (h - 7) / 12)) if 7 <= h < 19 else 430
 
 
 def sample_store(now: int) -> MemoryStore:
+    rng = random.Random(1)
     store = MemoryStore()
-    start = now - now % 300 - 3 * 86400
+    now -= now % 60
+    start = now - now % STEP - 3 * 86400
     battery = 70.0
-    windows = []
-    for t in range(start, now + 1, 300):
-        hour = (t // 3600 - 7) % 24  # roughly Pacific
-        solar = max(0.0, 230 * math.sin(math.pi * (hour - 7) / 12)) if 7 <= hour < 19 else 0.0
-        moer = 900 - 450 * max(0.0, math.sin(math.pi * (hour - 8) / 10)) if 8 <= hour < 18 else 900
-        on = 11 <= hour < 13
+    for t in range(start, now + 1, STEP):
+        h = _hour(t)
+        solar = max(0.0, 230 * math.sin(math.pi * (h - 7) / 12)) if 7 <= h < 19 else 0.0
+        on = 10.5 <= h < 14
         grid = 300.0 if on and battery < 80 else 0.0
         battery = min(100.0, max(5.0, battery + (solar + grid - 60) * 5 / 60 / 30.72))
         store.append(
@@ -31,43 +54,44 @@ def sample_store(now: int) -> MemoryStore:
                 "t": t,
                 "battery_pct": round(battery),
                 "solar_w": round(solar),
-                "moer": moer,
-                "index": round(moer / 10),
+                "moer": round(_moer(t), 1),
+                "moer_t": t,
+                "aoer": round(_aoer(t), 1),
+                "index": 5 if on else 70,
             },
         )
-        if on and t % 3600 == 0 and hour == 11:
-            windows.append([t, t + 7200])
+        if t % 1800 == 0:
+            # Forecasts get the curtailment stretch roughly right, with its
+            # edges off by up to an hour the further out they look.
+            values = []
+            for i in range(288):
+                ft = t + i * STEP
+                shift = rng.uniform(-1, 1) * min(1.0, i / 144) * 3600
+                values.append(round(_moer(int(ft + shift)) + rng.uniform(-30, 30)))
+            store.append(FORECASTS, {"t": t, "start": t, "step": STEP, "values": values})
+            store.append(PLANS, {"t": t, "windows": []})
     for t in range(start, now + 1, 60):
-        hour = (t // 3600 - 7) % 24
-        on = 11 <= hour < 13
-        store.append(
-            PLUG,
-            {
-                "t": t,
-                "on": on,
-                "reason": "peak" if 16 <= hour < 21 else "plan",
-                "w": 280.0 if on else 0.0,
-            },
-        )
-    future = now - now % 300
-    forecast = [
-        [
-            future + i * 300,
-            900
-            - 450 * max(0.0, math.sin(math.pi * (((future + i * 300) // 3600 - 7) % 24 - 8) / 10)),
-        ]
-        for i in range(288)
-    ]
-    nxt = now - now % 86400 + 86400 + 18 * 3600
+        h = _hour(t)
+        on = 10.5 <= h < 14
+        reason = "peak" if 16 <= h < 21 else "plan"
+        store.append(PLUG, {"t": t, "on": on, "reason": reason, "w": 280.0 if on else 0.0})
+
+    last = now - now % 1800
+    forecast = next(f for f in reversed(store.day(FORECASTS, _day(last))) if f["t"] == last)
+    points = [[forecast["start"] + i * STEP, v] for i, v in enumerate(forecast["values"])]
+    plan = build_plan(
+        [(datetime.fromtimestamp(t, UTC), v) for t, v in points], datetime.fromtimestamp(now, UTC)
+    )
+    windows = plan["windows"]
     store.put_state(
         "plan",
-        {
-            "generated_at": now - 600,
-            "windows": [*windows[-1:], [nxt, nxt + 7200]],
-            "forecast": forecast,
-        },
+        {"generated_at": last, "windows": windows, "forecast": points, "index_now": 70},
     )
     return store
+
+
+def _day(t: int) -> str:
+    return datetime.fromtimestamp(t, PACIFIC).date().isoformat()
 
 
 class NoSources:
@@ -78,6 +102,9 @@ class NoSources:
 
     def signal_index(self) -> float:
         return 0.0
+
+    def actual(self, signal: str, now: datetime) -> None:
+        return None
 
     def jackery(self, now: object) -> None:
         return None

@@ -6,7 +6,7 @@ from collections import defaultdict
 from itertools import pairwise
 
 from planner import telemetry
-from solar_server.store import PLUG, SAMPLES, Store, day_key, window
+from solar_server.store import FORECASTS, PLUG, SAMPLES, Store, day_key, window
 
 MAX_GAP = 3600  # don't integrate across outages longer than an hour
 
@@ -89,3 +89,37 @@ def daily_view(store: Store, now: int, days: int = 14) -> dict:
     full = {d: integrate_wh(by_day_solar[d]) for d in keys if len(by_day_solar[d]) >= 36}
     full.pop(day_key(now), None)
     return {"days": rows, "reserve": telemetry.recommend_reserve(full)}
+
+
+def accuracy_view(store: Store, now: int, lead_hours: int = 6, past_hours: int = 24) -> dict:
+    """WattTime's forecast made ``lead_hours`` ahead next to what actually happened.
+
+    For each actual reading, the forecast is the latest one made at least
+    ``lead_hours`` before it. ``error`` is the mean absolute difference.
+    """
+    since = now - past_hours * 3600
+    lead = lead_hours * 3600
+    snapshots = window(store, FORECASTS, since - lead - 86400, now)
+    points: list[list[float | int | None]] = []
+    errors: list[float] = []
+    for s in window(store, SAMPLES, since, now):
+        if s.get("moer") is None:
+            continue
+        t = s.get("moer_t", s["t"])
+        predicted = None
+        for f in reversed(snapshots):
+            if f["t"] > t - lead:
+                continue
+            i = (t - f["start"]) // f["step"]
+            if 0 <= i < len(f["values"]):
+                predicted = f["values"][i]
+            break
+        points.append([t, s["moer"], predicted])
+        if predicted is not None:
+            errors.append(abs(s["moer"] - predicted))
+    return {
+        "lead_hours": lead_hours,
+        "points": points,
+        "error": round(sum(errors) / len(errors)) if errors else None,
+        "compared": len(errors),
+    }

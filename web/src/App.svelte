@@ -1,20 +1,26 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { align } from "./lib/align";
-  import { api, type Daily, type Now, type Timeline } from "./lib/api";
-  import { explain, upcoming } from "./lib/status";
+  import { type Accuracy, api, type Daily, type Now, type Timeline } from "./lib/api";
+  import PlanView from "./lib/PlanView.svelte";
+  import { explain } from "./lib/status";
   import TimeChart from "./lib/TimeChart.svelte";
-  import { ago, fmtDayClock } from "./lib/time";
+  import { ago, fmtWhen, hours } from "./lib/time";
   import WeekBars from "./lib/WeekBars.svelte";
 
   const RESERVE = 80; // set by hand in the Jackery app
   const FUTURE = 24 * 3600;
+  const LEADS = [1, 3, 6, 12];
 
   let now = $state<Now>();
   let tl = $state<Timeline>();
   let daily = $state<Daily>();
+  let acc = $state<Accuracy>();
+  let lead = $state(6);
   let error = $state("");
+  let loadedAt = $state(0);
   let clock = $state(Date.now() / 1000);
+  let weekTable = $state(false);
 
   async function load(what: "now" | "all") {
     try {
@@ -22,12 +28,19 @@
       if (what === "all") {
         jobs.push(api.timeline(24).then((v) => (tl = v)));
         jobs.push(api.daily(14).then((v) => (daily = v)));
+        jobs.push(api.accuracy(lead).then((v) => (acc = v)));
       }
       await Promise.all(jobs);
       error = "";
+      loadedAt = Date.now() / 1000;
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     }
+  }
+
+  async function pickLead(h: number) {
+    lead = h;
+    acc = await api.accuracy(h);
   }
 
   onMount(() => {
@@ -35,7 +48,7 @@
     const timers = [
       setInterval(() => load("now"), 30_000),
       setInterval(() => load("all"), 5 * 60_000),
-      setInterval(() => (clock = Date.now() / 1000), 10_000),
+      setInterval(() => (clock = Date.now() / 1000), 5_000),
     ];
     const wake = () => document.visibilityState === "visible" && load("all");
     document.addEventListener("visibilitychange", wake);
@@ -48,18 +61,45 @@
   const s = $derived(now?.sample ?? null);
   const plug = $derived(now?.plug ?? null);
   const windows = $derived(tl?.windows ?? now?.plan?.windows ?? []);
+  const forecast = $derived(tl?.forecast ?? []);
+  const tnow = $derived(now?.now ?? clock);
   const t0 = $derived(tl?.since ?? clock - 24 * 3600);
   const t1 = $derived((tl?.now ?? clock) + FUTURE);
-  const tnow = $derived(now?.now ?? clock);
-  const next = $derived(upcoming(windows, tnow, 3));
   const age = (t?: number | null) => (t ? clock - t : Infinity);
 
-  const moerData = $derived(
+  // The one sentence that answers "what is it doing, and what's next?"
+  const nextWindow = $derived(windows.find(([, e]) => e > tnow) ?? null);
+  const headline = $derived.by(() => {
+    if (!plug) return { title: "Waiting for the plug", detail: "It reports every minute." };
+    const why = explain(plug, windows, tnow);
+    const current = windows.find(([st, e]) => st <= tnow && tnow < e);
+    if (plug.on) {
+      return {
+        title: current ? `Grid on until ${fmtWhen(current[1], tnow)}` : "Grid on",
+        detail: why,
+      };
+    }
+    const n = nextWindow && nextWindow[0] > tnow ? nextWindow : null;
+    return {
+      title: n ? `Grid off · next on ${fmtWhen(n[0], tnow)} for ${hours(n[1] - n[0])}` : "Grid off",
+      detail: why,
+    };
+  });
+
+  const emissionsData = $derived(
     align(
-      (tl?.samples ?? []).map((p) => [p.t, p.moer]),
-      (tl?.forecast ?? []).map(([t, v]) => [t, v]),
+      (tl?.samples ?? []).map((p) => [p.moer_t ?? p.t, p.moer]),
+      forecast.map(([t, v]) => [t, v]),
+      (tl?.samples ?? []).map((p) => [p.moer_t ?? p.t, p.aoer]),
     ),
   );
+  const accuracyData = $derived(
+    align(
+      (acc?.points ?? []).map(([t, a]) => [t, a]),
+      (acc?.points ?? []).map(([t, , f]) => [t, f]),
+    ),
+  );
+  const accFrom = $derived(acc?.points[0]?.[0] ?? tnow - 24 * 3600);
   const batteryData = $derived(align((tl?.samples ?? []).map((p) => [p.t, p.battery_pct])));
   const powerData = $derived(
     align(
@@ -69,91 +109,141 @@
   );
 
   const health = $derived([
-    { name: "Battery", t: s?.t, limit: 900 },
-    { name: "Plug", t: plug?.t, limit: 300 },
-    { name: "Plan", t: now?.plan?.generated_at, limit: 3 * 3600 },
+    { name: "Battery and emissions", t: s?.t, limit: 900, every: "every 5 min" },
+    { name: "Plug", t: plug?.t, limit: 300, every: "every minute" },
+    { name: "Plan", t: now?.plan?.generated_at, limit: 3 * 3600, every: "every 30 min" },
   ]);
+  const stale = $derived(health.filter((h) => age(h.t) > h.limit));
 </script>
 
 <main>
   <header>
     <h1>Solar Farm</h1>
-    <span class="sub">{fmtDayClock(tnow)} Pacific</span>
+    <p class="sub">
+      {#if stale.length}
+        <span class="bad-dot"></span>{stale.map((h) => h.name).join(", ")} not reporting
+      {:else if loadedAt}
+        <span class="ok-dot"></span>Live · updated {ago(clock - loadedAt)}
+      {/if}
+    </p>
   </header>
 
   {#if error}
-    <p class="banner bad">Couldn't refresh: {error}. Showing the last data.</p>
+    <p class="banner">Couldn't refresh ({error}). Showing the last data.</p>
   {/if}
 
-  <section class="status" class:on={plug?.on}>
-    {#if plug}
-      <span class="dot"></span>
+  <section class="card now" class:on={plug?.on} aria-labelledby="now-h">
+    <div class="headline">
+      <span class="dot" aria-hidden="true"></span>
       <div>
-        <strong>Grid {plug.on ? "on" : "off"}.</strong>
-        {explain(plug, windows, tnow)}.
+        <h2 id="now-h">{headline.title}</h2>
+        <p>{headline.detail}.</p>
       </div>
-    {:else}
-      <div>Waiting for the plug's first report.</div>
-    {/if}
-    {#if next.length}
-      <ul class="next">
-        {#each next as c (c.t + c.label)}
-          <li class:peak={c.peak}>{c.label}</li>
-        {/each}
-      </ul>
-    {/if}
+    </div>
+    <dl class="tiles">
+      <div>
+        <dt>Battery</dt>
+        <dd><b>{s?.battery_pct ?? "–"}</b><small>%</small></dd>
+        <dd class="n">Grid charges up to {RESERVE}%</dd>
+      </div>
+      <div>
+        <dt>Solar</dt>
+        <dd><b>{s?.solar_w ?? "–"}</b><small>W</small></dd>
+        <dd class="n">{now ? `${now.today.solar_wh} Wh today` : ""}</dd>
+      </div>
+      <div>
+        <dt>Grid</dt>
+        <dd><b>{plug?.w != null ? Math.round(plug.w) : "–"}</b><small>W</small></dd>
+        <dd class="n">{now ? `${now.today.grid_wh} Wh today` : ""}</dd>
+      </div>
+      <div>
+        <dt>Grid emissions</dt>
+        <dd><b>{s?.moer != null ? Math.round(s.moer) : "–"}</b><small>lb CO₂/MWh</small></dd>
+        <dd class="n">
+          {s?.index != null ? `Cleaner than ${Math.round(100 - s.index)}% of the past month` : ""}
+        </dd>
+      </div>
+    </dl>
   </section>
 
-  <section class="tiles">
-    <div class="tile">
-      <span class="k">Battery</span>
-      <span class="v">{s?.battery_pct ?? "–"}<small>%</small></span>
-      <span class="n">Reserve {RESERVE}%</span>
-    </div>
-    <div class="tile">
-      <span class="k">Solar now</span>
-      <span class="v solar">{s?.solar_w ?? "–"}<small>W</small></span>
-      <span class="n">{now ? `${now.today.solar_wh} Wh today` : ""}</span>
-    </div>
-    <div class="tile">
-      <span class="k">Grid now</span>
-      <span class="v grid">{plug?.w != null ? Math.round(plug.w) : "–"}<small>W</small></span>
-      <span class="n">{now ? `${now.today.grid_wh} Wh today` : ""}</span>
-    </div>
-    <div class="tile">
-      <span class="k">Grid emissions</span>
-      <span class="v">{s?.moer != null ? Math.round(s.moer) : "–"}<small>lb/MWh</small></span>
-      <span class="n">{s?.index != null ? `Cleaner than ${100 - s.index}% of the past month` : "WattTime MOER"}</span>
-    </div>
+  <section class="card" aria-labelledby="plan-h">
+    <h2 id="plan-h">Plan</h2>
+    <PlanView {windows} {forecast} now={tnow} generatedAt={now?.plan?.generated_at ?? null} />
   </section>
 
-  <section class="card">
-    <h2>Grid emissions <span class="hint">measured, then WattTime's forecast</span></h2>
+  <section class="card" aria-labelledby="em-h">
+    <h2 id="em-h">Grid emissions</h2>
+    <p class="lede">
+      The marginal rate is the extra CO₂ from the next unit of power you use, and it's what the
+      plan follows. In California it jumps between about 900 (gas) and near 0 (spare solar).
+    </p>
     <TimeChart
-      data={moerData}
+      label="Grid emissions, past 24 hours and forecast"
+      data={emissionsData}
       from={t0}
       to={t1}
       now={tnow}
       {windows}
+      height={190}
       series={[
-        { label: "Measured", color: "--ink-2", unit: "lb/MWh" },
-        { label: "Forecast", color: "--accent", dash: [5, 4], unit: "lb/MWh" },
+        { label: "Marginal, actual", color: "--ink", unit: "lb/MWh" },
+        { label: "Marginal, forecast", color: "--accent", dash: [5, 4], unit: "lb/MWh" },
+        { label: "Average, all plants", color: "--ink-3", width: 1.5, unit: "lb/MWh" },
       ]}
     />
-    <h2>Battery</h2>
+  </section>
+
+  <section class="card" aria-labelledby="acc-h">
+    <div class="head">
+      <h2 id="acc-h">How good is the forecast?</h2>
+      <div class="seg" role="group" aria-label="Forecast made this long before">
+        {#each LEADS as h (h)}
+          <button aria-pressed={lead === h} onclick={() => pickLead(h)}>{h} h ahead</button>
+        {/each}
+      </div>
+    </div>
+    {#if acc && acc.compared > 0}
+      <p class="lede">
+        Made {hours(lead * 3600)} ahead, the forecast was off by
+        <strong>{acc.error} lb/MWh</strong> on average over the last {acc.compared} readings.
+      </p>
+      <TimeChart
+        label="Actual marginal emissions against the forecast made earlier"
+        data={accuracyData}
+        from={accFrom}
+        to={tnow}
+        now={tnow}
+        height={160}
+        series={[
+          { label: "Actual", color: "--ink", unit: "lb/MWh" },
+          { label: `Forecast from ${lead} h before`, color: "--accent", dash: [5, 4], unit: "lb/MWh" },
+        ]}
+      />
+    {:else}
+      <p class="lede">
+        Every forecast is now being saved. Once one is {hours(lead * 3600)} old, this compares
+        what it said with what actually happened.
+      </p>
+    {/if}
+  </section>
+
+  <section class="card" aria-labelledby="bat-h">
+    <h2 id="bat-h">Battery and power</h2>
     <TimeChart
+      label="Battery charge, past 24 hours"
       data={batteryData}
       from={t0}
       to={t1}
       now={tnow}
       {windows}
-      height={120}
+      height={130}
       yMax={100}
-      yRule={{ value: RESERVE, label: `reserve ${RESERVE}%` }}
-      series={[{ label: "Charge", color: "--good", unit: "%" }]}
+      yRule={{ value: RESERVE, label: `Grid charges up to ${RESERVE}%` }}
+      series={[{ label: "Battery", color: "--accent", unit: "%" }]}
     />
-    <h2>Power in</h2>
+    <div class="gap"></div>
     <TimeChart
+      label="Solar and grid power into the battery, past 24 hours"
       data={powerData}
       from={t0}
       to={t1}
@@ -165,39 +255,63 @@
         { label: "Grid", color: "--grid", fill: "--grid-fill", unit: "W" },
       ]}
     />
-    <p class="legend">
-      <span class="sw plan"></span>Planned grid charging
-      <span class="sw peak"></span>PG&amp;E peak, 4–9 pm
+    <p class="key">
+      <span><i class="sw plan"></i>Planned grid charging</span>
+      <span><i class="sw peak"></i>PG&amp;E peak, 4–9 PM</span>
     </p>
   </section>
 
   <div class="row">
-    <section class="card">
-      <h2>Last 7 days <span class="hint"><i class="sw solar"></i>solar <i class="sw grid"></i>grid</span></h2>
-      <WeekBars days={daily?.days ?? []} />
+    <section class="card" aria-labelledby="week-h">
+      <div class="head">
+        <h2 id="week-h">Last 7 days</h2>
+        <button class="link" onclick={() => (weekTable = !weekTable)}>
+          {weekTable ? "Show chart" : "Show table"}
+        </button>
+      </div>
+      {#if weekTable}
+        <table>
+          <thead><tr><th>Day</th><th>Solar</th><th>Grid</th><th>Battery peak</th></tr></thead>
+          <tbody>
+            {#each (daily?.days ?? []).slice(-7) as d (d.day)}
+              <tr>
+                <td>{d.day}</td>
+                <td>{d.solar_wh} Wh</td>
+                <td>{d.grid_wh} Wh</td>
+                <td>{d.battery_peak_pct ?? "–"}%</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      {:else}
+        <p class="key">
+          <span><i class="sw solar"></i>Solar</span>
+          <span><i class="sw grid"></i>Grid</span>
+        </p>
+        <WeekBars days={daily?.days ?? []} />
+      {/if}
     </section>
-    <section class="card">
-      <h2>Reserve</h2>
+    <section class="card" aria-labelledby="res-h">
+      <h2 id="res-h">Reserve</h2>
+      <p class="big">{RESERVE}%<small>set in the Jackery app</small></p>
       {#if daily?.reserve.reserve_pct != null}
-        <p class="big">{daily.reserve.reserve_pct}%</p>
-        <p class="muted">
-          Suggested from the last {daily.reserve.days} full days of solar
-          {#if daily.reserve.good_day_wh}(a good day is about {daily.reserve.good_day_wh} Wh){/if}.
-          Currently set to {RESERVE}% in the Jackery app.
+        <p class="lede">
+          Suggested: <strong>{daily.reserve.reserve_pct}%</strong>. That leaves room for a good
+          solar day ({daily.reserve.good_day_wh} Wh) over the last {daily.reserve.days} full days.
         </p>
       {:else}
-        <p class="muted">A suggestion appears after a few full days of readings. Currently {RESERVE}%.</p>
+        <p class="lede">A suggestion appears after a few full days of readings.</p>
       {/if}
     </section>
   </div>
 
-  <section class="health">
+  <footer>
     {#each health as h (h.name)}
-      <span class:stale={age(h.t) > h.limit}>
-        <i></i>{h.name} {h.t ? ago(age(h.t)) : "never"}
+      <span class:stale={age(h.t) > h.limit} title="Expected {h.every}">
+        <i></i>{h.name}: {h.t ? ago(age(h.t)) : "never"}
       </span>
     {/each}
-  </section>
+  </footer>
 </main>
 
 <style>
@@ -205,7 +319,7 @@
     max-width: 1080px;
     margin: 0 auto;
     display: grid;
-    gap: 14px;
+    gap: 16px;
   }
   header {
     display: flex;
@@ -219,148 +333,177 @@
     margin: 0;
   }
   h2 {
-    font: 600 14px var(--f-body);
-    margin: 14px 0 4px;
-    color: var(--ink-2);
+    font: 600 16px var(--f-display);
+    margin: 0 0 8px;
   }
-  h2:first-child {
-    margin-top: 0;
-  }
-  .sub,
-  .hint,
-  .muted {
-    color: var(--ink-3);
+  .sub {
+    margin: 0;
     font-size: 13px;
-    font-weight: 400;
+    color: var(--ink-3);
+    display: flex;
+    align-items: center;
+    gap: 6px;
   }
-  .card,
-  .status,
-  .tile {
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 10px;
-    padding: 14px 16px;
-    min-width: 0;
+  .ok-dot,
+  .bad-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--good);
+  }
+  .bad-dot {
+    background: var(--bad);
   }
   .banner {
     margin: 0;
     padding: 10px 14px;
     border-radius: 8px;
-  }
-  .bad {
     background: var(--bad-bg);
     color: var(--bad);
   }
-  .status {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    flex-wrap: wrap;
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px 18px;
+    min-width: 0;
   }
-  .status .dot {
-    width: 12px;
-    height: 12px;
+  .head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px 12px;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+  }
+  .head h2 {
+    margin: 0;
+  }
+  .lede {
+    margin: 0 0 10px;
+    font-size: 13px;
+    color: var(--ink-2);
+    max-width: 70ch;
+  }
+  .lede strong {
+    color: var(--ink);
+  }
+  .headline {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+  }
+  .headline h2 {
+    font-size: 20px;
+    margin: 0;
+  }
+  .headline p {
+    margin: 2px 0 0;
+    color: var(--ink-2);
+  }
+  .dot {
+    width: 14px;
+    height: 14px;
+    margin-top: 6px;
     border-radius: 50%;
     background: var(--ink-3);
     flex: none;
   }
-  .status.on .dot {
+  .now.on .dot {
     background: var(--grid);
     box-shadow: 0 0 0 4px var(--grid-fill);
   }
-  .status > div {
-    flex: 1 1 260px;
-  }
-  .next {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-  .next li {
-    font: 12px var(--f-mono);
-    padding: 3px 8px;
-    border-radius: 6px;
-    background: var(--plan-band);
-    color: var(--ink-2);
-  }
-  .next li.peak {
-    background: var(--peak-band);
-    color: var(--peak-ink);
-  }
   .tiles {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-    gap: 14px;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 16px;
+    margin: 16px 0 0;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
   }
-  .tile {
-    display: grid;
-    gap: 2px;
-  }
-  .k {
+  dt {
     font-size: 13px;
     color: var(--ink-3);
   }
-  .v {
-    font: 600 30px var(--f-display);
+  dd {
+    margin: 0;
+  }
+  dd b {
+    font: 600 28px var(--f-display);
     font-variant-numeric: tabular-nums;
   }
-  .v small {
-    font-size: 14px;
-    margin-left: 3px;
+  dd small {
+    font-size: 13px;
+    margin-left: 4px;
     color: var(--ink-3);
-    font-weight: 400;
-  }
-  .v.solar {
-    color: var(--solar);
-  }
-  .v.grid {
-    color: var(--grid);
   }
   .n {
     font-size: 13px;
     color: var(--ink-2);
   }
-  .row {
-    display: grid;
-    grid-template-columns: 2fr 1fr;
-    gap: 14px;
+  .seg {
+    display: inline-flex;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow: hidden;
   }
-  @media (max-width: 720px) {
-    .row {
-      grid-template-columns: 1fr;
-    }
+  .seg button {
+    font: inherit;
+    font-size: 12px;
+    padding: 4px 10px;
+    border: 0;
+    background: transparent;
+    color: var(--ink-2);
+    cursor: pointer;
   }
-  .big {
-    font: 600 34px var(--f-display);
-    margin: 4px 0;
+  .seg button + button {
+    border-left: 1px solid var(--line);
   }
-  .legend {
+  .seg button[aria-pressed="true"] {
+    background: var(--panel-2);
+    color: var(--ink);
+    font-weight: 600;
+  }
+  .link {
+    font: inherit;
+    font-size: 13px;
+    border: 0;
+    background: none;
+    color: var(--accent);
+    cursor: pointer;
+    padding: 0;
+  }
+  .gap {
+    height: 12px;
+  }
+  .key {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 14px;
     margin: 8px 0 0;
     font-size: 12px;
-    color: var(--ink-3);
+    color: var(--ink-2);
+  }
+  .key span {
     display: flex;
     align-items: center;
     gap: 6px;
-    flex-wrap: wrap;
   }
   .sw {
     display: inline-block;
     width: 12px;
     height: 10px;
     border-radius: 2px;
-    vertical-align: -1px;
-    margin-left: 6px;
   }
   .sw.plan {
     background: var(--plan-band);
-    border: 1px solid var(--grid);
+    outline: 1px solid var(--grid);
+    outline-offset: -1px;
   }
   .sw.peak {
     background: var(--peak-band);
-    border: 1px solid var(--peak-ink);
+    outline: 1px solid var(--peak-ink);
+    outline-offset: -1px;
   }
   .sw.solar {
     background: var(--solar);
@@ -368,14 +511,50 @@
   .sw.grid {
     background: var(--grid);
   }
-  .health {
+  .row {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 16px;
+  }
+  @media (max-width: 720px) {
+    .row {
+      grid-template-columns: 1fr;
+    }
+  }
+  .big {
+    font: 600 30px var(--f-display);
+    margin: 0 0 6px;
+  }
+  .big small {
+    margin-left: 8px;
+    font: 400 13px var(--f-body);
+    color: var(--ink-3);
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+    font-variant-numeric: tabular-nums;
+  }
+  th {
+    text-align: left;
+    font-weight: 500;
+    font-size: 12px;
+    color: var(--ink-3);
+    padding: 4px 8px 4px 0;
+  }
+  td {
+    padding: 6px 8px 6px 0;
+    border-top: 1px solid var(--line);
+  }
+  footer {
     display: flex;
     gap: 16px;
     flex-wrap: wrap;
-    font: 12px var(--f-mono);
+    font-size: 12px;
     color: var(--ink-3);
   }
-  .health i {
+  footer i {
     display: inline-block;
     width: 8px;
     height: 8px;
@@ -383,10 +562,10 @@
     background: var(--good);
     margin-right: 6px;
   }
-  .health .stale {
+  footer .stale {
     color: var(--bad);
   }
-  .health .stale i {
+  footer .stale i {
     background: var(--bad);
   }
 </style>

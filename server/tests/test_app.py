@@ -5,16 +5,17 @@ from fastapi.testclient import TestClient
 from planner.jackery import Reading
 from solar_server.app import create_app
 from solar_server.config import Settings
-from solar_server.store import PLUG, SAMPLES, MemoryStore
+from solar_server.store import FORECASTS, PLANS, PLUG, SAMPLES, MemoryStore
 
 NOW = 1791158400  # Sat 4 Oct 2026, 17:00 Pacific
 SCHED = "solar-scheduler@p.iam.gserviceaccount.com"
 
 
 class FakeSources:
-    def __init__(self, jackery: bool = True, fail_index: bool = False):
+    def __init__(self, jackery: bool = True, fail_index: bool = False, actuals: bool = True):
         self.with_jackery = jackery
         self.fail_index = fail_index
+        self.actuals = actuals
 
     def forecast(self, hours):
         start = NOW - NOW % 300
@@ -28,6 +29,12 @@ class FakeSources:
         if self.fail_index:
             raise RuntimeError("watttime down")
         return 82.0
+
+    def actual(self, signal, now):
+        if not self.actuals:
+            raise RuntimeError("watttime down")
+        value = {"co2_moer": 880.0, "co2_aoer": 410.0, "health_damage": 0.02}[signal]
+        return (datetime.fromtimestamp(NOW - 300, UTC), value)
 
     def jackery(self, now):
         if not self.with_jackery:
@@ -77,7 +84,10 @@ def test_collect_stores_one_sample_with_every_source():
     body = c.post("/tasks/collect", headers=AUTH).json()
     assert body == {
         "t": NOW,
-        "moer": 900.0,
+        "moer": 880.0,
+        "moer_t": NOW - 300,
+        "aoer": 410.0,
+        "health": 0.02,
         "index": 82.0,
         "battery_pct": 81.0,
         "solar_w": 120.0,
@@ -90,7 +100,12 @@ def test_collect_stores_one_sample_with_every_source():
 def test_collect_keeps_going_when_a_source_fails():
     c, _ = make("edge", sources=FakeSources(jackery=False, fail_index=True))
     body = c.post("/tasks/collect", headers=AUTH).json()
-    assert body == {"t": NOW, "moer": 900.0}
+    assert body["moer"] == 880.0
+    assert "index" not in body and "battery_pct" not in body
+
+    c, _ = make("edge", sources=FakeSources(actuals=False))
+    body = c.post("/tasks/collect", headers=AUTH).json()
+    assert "moer" not in body and body["battery_pct"] == 81.0
 
 
 def test_plan_task_feeds_the_plug_without_the_forecast():
@@ -105,6 +120,33 @@ def test_plan_task_feeds_the_plug_without_the_forecast():
     assert plan["index_now"] == 82.0
     # 4 clean hours, all in the cheap stretch 18 h out
     assert plan["windows"] == [[NOW + 18 * 3600, NOW + 22 * 3600]]
+
+    # Every plan and its forecast are kept, not just the latest.
+    assert store.day(PLANS, "2026-10-04") == [
+        {"t": NOW, "windows": [{"s": NOW + 18 * 3600, "e": NOW + 22 * 3600}]}
+    ]
+    (snap,) = store.day(FORECASTS, "2026-10-04")
+    assert snap["t"] == NOW and snap["step"] == 300 and len(snap["values"]) == 288
+
+
+def test_accuracy_compares_the_forecast_made_hours_earlier():
+    store = MemoryStore()
+    start = NOW - 12 * 3600
+    # Two forecasts: one 12 h ago saying 500, one 2 h ago saying 100.
+    for made, value in ((start, 500), (NOW - 2 * 3600, 100)):
+        store.append(FORECASTS, {"t": made, "start": made, "step": 300, "values": [value] * 288})
+    for t in (NOW - 3600, NOW):
+        store.append(SAMPLES, {"t": t, "moer": 400.0})
+    c, _ = make("web", store=store)
+
+    six = c.get("/api/accuracy?lead_hours=6").json()
+    assert six["points"] == [[NOW - 3600, 400.0, 500], [NOW, 400.0, 500]]
+    assert six["error"] == 100 and six["compared"] == 2
+
+    one = c.get("/api/accuracy?lead_hours=1").json()
+    assert one["points"][-1] == [NOW, 400.0, 100]
+    # A reading two hours after the newer forecast was made can use it.
+    assert one["points"][0] == [NOW - 3600, 400.0, 100]
 
 
 @pytest.mark.parametrize("key", [None, "", "wrong"])

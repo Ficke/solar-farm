@@ -9,7 +9,7 @@ from planner.plan import build_plan
 
 from solar_server.config import Settings
 from solar_server.sources import Sources
-from solar_server.store import SAMPLES, Store
+from solar_server.store import FORECASTS, PLANS, SAMPLES, Store
 
 log = logging.getLogger(__name__)
 
@@ -18,19 +18,29 @@ def _num(v: float | None) -> float | None:
     return None if v is None else round(float(v), 1)
 
 
+# Signals recorded from WattTime's actuals: marginal CO2 (what the plan
+# follows), average CO2 across all plants, and health damage. Stored now so
+# later features have history to work with.
+ACTUALS = {"moer": "co2_moer", "aoer": "co2_aoer", "health": "health_damage"}
+
+
 def collect(store: Store, sources: Sources, now: datetime) -> dict:
-    """One sample: WattTime's current emissions and percentile, plus the Jackery.
+    """One sample: WattTime's latest actuals and percentile, plus the Jackery.
 
     Each source is optional; a sample is stored with whatever arrived.
     """
     t = int(now.timestamp())
     sample: dict = {"t": t}
-    try:
-        points = sources.forecast(1)
-        if points:
-            sample["moer"] = _num(points[0][1])
-    except Exception as e:
-        log.warning("watttime forecast failed: %s", e)
+    for key, signal in ACTUALS.items():
+        try:
+            point = sources.actual(signal, now)
+            if point:
+                # Health damage values are small, so keep more digits.
+                sample[key] = round(point[1], 4) if key == "health" else _num(point[1])
+                if key == "moer":
+                    sample["moer_t"] = int(point[0].timestamp())
+        except Exception as e:
+            log.warning("watttime %s failed: %s", signal, e)
     try:
         sample["index"] = _num(sources.signal_index())
     except Exception as e:
@@ -61,6 +71,22 @@ def plan(store: Store, sources: Sources, settings: Settings, now: datetime) -> d
         log.warning("signal-index skipped: %s", e)
     p["forecast"] = [[int(t.timestamp()), round(v, 1)] for t, v in points]
     store.put_state("plan", p)
+    # Keep every plan and forecast, so the dashboard can check the forecast
+    # against what happened and later features can look back.
+    store.append(
+        PLANS,
+        {"t": p["generated_at"], "windows": [{"s": s, "e": e} for s, e in p["windows"]]},
+    )
+    if points:
+        store.append(
+            FORECASTS,
+            {
+                "t": p["generated_at"],
+                "start": int(points[0][0].timestamp()),
+                "step": 300,
+                "values": [round(v) for _, v in points],
+            },
+        )
     return p
 
 

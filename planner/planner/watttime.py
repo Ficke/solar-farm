@@ -1,8 +1,8 @@
-"""Minimal WattTime v3 client: login and marginal-emissions forecast."""
+"""Minimal WattTime v3 client: login, forecasts and historical actuals."""
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import requests
 
@@ -21,17 +21,51 @@ def forecast(
     region: str = "CAISO_NORTH",
     horizon_hours: int = 24,
     session: requests.Session | None = None,
+    signal_type: str = "co2_moer",
 ) -> list[tuple[datetime, float]]:
-    """Return (point_time UTC, MOER lbs/MWh) pairs, 5 minutes apart."""
+    """Return (point_time UTC, value) pairs, 5 minutes apart. MOER is lbs/MWh."""
     s = session or requests.Session()
     r = s.get(
         f"{API}/v3/forecast",
-        params={"region": region, "signal_type": "co2_moer", "horizon_hours": horizon_hours},
+        params={"region": region, "signal_type": signal_type, "horizon_hours": horizon_hours},
         headers={"Authorization": f"Bearer {token}"},
         timeout=30,
     )
     r.raise_for_status()
     return parse_forecast(r.json())
+
+
+def historical(
+    token: str,
+    start: datetime,
+    end: datetime,
+    region: str = "CAISO_NORTH",
+    signal_type: str = "co2_moer",
+    session: requests.Session | None = None,
+) -> list[tuple[datetime, float]]:
+    """What the grid actually did: (point_time UTC, value) pairs, 5 minutes apart."""
+    s = session or requests.Session()
+    r = s.get(
+        f"{API}/v3/historical",
+        params={
+            "region": region,
+            "signal_type": signal_type,
+            "start": start.isoformat(),
+            "end": end.isoformat(),
+        },
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=30,
+    )
+    r.raise_for_status()
+    return parse_forecast(r.json())
+
+
+def latest(
+    token: str, now: datetime, region: str = "CAISO_NORTH", signal_type: str = "co2_moer"
+) -> tuple[datetime, float] | None:
+    """The most recent actual value, from the last 30 minutes of history."""
+    points = historical(token, now - timedelta(minutes=30), now, region, signal_type)
+    return max(points) if points else None
 
 
 def signal_index(

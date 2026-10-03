@@ -40,7 +40,9 @@ Both tools are [uv scripts](https://docs.astral.sh/uv/guides/scripts/): uv insta
 
 ## Dashboard
 
-The private dashboard is at https://solar-web-v5whpbqqpq-uw.a.run.app (Google sign-in; only the accounts in the `DASHBOARD_USERS` variable get in). It shows whether the grid is on and why, the next on, off and peak times, live battery, solar, grid and emissions readings, 24 hours of history next to WattTime's 24-hour forecast with the planned charging windows, the last week's solar and grid energy, and the suggested reserve. It refreshes itself every 30 seconds.
+The private dashboard is at https://solar-web-v5whpbqqpq-uw.a.run.app (Google sign-in; only the accounts in the `DASHBOARD_USERS` variable get in). It leads with whether the grid is on, why, and when it next changes, then the plan in one place (a 24-hour strip and a list of windows), WattTime's actual and forecast emissions, a check of how far off the forecast was 1 to 12 hours ahead, the battery and power history, the last week's energy, and the suggested reserve. Hover a chart for exact times and values. It refreshes itself every 30 seconds.
+
+Every reading, plug report, plan and forecast is kept in Firestore, with a weekly backup kept for 14 weeks.
 
 ## Dry run without the plug
 
@@ -54,7 +56,7 @@ bun device/sim.js --stale    # same, if the plan stopped updating (fallback rule
 The dashboard and the plug's server run on Google Cloud Run. All of it is defined in OpenTofu under [`infra/`](infra/README.md), which also has the one-time setup steps. The server in `server/` runs as two Cloud Run services from one image:
 
 - **solar-edge** (public) serves the plug, which reads `/plug/plan` and posts `/plug/report` each minute with its `X-Plug-Key`. It also serves Cloud Scheduler: `/tasks/collect` every 5 minutes records Jackery and WattTime readings in Firestore, and `/tasks/plan` every 30 minutes builds the plan.
-- **solar-web** (behind Google sign-in) serves the dashboard from `web/` and its API: `/api/now`, `/api/timeline` and `/api/daily`.
+- **solar-web** (behind Google sign-in) serves the dashboard from `web/` and its API: `/api/now`, `/api/timeline`, `/api/accuracy` and `/api/daily`.
 
 The Deploy workflow builds the image and rolls it out on every merge to `main`.
 

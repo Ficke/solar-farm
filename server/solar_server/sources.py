@@ -17,6 +17,7 @@ from solar_server.config import Settings
 class Sources(Protocol):
     def forecast(self, hours: int) -> list[tuple[datetime, float]]: ...
     def signal_index(self) -> float: ...
+    def actual(self, signal: str, now: datetime) -> tuple[datetime, float] | None: ...
     def jackery(self, now: datetime) -> Reading | None: ...
 
 
@@ -39,6 +40,9 @@ class LiveSources:
 
     def signal_index(self) -> float:
         return watttime.signal_index(self._auth(), self.settings.region)
+
+    def actual(self, signal: str, now: datetime) -> tuple[datetime, float] | None:
+        return watttime.latest(self._auth(), now, self.settings.region, signal)
 
     def jackery(self, now: datetime) -> Reading | None:
         s = self.settings

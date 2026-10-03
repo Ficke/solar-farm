@@ -6,8 +6,10 @@ export interface Sample {
   solar_w?: number;
   ac_input_w?: number;
   output_w?: number;
-  moer?: number;
-  index?: number;
+  moer?: number; // WattTime's actual marginal CO2, lb/MWh
+  moer_t?: number;
+  aoer?: number; // actual average CO2 across all plants, lb/MWh
+  index?: number; // 0-100 percentile of the past month, lower is cleaner
 }
 
 export interface PlugReport {
@@ -38,6 +40,13 @@ export interface Timeline {
   windows: Window[];
 }
 
+export interface Accuracy {
+  lead_hours: number;
+  points: [number, number, number | null][]; // [t, actual, forecast made lead_hours earlier]
+  error: number | null;
+  compared: number;
+}
+
 export interface Daily {
   days: { day: string; solar_wh: number; grid_wh: number; battery_peak_pct: number | null }[];
   reserve: { reserve_pct: number | null; good_day_wh?: number; days: number };
@@ -53,4 +62,5 @@ export const api = {
   now: () => get<Now>("/api/now"),
   timeline: (pastHours = 24) => get<Timeline>(`/api/timeline?past_hours=${pastHours}`),
   daily: (days = 14) => get<Daily>(`/api/daily?days=${days}`),
+  accuracy: (leadHours: number) => get<Accuracy>(`/api/accuracy?lead_hours=${leadHours}`),
 };

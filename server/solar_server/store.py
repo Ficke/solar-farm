@@ -17,6 +17,8 @@ from planner.plan import PACIFIC
 
 SAMPLES = "samples"  # every 5 min: battery, solar, emissions
 PLUG = "plug"  # every minute: relay state, reason, grid watts
+PLANS = "plans"  # every 30 min: the windows each plan picked
+FORECASTS = "forecasts"  # every 30 min: the 24-hour forecast each plan used
 
 
 def _state_document(data: dict[str, Any]) -> dict[str, str]:
