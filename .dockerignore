@@ -1,0 +1,9 @@
+.git
+.venv
+**/__pycache__
+**/.pytest_cache
+device/node_modules
+infra
+out
+.env
+config/device.toml

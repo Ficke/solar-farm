@@ -1,4 +1,4 @@
-# One-time setup, run by hand from Cloud Shell with your own login. It gives
+# One-time setup, run by hand from your machine with your own gcloud login. It gives
 # GitHub Actions a keyless way into the project so that everything in ../
 # (the main config) is applied by CI on every merge to main. See ../README.md.
 

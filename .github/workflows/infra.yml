@@ -38,8 +38,9 @@ jobs:
       - uses: actions/checkout@v5
       - uses: google-github-actions/auth@v3
         with:
-          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ vars.GCP_INFRA_SERVICE_ACCOUNT }}
+          # Both created by infra/bootstrap; neither is secret.
+          workload_identity_provider: projects/644948460803/locations/global/workloadIdentityPools/github/providers/solar-farm
+          service_account: github-infra@solar-farm-510518.iam.gserviceaccount.com
       - uses: opentofu/setup-opentofu@v1
         with:
           tofu_wrapper: false
