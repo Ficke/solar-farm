@@ -2,21 +2,16 @@
 name = "solar-farm-planner"
 version = "0.1.0"
 description = "Picks clean grid windows for the Jackery and records Jackery telemetry"
-requires-python = ">=3.11"
+requires-python = ">=3.14"
 dependencies = [
-  "requests>=2.31",
+  "requests>=2.32",
   "socketry>=0.2.4",
 ]
 
-[project.optional-dependencies]
-dev = ["pytest>=8"]
-
 [build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
+requires = ["uv_build>=0.8.17,<0.10"]
+build-backend = "uv_build"
 
-[tool.setuptools]
-packages = ["planner"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
+[tool.uv.build-backend]
+module-root = ""
+module-name = "planner"

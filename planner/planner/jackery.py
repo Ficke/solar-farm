@@ -40,7 +40,7 @@ def parse_properties(props: dict, now: datetime) -> Reading:
         v = props.get(key)
         try:
             return float(v) if v is not None else None
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
 
     return Reading(

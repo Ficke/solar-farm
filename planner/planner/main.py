@@ -1,7 +1,7 @@
 """Entry points run by GitHub Actions.
 
-  python -m planner.main plan --site out/site --data out/data
-  python -m planner.main recommend --data out/data
+python -m planner.main plan --site out/site --data out/data
+python -m planner.main recommend --data out/data
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ import asyncio
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from planner import jackery, telemetry, watttime
@@ -19,7 +19,7 @@ from planner.plan import build_plan
 
 
 def cmd_plan(args: argparse.Namespace) -> int:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     token = watttime.login(os.environ["WATTTIME_USERNAME"], os.environ["WATTTIME_PASSWORD"])
     points = watttime.forecast(token, region=args.region)
     plan = build_plan(points, now, budget_hours=args.budget_hours, region=args.region)
@@ -30,13 +30,17 @@ def cmd_plan(args: argparse.Namespace) -> int:
     site = Path(args.site)
     site.mkdir(parents=True, exist_ok=True)
     (site / "plan.json").write_text(json.dumps(plan, separators=(",", ":")))
-    print(f"plan: {len(plan['windows'])} windows {plan['windows']} index_now={plan.get('index_now')}")
+    print(
+        f"plan: {len(plan['windows'])} windows {plan['windows']} index_now={plan.get('index_now')}"
+    )
 
     email = os.environ.get("JACKERY_EMAIL")
     if email:
         try:
             reading = asyncio.run(
-                jackery.read(email, os.environ["JACKERY_PASSWORD"], os.environ.get("JACKERY_SN"), now)
+                jackery.read(
+                    email, os.environ["JACKERY_PASSWORD"], os.environ.get("JACKERY_SN"), now
+                )
             )
             telemetry.append(Path(args.data) / "telemetry.csv", reading)
             print(f"jackery: battery {reading.battery_pct}% solar {reading.solar_w} W")

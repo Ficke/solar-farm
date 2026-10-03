@@ -6,6 +6,7 @@ import csv
 import json
 from collections import defaultdict
 from datetime import datetime, timedelta
+from itertools import pairwise
 from pathlib import Path
 
 from planner.jackery import Reading
@@ -55,7 +56,7 @@ def daily_solar_wh(samples: list[tuple[datetime, float]], min_samples: int = 36)
         if len(pts) < min_samples:
             continue
         wh = 0.0
-        for (t0, w0), (t1, w1) in zip(pts, pts[1:]):
+        for (t0, w0), (t1, w1) in pairwise(pts):
             gap = min(t1 - t0, max_gap)
             wh += (w0 + w1) / 2 * gap.total_seconds() / 3600
         out[day] = wh
@@ -68,7 +69,7 @@ def recommend_reserve(daily_wh: dict, days: int = 14, capacity_wh: int = CAPACIT
     if not recent:
         return {"reserve_pct": None, "days": 0}
     recent.sort()
-    good_day = recent[min(len(recent) - 1, int(round(0.8 * (len(recent) - 1))))]
+    good_day = recent[min(len(recent) - 1, round(0.8 * (len(recent) - 1)))]
     headroom = good_day / capacity_wh * 100
     reserve = 5 * round((100 - headroom) / 5)
     return {

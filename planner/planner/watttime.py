@@ -34,7 +34,9 @@ def forecast(
     return parse_forecast(r.json())
 
 
-def signal_index(token: str, region: str = "CAISO_NORTH", session: requests.Session | None = None) -> float:
+def signal_index(
+    token: str, region: str = "CAISO_NORTH", session: requests.Session | None = None
+) -> float:
     """Current 0-100 percentile, the same call the Shelly script makes as a fallback."""
     s = session or requests.Session()
     r = s.get(

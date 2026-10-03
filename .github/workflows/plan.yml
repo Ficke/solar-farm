@@ -19,13 +19,11 @@ jobs:
   plan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
         with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: planner/pyproject.toml
-      - run: pip install ./planner
+          enable-cache: true
+      - run: uv sync --locked --no-dev
 
       - name: Check out gh-pages
         run: |
@@ -44,7 +42,7 @@ jobs:
           JACKERY_PASSWORD: ${{ secrets.JACKERY_PASSWORD }}
           JACKERY_SN: ${{ secrets.JACKERY_SN }}
         working-directory: planner
-        run: python -m planner.main plan --site ../out --data ../out/data
+        run: uv run --no-sync python -m planner.main plan --site ../out --data ../out/data
 
       - name: Publish
         working-directory: out

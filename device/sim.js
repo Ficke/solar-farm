@@ -2,9 +2,9 @@
 // Dry run of the plug: what grid-gate.js would do over the next 24 hours
 // with the published plan, minute by minute, without any hardware.
 //
-//   node device/sim.js                          # fetches the live plan.json
-//   node device/sim.js path/to/plan.json        # or a local file
-//   node device/sim.js --stale                  # pretend the plan is stale (fallback rules)
+//   bun device/sim.js                          # fetches the live plan.json
+//   bun device/sim.js path/to/plan.json        # or a local file
+//   bun device/sim.js --stale                  # pretend the plan is stale (fallback rules)
 "use strict";
 
 const fs = require("node:fs");

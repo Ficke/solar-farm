@@ -1,8 +1,12 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.14"
+# dependencies = ["requests>=2.32"]
+# ///
 """Push grid-gate.js and its settings to the Shelly plug over your home Wi-Fi.
 
-    python tools/deploy.py            # uses config/device.toml and .env
-    python tools/deploy.py --dry-run  # show what would be sent
+    uv run tools/deploy.py            # uses config/device.toml and .env
+    uv run tools/deploy.py --dry-run  # show what would be sent
 
 Talks to the plug's local JSON-RPC API (http://<host>/rpc). Run it from a
 machine on the same network as the plug.
@@ -49,7 +53,10 @@ class Shelly:
             print(f"[dry-run] {method} {json.dumps(shown)}")
             return {}
         r = requests.post(
-            self.url, json={"id": 1, "method": method, "params": params or {}}, auth=self.auth, timeout=15
+            self.url,
+            json={"id": 1, "method": method, "params": params or {}},
+            auth=self.auth,
+            timeout=15,
         )
         r.raise_for_status()
         body = r.json()
@@ -71,12 +78,19 @@ def kvs_settings(cfg: dict) -> dict[str, str]:
 
 def deploy(dev: Shelly, cfg: dict) -> None:
     info = dev.call("Shelly.GetDeviceInfo")
-    print(f"Connected to {info.get('model', '?')} ({info.get('id', '?')}), firmware {info.get('ver', '?')}")
+    model, dev_id, fw = info.get("model", "?"), info.get("id", "?"), info.get("ver", "?")
+    print(f"Connected to {model} ({dev_id}), firmware {fw}")
 
     # The script reads local time for the peak block, so pin the timezone.
-    dev.call("Sys.SetConfig", {"config": {"location": {"tz": cfg.get("timezone", "America/Los_Angeles")}}})
+    dev.call(
+        "Sys.SetConfig",
+        {"config": {"location": {"tz": cfg.get("timezone", "America/Los_Angeles")}}},
+    )
     # Keep the relay where it was across reboots; the script takes over within a minute.
-    dev.call("Switch.SetConfig", {"id": 0, "config": {"initial_state": "restore_last", "auto_on": False, "auto_off": False}})
+    dev.call(
+        "Switch.SetConfig",
+        {"id": 0, "config": {"initial_state": "restore_last", "auto_on": False, "auto_off": False}},
+    )
 
     for key, value in kvs_settings(cfg).items():
         dev.call("KVS.Set", {"key": key, "value": value})
@@ -100,7 +114,9 @@ def deploy(dev: Shelly, cfg: dict) -> None:
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     p.add_argument("--config", default=str(ROOT / "config" / "device.toml"))
     p.add_argument("--dry-run", action="store_true")
     args = p.parse_args()
@@ -108,7 +124,9 @@ def main() -> int:
     load_env(ROOT / ".env")
     cfg_path = Path(args.config)
     if not cfg_path.exists():
-        print(f"Missing {cfg_path}. Copy config/device.example.toml and fill it in.", file=sys.stderr)
+        print(
+            f"Missing {cfg_path}. Copy config/device.example.toml and fill it in.", file=sys.stderr
+        )
         return 1
     cfg = tomllib.loads(cfg_path.read_text())
     dev = Shelly(cfg["host"], os.environ.get("SHELLY_PASSWORD") or None, dry_run=args.dry_run)
