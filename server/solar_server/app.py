@@ -100,6 +100,13 @@ def _web_routes(app, store, clock) -> None:
     def api_timeline(past_hours: Annotated[int, Query(ge=1, le=168)] = 24) -> dict:
         return views.timeline_view(store, int(clock()), past_hours)
 
+    @app.get("/api/accuracy")
+    def api_accuracy(
+        lead_hours: Annotated[int, Query(ge=1, le=23)] = 6,
+        past_hours: Annotated[int, Query(ge=1, le=168)] = 24,
+    ) -> dict:
+        return views.accuracy_view(store, int(clock()), lead_hours, past_hours)
+
     @app.get("/api/daily")
     def api_daily(days: Annotated[int, Query(ge=1, le=60)] = 14) -> dict:
         return views.daily_view(store, int(clock()), days)

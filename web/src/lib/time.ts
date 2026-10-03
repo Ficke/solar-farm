@@ -20,7 +20,23 @@ const parts = new Intl.DateTimeFormat("en-US", {
   hourCycle: "h23",
 });
 
+const weekday = new Intl.DateTimeFormat("en-US", { timeZone: TZ, weekday: "short" });
+const dayKey = new Intl.DateTimeFormat("en-CA", { timeZone: TZ });
+
 export const fmtClock = (t: number) => clock.format(t * 1000).replace(":00", "");
+export const fmtWeekday = (t: number) => weekday.format(t * 1000);
+/** Clock time with the weekday only when it isn't today. */
+export const fmtWhen = (t: number, now: number) =>
+  dayKey.format(t * 1000) === dayKey.format(now * 1000)
+    ? fmtClock(t)
+    : `${fmtWeekday(t)} ${fmtClock(t)}`;
+/** "3–4 PM", "11 AM–1 PM", "3:30–4 PM". */
+export function fmtRange(s: number, e: number): string {
+  const a = fmtClock(s);
+  const b = fmtClock(e);
+  const [am, bm] = [a.slice(-2), b.slice(-2)];
+  return am === bm ? `${a.slice(0, -3)}–${b}` : `${a}–${b}`;
+}
 export const fmtDayClock = (t: number) => dayClock.format(t * 1000).replace(":00", "");
 
 /** Minutes after local midnight in Pacific time. */
@@ -47,6 +63,11 @@ export function peakWindows(from: number, to: number): [number, number][] {
     midnight += 86400;
   }
   return out;
+}
+
+export function hours(seconds: number): string {
+  const h = seconds / 3600;
+  return h === 1 ? "1 hour" : `${Number.isInteger(h) ? h : h.toFixed(1)} hours`;
 }
 
 export function ago(seconds: number): string {
