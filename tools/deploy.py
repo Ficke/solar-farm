@@ -18,6 +18,7 @@ import argparse
 import base64
 import json
 import os
+import subprocess
 import sys
 import tomllib
 from pathlib import Path
@@ -29,6 +30,10 @@ ROOT = Path(__file__).resolve().parent.parent
 SCRIPT_PATH = ROOT / "device" / "src" / "grid-gate.js"
 SCRIPT_NAME = "grid-gate"
 CHUNK = 1024
+GCLOUD_PLUG_KEY = [
+    "gcloud", "secrets", "versions", "access", "latest",
+    "--secret=plug-key", "--project=solar-farm-510518",
+]  # fmt: skip
 
 
 def load_env(path: Path) -> None:
@@ -65,8 +70,34 @@ class Shelly:
         return body.get("result", {})
 
 
+def plug_key() -> str | None:
+    """The key solar-edge expects: PLUG_KEY in .env, else Secret Manager via gcloud."""
+    if key := os.environ.get("PLUG_KEY"):
+        return key
+    try:
+        out = subprocess.run(
+            GCLOUD_PLUG_KEY,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except FileNotFoundError, subprocess.CalledProcessError:
+        return None
+    return out.stdout.strip() or None
+
+
 def kvs_settings(cfg: dict) -> dict[str, str]:
     kv = {"gg.plan_url": cfg["plan_url"]}
+    if cfg.get("report_url"):
+        kv["gg.report_url"] = cfg["report_url"]
+    if "/plug/" in cfg["plan_url"] or cfg.get("report_url"):
+        key = plug_key()
+        if not key:
+            raise SystemExit(
+                "The plan URL is the solar-edge service, which needs the plug key. Set "
+                "PLUG_KEY in .env, or run `gcloud auth login` so it's read from Secret Manager."
+            )
+        kv["gg.plug_key"] = key
     user, pw = os.environ.get("WATTTIME_USERNAME"), os.environ.get("WATTTIME_PASSWORD")
     if user and pw:
         kv["gg.wt_auth"] = base64.b64encode(f"{user}:{pw}".encode()).decode()

@@ -1,0 +1,24 @@
+[project]
+name = "solar-farm-server"
+version = "0.1.0"
+description = "Private dashboard API, plug endpoints and scheduled tasks on Cloud Run"
+requires-python = ">=3.14"
+dependencies = [
+  "solar-farm-planner",
+  "fastapi>=0.118",
+  "uvicorn[standard]>=0.37",
+  "google-cloud-firestore>=2.21",
+  "google-auth>=2.41",
+  "requests>=2.32",
+]
+
+[tool.uv.sources]
+solar-farm-planner = { workspace = true }
+
+[build-system]
+requires = ["uv_build>=0.12,<0.13"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = ""
+module-name = "solar_server"

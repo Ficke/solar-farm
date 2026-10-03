@@ -3,7 +3,11 @@
 # The plug's address on your Wi-Fi (Shelly app > device > Device information).
 host = "192.168.1.50"
 
-# Where the planner publishes the plan (GitHub Pages for this repo).
+# Where the plug reads its plan. Today that's GitHub Pages. Once the Google
+# Cloud setup is live, switch to the solar-edge service (`plug_base_url` in the
+# Infra run's output) and add report_url so the dashboard sees the plug:
+#   plan_url = "https://solar-edge-XXXX.us-west1.run.app/plug/plan"
+#   report_url = "https://solar-edge-XXXX.us-west1.run.app/plug/report"
 plan_url = "https://ficke.github.io/solar-farm/plan.json"
 
 timezone = "America/Los_Angeles"

@@ -11,6 +11,8 @@
 
 var CFG = {
   planUrl: "",
+  plugKey: "", // X-Plug-Key for the solar-edge service, written by tools/deploy.py
+  reportUrl: "", // where to POST what the plug decided each minute (optional)
   wtAuth: "", // base64 of "user:password", written by tools/deploy.py
   region: "CAISO_NORTH",
   threshold: 25, // WattTime signal-index percentile at or below which grid is on
@@ -172,7 +174,54 @@ function onPlan(res, errCode, errMsg) {
 
 function fetchPlan(now) {
   if (!CFG.planUrl) return;
-  Shelly.call("HTTP.GET", { url: CFG.planUrl + "?t=" + now, timeout: 10 }, onPlan);
+  if (!CFG.plugKey) {
+    Shelly.call("HTTP.GET", { url: CFG.planUrl + "?t=" + now, timeout: 10 }, onPlan);
+    return;
+  }
+  Shelly.call(
+    "HTTP.Request",
+    {
+      method: "GET",
+      url: CFG.planUrl,
+      headers: { "X-Plug-Key": CFG.plugKey },
+      timeout: 10
+    },
+    onPlan
+  );
+}
+
+// --- report to the dashboard -------------------------------------------------
+
+function reportBody(now) {
+  var sw = Shelly.getComponentStatus("switch:0");
+  return JSON.stringify({
+    t: now,
+    on: S.on,
+    reason: S.reason,
+    w: sw && typeof sw.apower === "number" ? sw.apower : null,
+    wh: sw && sw.aenergy ? sw.aenergy.total : null,
+    index: S.index,
+    plan_at: S.plan ? S.plan.generated_at : null
+  });
+}
+
+function onReport(res, errCode) {
+  if (errCode !== 0 || !res || res.code !== 204) print("grid-gate: report failed " + errCode);
+}
+
+function sendReport(now) {
+  if (!CFG.reportUrl || !CFG.plugKey) return;
+  Shelly.call(
+    "HTTP.Request",
+    {
+      method: "POST",
+      url: CFG.reportUrl,
+      headers: { "X-Plug-Key": CFG.plugKey, "Content-Type": "application/json" },
+      body: reportBody(now),
+      timeout: 10
+    },
+    onReport
+  );
 }
 
 // --- WattTime live index (fallback when the plan is stale) -------------------
@@ -252,6 +301,7 @@ function tick() {
   }
   S.ticks++;
   applyDecision(decide(S, now, now > 0 ? localMinutes() : -1, CFG), now);
+  if (now > 0) sendReport(now);
 }
 
 function onStatusRequest(request, response) {
@@ -288,6 +338,8 @@ function kvsItems(res) {
 function applyConfig(kv) {
   if (kv["gg.plan_url"]) CFG.planUrl = kv["gg.plan_url"];
   if (kv["gg.wt_auth"]) CFG.wtAuth = kv["gg.wt_auth"];
+  if (kv["gg.plug_key"]) CFG.plugKey = kv["gg.plug_key"];
+  if (kv["gg.report_url"]) CFG.reportUrl = kv["gg.report_url"];
   if (kv["gg.cfg"]) {
     try {
       var extra = JSON.parse(kv["gg.cfg"]);

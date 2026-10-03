@@ -51,7 +51,12 @@ bun device/sim.js --stale    # same, if the plan stopped updating (fallback rule
 
 ## Google Cloud (in progress)
 
-A private live dashboard is being built on Google Cloud Run, and it will eventually replace the GitHub Pages files. All of it is defined in OpenTofu under [`infra/`](infra/README.md), which also has the one-time setup steps.
+A private live dashboard is being built on Google Cloud Run, and it will eventually replace the GitHub Pages files. All of it is defined in OpenTofu under [`infra/`](infra/README.md), which also has the one-time setup steps. The server in `server/` runs as two Cloud Run services from one image:
+
+- **solar-edge** (public) serves the plug, which reads `/plug/plan` and posts `/plug/report` each minute with its `X-Plug-Key`. It also serves Cloud Scheduler: `/tasks/collect` every 5 minutes records Jackery and WattTime readings in Firestore, and `/tasks/plan` every 30 minutes builds the plan.
+- **solar-web** (behind Google sign-in) serves the dashboard's API: `/api/now`, `/api/timeline` and `/api/daily`.
+
+The Deploy workflow builds the image and rolls it out on every merge to `main`.
 
 ## Development
 
@@ -64,7 +69,7 @@ uv run ruff check . && uv run ty check   # lint and type check
 cd device && bun install && bun test     # script logic under a fake Shelly runtime
 ```
 
-Or `just check` to run everything CI runs. The repo is a uv workspace: the root `pyproject.toml` holds the shared Ruff, ty and pytest settings and one `uv.lock`; `planner/` is a member package.
+Or `just check` to run everything CI runs. The repo is a uv workspace: the root `pyproject.toml` holds the shared Ruff, ty and pytest settings and one `uv.lock`; `planner/` and `server/` are member packages.
 
 The script must stay ES5: the test suite parses it with `ecmaVersion: 5`.
 

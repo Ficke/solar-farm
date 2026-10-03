@@ -115,3 +115,39 @@ test("KVS results are read in both firmware formats", () => {
   assert.deepEqual({ ...context.kvsItems({ items: [{ key: "a", value: "1" }] }) }, { a: "1" });
   assert.deepEqual({ ...context.kvsItems({ items: { a: { etag: "x", value: "1" } } }) }, { a: "1" });
 });
+
+test("with a plug key, the plan request carries it and every tick posts a report", () => {
+  const plan = { generated_at: NOW - 60, windows: [[NOW - 60, NOW + 60]] };
+  const h = load({
+    time: "11:00",
+    kvs: {
+      "gg.plan_url": "https://solar-edge.example.run.app/plug/plan",
+      "gg.report_url": "https://solar-edge.example.run.app/plug/report",
+      "gg.plug_key": "k3y"
+    },
+    responses: {
+      "HTTP.Request": (p) => (p.method === "GET" ? { code: 200, body: JSON.stringify(plan) } : { code: 204 })
+    }
+  });
+  const { calls, device } = h;
+  device.sw.apower = 412.5;
+  const reqs = calls.filter((c) => c.method === "HTTP.Request");
+  const get = reqs.find((c) => c.params.method === "GET");
+  assert.equal(get.params.url, "https://solar-edge.example.run.app/plug/plan");
+  assert.equal(get.params.headers["X-Plug-Key"], "k3y");
+  assert.ok(!calls.some((c) => c.method === "HTTP.GET"));
+
+  const post = reqs.find((c) => c.params.method === "POST");
+  assert.equal(post.params.url, "https://solar-edge.example.run.app/plug/report");
+  assert.equal(post.params.headers["X-Plug-Key"], "k3y");
+  const body = JSON.parse(post.params.body);
+  assert.equal(body.t, NOW);
+  assert.equal(body.on, true);
+  assert.equal(body.reason, "plan");
+  assert.equal(body.plan_at, NOW - 60);
+});
+
+test("no report is sent without a report URL", () => {
+  const h = load({ kvs: { "gg.plug_key": "k3y" } });
+  assert.ok(!h.calls.some((c) => c.method === "HTTP.Request" && c.params.method === "POST"));
+});

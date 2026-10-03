@@ -39,13 +39,7 @@ tofu init
 tofu apply -var billing_account=ACCOUNT_ID
 ```
 
-It prints two values. Add both to GitHub under **Settings > Secrets and variables > Actions > Variables**, plus a third:
-
-| Variable | Value |
-| --- | --- |
-| `GCP_WORKLOAD_IDENTITY_PROVIDER` | from the output |
-| `GCP_INFRA_SERVICE_ACCOUNT` | from the output |
-| `DASHBOARD_USERS` | `["you@gmail.com"]` (JSON list) |
+Then add one GitHub variable under **Settings > Secrets and variables > Actions > Variables**: `DASHBOARD_USERS`, set to `["you@gmail.com"]` (a JSON list). The workflows already know the two values the bootstrap prints, since they're fixed names in this project.
 
 **3. Create the sign-in client for IAP**
 
