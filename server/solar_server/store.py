@@ -8,6 +8,7 @@ plug's latest report.
 
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
@@ -16,6 +17,19 @@ from planner.plan import PACIFIC
 
 SAMPLES = "samples"  # every 5 min: battery, solar, emissions
 PLUG = "plug"  # every minute: relay state, reason, grid watts
+
+
+def _state_document(data: dict[str, Any]) -> dict[str, str]:
+    # Firestore rejects arrays nested directly inside arrays, which both plan
+    # windows and forecast points use. JSON preserves the public data shape.
+    return {"data_json": json.dumps(data, separators=(",", ":"))}
+
+
+def _state_data(document: dict[str, Any]) -> dict[str, Any]:
+    encoded = document.get("data_json")
+    if isinstance(encoded, str):
+        return json.loads(encoded)
+    return document
 
 
 def day_key(t: int) -> str:
@@ -80,8 +94,8 @@ class FirestoreStore:
         return list((snap.to_dict() or {}).get("items", [])) if snap.exists else []
 
     def put_state(self, name: str, data: dict[str, Any]) -> None:
-        self.db.collection("state").document(name).set(data)
+        self.db.collection("state").document(name).set(_state_document(data))
 
     def get_state(self, name: str) -> dict[str, Any] | None:
         snap = self.db.collection("state").document(name).get()
-        return snap.to_dict() if snap.exists else None
+        return _state_data(snap.to_dict() or {}) if snap.exists else None
