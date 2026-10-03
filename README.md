@@ -11,15 +11,15 @@ Grid-aware charging for a Jackery Explorer 3000 v2 with a 250 W panel in a San F
   3. A plan less than 3 hours old: on inside its windows.
   4. Otherwise WattTime's live index for `CAISO_NORTH`: on at or below the 25th percentile.
   5. No internet: on from 10am to 3pm.
-- **Planner** (`planner/`, run by `.github/workflows/plan.yml` every 30 minutes): reads WattTime's 24-hour marginal-emissions forecast, picks the cleanest 4 hours outside the peak, and publishes `plan.json` to GitHub Pages. It also records a Jackery telemetry sample (battery %, solar watts) from Jackery's cloud.
-- **Reserve recommendation** (`.github/workflows/recommend.yml`, weekly): turns two weeks of solar telemetry into a suggested reserve and posts it on the "Reserve recommendation" issue. The reserve itself is set by hand in the Jackery app.
+- **Server** (`server/` and `planner/`, on Google Cloud Run): every 30 minutes it reads WattTime's 24-hour marginal-emissions forecast and picks the cleanest 4 hours outside the peak, which the plug reads from `/plug/plan`. Every 5 minutes it records the battery %, solar watts (from Jackery's cloud) and grid emissions, and the plug reports its state every minute.
+- **Dashboard** (`web/`): the private page described below. It also suggests a reserve from two weeks of solar readings; the reserve itself is set by hand in the Jackery app.
 
 ## One-time setup
 
 1. **WattTime:** create a free account at [watttime.org](https://watttime.org). The free plan includes full `CAISO_NORTH` data.
 2. **Jackery cloud (optional, for telemetry):** create a second Jackery account and share the power station to it from the app. Jackery allows one login at a time, so the planner must not use the account on your phone. The access is unofficial (via [socketry](https://github.com/jlopez/socketry)) and read-only; if it breaks, the plan keeps working.
-3. **Repository secrets** (Settings > Secrets and variables > Actions): `WATTTIME_USERNAME`, `WATTTIME_PASSWORD`, and optionally `JACKERY_EMAIL`, `JACKERY_PASSWORD`, `JACKERY_SN`.
-4. **GitHub Pages:** run the Plan workflow once (Actions > Plan > Run workflow), then Settings > Pages > Deploy from branch `gh-pages`, folder `/`.
+3. **Repository secrets** (Settings > Secrets and variables > Actions): `WATTTIME_USERNAME`, `WATTTIME_PASSWORD`, and optionally `JACKERY_EMAIL`, `JACKERY_PASSWORD`, `JACKERY_SN`. The Infra workflow copies them into Google Secret Manager.
+4. **Google Cloud:** follow [`infra/README.md`](infra/README.md).
 5. **Jackery app:** Self-powered on, reserve 80%, Quiet Charging on (keeps the charge rate well under the plug's 15 A rating).
 6. **Plug:** keep it in Wi-Fi mode and note its IP address.
 
@@ -30,6 +30,7 @@ From a computer on your home Wi-Fi:
 ```sh
 cp config/device.example.toml config/device.toml   # set host
 cp .env.example .env                                # WattTime login for the live-index fallback
+gcloud auth login                                   # deploy.py reads the plug key from Secret Manager
 uv run tools/deploy.py
 uv run tools/status.py
 ```
@@ -42,12 +43,10 @@ Both tools are [uv scripts](https://docs.astral.sh/uv/guides/scripts/): uv insta
 
 The private dashboard is at https://solar-web-v5whpbqqpq-uw.a.run.app (Google sign-in; only the accounts in the `DASHBOARD_USERS` variable get in). It shows whether the grid is on and why, the next on, off and peak times, live battery, solar, grid and emissions readings, 24 hours of history next to WattTime's 24-hour forecast with the planned charging windows, the last week's solar and grid energy, and the suggested reserve. It refreshes itself every 30 seconds.
 
-The old status page at https://ficke.github.io/solar-farm/ still works until the plug moves to the new server.
-
 ## Dry run without the plug
 
 ```sh
-bun device/sim.js            # what the plug would do over the next 24 h with the live plan
+bun device/sim.js            # what the plug would do over the next 24 h with the live plan (uses your gcloud login for the plug key)
 bun device/sim.js --stale    # same, if the plan stopped updating (fallback rules)
 ```
 
@@ -80,8 +79,6 @@ The script must stay ES5: the test suite parses it with `ecmaVersion: 5`.
 
 ## Tuning
 
-- **Reserve:** follow the weekly recommendation. Rule of thumb: if the battery hits 100% on sunny afternoons, lower it; if it never gets close, raise it.
+- **Reserve:** follow the dashboard's suggestion. Rule of thumb: if the battery hits 100% on sunny afternoons, lower it; if it never gets close, raise it.
 - **Script settings:** `[tuning]` in `config/device.toml` overrides the script defaults (threshold, peak hours, fallback window); rerun `deploy.py`.
-- **Daily grid window:** `--budget-hours` in `plan.yml`.
-
-Note: `gh-pages` is public, including `data/telemetry.csv` (battery and solar readings).
+- **Daily grid window:** add `BUDGET_HOURS` (default 4) to solar-edge's environment in `infra/run.tf`.

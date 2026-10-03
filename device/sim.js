@@ -2,15 +2,25 @@
 // Dry run of the plug: what grid-gate.js would do over the next 24 hours
 // with the published plan, minute by minute, without any hardware.
 //
-//   bun device/sim.js                          # fetches the live plan.json
+//   bun device/sim.js                          # fetches the live plan (PLUG_KEY, or your gcloud login)
 //   bun device/sim.js path/to/plan.json        # or a local file
 //   bun device/sim.js --stale                  # pretend the plan is stale (fallback rules)
 "use strict";
 
 const fs = require("node:fs");
+const { execFileSync } = require("node:child_process");
 const { load } = require("./test/harness");
 
-const PLAN_URL = "https://ficke.github.io/solar-farm/plan.json";
+const PLAN_URL = "https://solar-edge-v5whpbqqpq-uw.a.run.app/plug/plan";
+
+function plugKey() {
+  if (process.env.PLUG_KEY) return process.env.PLUG_KEY;
+  return execFileSync(
+    "gcloud",
+    ["secrets", "versions", "access", "latest", "--secret=plug-key", "--project=solar-farm-510518"],
+    { encoding: "utf8" }
+  ).trim();
+}
 const fmt = new Intl.DateTimeFormat("en-US", {
   timeZone: "America/Los_Angeles",
   weekday: "short",
@@ -26,7 +36,7 @@ function localMinutes(unix) {
 
 async function getPlan(arg) {
   if (arg && !arg.startsWith("--")) return JSON.parse(fs.readFileSync(arg, "utf8"));
-  const res = await fetch(PLAN_URL + "?t=" + Date.now());
+  const res = await fetch(PLAN_URL, { headers: { "X-Plug-Key": plugKey() } });
   if (!res.ok) throw new Error(`plan fetch failed: ${res.status}`);
   return res.json();
 }
