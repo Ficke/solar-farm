@@ -26,4 +26,5 @@ target-version = "py314"
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
 
 [tool.pytest.ini_options]
-testpaths = ["planner/tests", "server/tests"]
+pythonpath = ["."]
+testpaths = ["planner/tests", "server/tests", "tools/tests"]

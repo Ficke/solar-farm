@@ -29,15 +29,14 @@ From a computer on your home Wi-Fi:
 
 ```sh
 cp config/device.example.toml config/device.toml   # set host
-cp .env.example .env                                # WattTime login for the live-index fallback
-gcloud auth login                                   # deploy.py reads the plug key from Secret Manager
+gcloud auth login                                   # deploy.py reads secrets from Secret Manager
 uv run tools/deploy.py
 uv run tools/status.py
 ```
 
 Both tools are [uv scripts](https://docs.astral.sh/uv/guides/scripts/): uv installs their dependencies on first run.
 
-`deploy.py` sets the plug's timezone, writes settings into the plug's key-value store (secrets never go in the repo), uploads the script in 1 KB chunks, enables it on boot and starts it.
+`deploy.py` sets the plug's timezone, writes settings into the plug's key-value store (secrets never go in the repo), uploads the script in 1 KB chunks, enables it on boot and starts it. It reads the plug key and WattTime credentials from Google Secret Manager, where the Infra workflow copied the repository secrets. A local `.env` is only needed to override those values during development.
 
 ## Dashboard
 
