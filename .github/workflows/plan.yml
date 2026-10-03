@@ -49,6 +49,7 @@ jobs:
       - name: Publish
         working-directory: out
         run: |
+          cp ../site/index.html .
           touch .nojekyll
           git config user.name "solar-farm-bot"
           git config user.email "solar-farm-bot@users.noreply.github.com"

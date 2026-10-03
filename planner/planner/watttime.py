@@ -34,6 +34,24 @@ def forecast(
     return parse_forecast(r.json())
 
 
+def signal_index(token: str, region: str = "CAISO_NORTH", session: requests.Session | None = None) -> float:
+    """Current 0-100 percentile, the same call the Shelly script makes as a fallback."""
+    s = session or requests.Session()
+    r = s.get(
+        f"{API}/v3/signal-index",
+        params={"region": region, "signal_type": "co2_moer"},
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=20,
+    )
+    r.raise_for_status()
+    return parse_signal_index(r.json())
+
+
+def parse_signal_index(body: dict) -> float:
+    # Same shape the device parses: data[0].value
+    return float(body["data"][0]["value"])
+
+
 def parse_forecast(body: dict) -> list[tuple[datetime, float]]:
     points = []
     for p in body.get("data", []):

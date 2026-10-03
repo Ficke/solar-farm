@@ -22,7 +22,7 @@ test("peak hours always block the grid, even when the plan says on", () => {
   const { context } = load();
   const s = freshState(context, {
     plan: { generated_at: NOW - 60, windows: [[NOW - 100, NOW + 100]] },
-    lastOnAt: NOW - 20 * 3600
+    lastOnAt: NOW - 31 * 3600
   });
   for (const t of ["16:00", "18:30", "20:59"]) {
     const d = context.decide(s, NOW, context.parseLocalMinutes(t), context.CFG);
@@ -60,11 +60,11 @@ test("no plan and no index uses the 10am to 3pm window", () => {
   assert.equal(context.decide(s, NOW, 15 * 60, context.CFG).on, false);
 });
 
-test("18 hours off forces the grid on, but not during peak", () => {
+test("30 hours off forces the grid on, but not during peak", () => {
   const { context } = load();
   const s = freshState(context, {
     plan: { generated_at: NOW - 60, windows: [] },
-    lastOnAt: NOW - 18 * 3600 - 1
+    lastOnAt: NOW - 30 * 3600 - 1
   });
   assert.deepEqual({ ...context.decide(s, NOW, 23 * 60, context.CFG) }, { on: true, reason: "safety" });
   assert.equal(context.decide(s, NOW, 17 * 60, context.CFG).reason, "peak");

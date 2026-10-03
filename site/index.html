@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Solar Farm</title>
+<style>
+  :root { --bg:#fff; --fg:#1d1d1f; --muted:#6e6e73; --grid:#e5e5ea; --on:#2e7d32; --solar:#f2a900; --batt:#1565c0; --peak:#fdecea; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#161618; --fg:#f2f2f7; --muted:#a1a1a6; --grid:#2c2c2e; --on:#66bb6a; --solar:#ffca28; --batt:#64b5f6; --peak:#3b1f1f; } }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--fg); font:15px/1.45 -apple-system, system-ui, sans-serif; max-width:820px; margin-inline:auto; }
+  h1 { font-size:20px; margin:0 0 4px; } h2 { font-size:15px; margin:24px 0 8px; }
+  .muted { color:var(--muted); } svg { width:100%; height:auto; display:block; }
+  ul { padding-left:18px; margin:4px 0; }
+</style>
+</head>
+<body>
+<h1>Solar Farm</h1>
+<div class="muted" id="updated">Loading…</div>
+
+<h2>Grid windows (Pacific)</h2>
+<div id="windows"></div>
+<div class="muted">Green: grid on. Pink: PG&amp;E peak, always off.</div>
+<svg id="timeline" viewBox="0 0 800 60" role="img" aria-label="Next 24 hours of grid windows"></svg>
+
+<h2>Last 7 days</h2>
+<div class="muted">Battery % (blue) and solar watts (yellow), from Jackery's cloud every 30 minutes.</div>
+<svg id="chart" viewBox="0 0 800 260" role="img" aria-label="Battery and solar over the last 7 days"></svg>
+
+<script>
+const TZ = "America/Los_Angeles";
+const fmt = new Intl.DateTimeFormat("en-US", { timeZone: TZ, weekday: "short", hour: "numeric", minute: "2-digit" });
+const hourOf = (d) => Number(new Intl.DateTimeFormat("en-US", { timeZone: TZ, hour: "2-digit", hourCycle: "h23" }).format(d));
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v);
+const el = (tag, attrs, text) => { const e = document.createElementNS("http://www.w3.org/2000/svg", tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text) e.textContent = text; return e; };
+
+async function showPlan() {
+  const plan = await (await fetch("plan.json?t=" + Date.now())).json();
+  const gen = new Date(plan.generated_at * 1000);
+  document.getElementById("updated").textContent =
+    `Plan updated ${fmt.format(gen)}` + (plan.index_now != null ? ` · grid right now is at the ${Math.round(plan.index_now)}th percentile (lower is cleaner)` : "");
+  const ul = document.createElement("ul");
+  for (const [s, e] of plan.windows) { const li = document.createElement("li"); li.textContent = `${fmt.format(new Date(s * 1000))} to ${fmt.format(new Date(e * 1000))}`; ul.appendChild(li); }
+  document.getElementById("windows").appendChild(plan.windows.length ? ul : document.createTextNode("No windows."));
+
+  const svg = document.getElementById("timeline"), t0 = Date.now(), span = 24 * 3600e3, X = (t) => 10 + (t - t0) / span * 780;
+  for (let t = Math.ceil(t0 / 3600e3) * 3600e3; t < t0 + span; t += 3600e3) {
+    const h = hourOf(new Date(t));
+    if (h >= 16 && h < 21) svg.appendChild(el("rect", { x: X(t), y: 10, width: 780 / 24, height: 24, fill: css("--peak") }));
+    if (h % 6 === 0) svg.appendChild(el("text", { x: X(t), y: 52, "font-size": 11, fill: css("--muted"), "text-anchor": "middle" }, fmt.format(new Date(t)).replace(/:00/, "")));
+  }
+  for (const [s, e] of plan.windows) svg.appendChild(el("rect", { x: X(Math.max(s * 1000, t0)), y: 10, width: Math.max(0, X(Math.min(e * 1000, t0 + span)) - X(Math.max(s * 1000, t0))), height: 24, rx: 4, fill: css("--on") }));
+  svg.appendChild(el("rect", { x: 10, y: 10, width: 780, height: 24, fill: "none", stroke: css("--grid") }));
+}
+
+async function showTelemetry() {
+  const res = await fetch("data/telemetry.csv?t=" + Date.now());
+  if (!res.ok) return;
+  const rows = (await res.text()).trim().split("\n").slice(1).map((line) => {
+    const [time, batt, solar] = line.split(",");
+    return { t: Date.parse(time), batt: parseFloat(batt), solar: parseFloat(solar) };
+  }).filter((r) => r.t > Date.now() - 7 * 864e5);
+  if (!rows.length) return;
+  const svg = document.getElementById("chart"), t0 = rows[0].t, t1 = rows[rows.length - 1].t || t0 + 1;
+  const X = (t) => 40 + (t - t0) / Math.max(1, t1 - t0) * 720, maxSolar = Math.max(100, ...rows.map((r) => r.solar || 0));
+  for (const p of [0, 50, 100]) {
+    const y = 230 - p * 2;
+    svg.appendChild(el("line", { x1: 40, x2: 760, y1: y, y2: y, stroke: css("--grid") }));
+    svg.appendChild(el("text", { x: 34, y: y + 4, "font-size": 11, fill: css("--muted"), "text-anchor": "end" }, p + "%"));
+  }
+  svg.appendChild(el("text", { x: 760, y: 22, "font-size": 11, fill: css("--muted"), "text-anchor": "end" }, "solar scale: " + Math.round(maxSolar) + " W max"));
+  const line = (key, scale, color) => svg.appendChild(el("polyline", { fill: "none", stroke: color, "stroke-width": 2,
+    points: rows.filter((r) => !isNaN(r[key])).map((r) => `${X(r.t).toFixed(1)},${(230 - r[key] * scale).toFixed(1)}`).join(" ") }));
+  line("solar", 200 / maxSolar, css("--solar"));
+  line("batt", 2, css("--batt"));
+  svg.appendChild(el("text", { x: 40, y: 252, "font-size": 11, fill: css("--muted") }, fmt.format(new Date(t0))));
+  svg.appendChild(el("text", { x: 760, y: 252, "font-size": 11, fill: css("--muted"), "text-anchor": "end" }, fmt.format(new Date(t1))));
+}
+
+showPlan().catch((e) => (document.getElementById("updated").textContent = "Could not load plan.json: " + e.message));
+showTelemetry();
+</script>
+</body>
+</html>

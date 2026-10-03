@@ -23,10 +23,14 @@ def cmd_plan(args: argparse.Namespace) -> int:
     token = watttime.login(os.environ["WATTTIME_USERNAME"], os.environ["WATTTIME_PASSWORD"])
     points = watttime.forecast(token, region=args.region)
     plan = build_plan(points, now, budget_hours=args.budget_hours, region=args.region)
+    try:
+        plan["index_now"] = watttime.signal_index(token, region=args.region)
+    except Exception as e:  # informational only; the device has its own fallback
+        print(f"signal-index: skipped ({type(e).__name__}: {e})", file=sys.stderr)
     site = Path(args.site)
     site.mkdir(parents=True, exist_ok=True)
     (site / "plan.json").write_text(json.dumps(plan, separators=(",", ":")))
-    print(f"plan: {len(plan['windows'])} windows {plan['windows']}")
+    print(f"plan: {len(plan['windows'])} windows {plan['windows']} index_now={plan.get('index_now')}")
 
     email = os.environ.get("JACKERY_EMAIL")
     if email:
