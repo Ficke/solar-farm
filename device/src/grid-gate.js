@@ -21,7 +21,7 @@ var CFG = {
   fallbackEnd: 900, // 15:00 local
   planMaxAge: 10800, // seconds a plan stays trusted
   indexMaxAge: 900, // seconds a live index reading stays trusted
-  safetyOffMax: 64800, // 18 h off forces the grid on
+  safetyOffMax: 108000, // 30 h off (a whole missed day) forces the grid on
   safetyHold: 7200 // how long a safety charge lasts
 };
 

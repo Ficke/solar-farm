@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 from planner.plan import PACIFIC, build_plan
-from planner.watttime import parse_forecast
+from planner.watttime import parse_forecast, parse_signal_index
 
 
 def forecast_from(start: datetime, values_by_hour: dict[int, float], hours: int = 24):
@@ -54,3 +54,8 @@ def test_parse_forecast():
     [(t, v)] = parse_forecast(body)
     assert t == datetime(2026, 10, 3, 17, 30, tzinfo=timezone.utc)
     assert v == 812.5
+
+
+def test_parse_signal_index():
+    body = {"data": [{"point_time": "2026-10-03T17:35:00+00:00", "value": 37.0}], "meta": {}}
+    assert parse_signal_index(body) == 37.0

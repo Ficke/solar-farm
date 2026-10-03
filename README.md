@@ -7,7 +7,7 @@ Grid-aware charging for a Jackery Explorer 3000 v2 with a 250 W panel in a San F
 - **Jackery:** Self-powered mode with the outage reserve at about 80%. The grid only charges the battery up to the reserve; the space above it is left for the panel. When the plug cuts power, the Jackery treats it as an outage and runs everything from the battery.
 - **Shelly plug** (`device/src/grid-gate.js`): a script on the plug decides every minute whether the grid is on, in this order:
   1. 4pm to 9pm Pacific: always off.
-  2. Grid off for 18 hours: on for 2 hours, so the battery can't run flat.
+  2. Grid off for 30 hours (a whole missed day): on for 2 hours, so the battery can't run flat.
   3. A plan less than 3 hours old: on inside its windows.
   4. Otherwise WattTime's live index for `CAISO_NORTH`: on at or below the 25th percentile.
   5. No internet: on from 10am to 3pm.
@@ -36,6 +36,17 @@ python tools/status.py
 ```
 
 `deploy.py` sets the plug's timezone, writes settings into the plug's key-value store (secrets never go in the repo), uploads the script in 1 KB chunks, enables it on boot and starts it.
+
+## Dashboard
+
+GitHub Pages serves a small status page at https://ficke.github.io/solar-farm/ with the upcoming grid windows and the last week of battery and solar readings.
+
+## Dry run without the plug
+
+```sh
+node device/sim.js            # what the plug would do over the next 24 h with the live plan
+node device/sim.js --stale    # same, if the plan stopped updating (fallback rules)
+```
 
 ## Development
 
