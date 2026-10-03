@@ -20,7 +20,7 @@ from planner.plan import build_plan
 
 def cmd_plan(args: argparse.Namespace) -> int:
     now = datetime.now(timezone.utc)
-    token = watttime.login(os.environ["WATTTIME_USER"], os.environ["WATTTIME_PASSWORD"])
+    token = watttime.login(os.environ["WATTTIME_USERNAME"], os.environ["WATTTIME_PASSWORD"])
     points = watttime.forecast(token, region=args.region)
     plan = build_plan(points, now, budget_hours=args.budget_hours, region=args.region)
     site = Path(args.site)

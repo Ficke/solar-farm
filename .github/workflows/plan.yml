@@ -38,7 +38,7 @@ jobs:
 
       - name: Build plan
         env:
-          WATTTIME_USER: ${{ secrets.WATTTIME_USER }}
+          WATTTIME_USERNAME: ${{ secrets.WATTTIME_USERNAME }}
           WATTTIME_PASSWORD: ${{ secrets.WATTTIME_PASSWORD }}
           JACKERY_EMAIL: ${{ secrets.JACKERY_EMAIL }}
           JACKERY_PASSWORD: ${{ secrets.JACKERY_PASSWORD }}

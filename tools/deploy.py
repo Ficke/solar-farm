@@ -60,7 +60,7 @@ class Shelly:
 
 def kvs_settings(cfg: dict) -> dict[str, str]:
     kv = {"gg.plan_url": cfg["plan_url"]}
-    user, pw = os.environ.get("WATTTIME_USER"), os.environ.get("WATTTIME_PASSWORD")
+    user, pw = os.environ.get("WATTTIME_USERNAME"), os.environ.get("WATTTIME_PASSWORD")
     if user and pw:
         kv["gg.wt_auth"] = base64.b64encode(f"{user}:{pw}".encode()).decode()
     tuning = cfg.get("tuning", {})

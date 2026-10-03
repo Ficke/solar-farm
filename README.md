@@ -18,7 +18,7 @@ Grid-aware charging for a Jackery Explorer 3000 v2 with a 250 W panel in a San F
 
 1. **WattTime:** create a free account at [watttime.org](https://watttime.org). The free plan includes full `CAISO_NORTH` data.
 2. **Jackery cloud (optional, for telemetry):** create a second Jackery account and share the power station to it from the app. Jackery allows one login at a time, so the planner must not use the account on your phone. The access is unofficial (via [socketry](https://github.com/jlopez/socketry)) and read-only; if it breaks, the plan keeps working.
-3. **Repository secrets** (Settings > Secrets and variables > Actions): `WATTTIME_USER`, `WATTTIME_PASSWORD`, and optionally `JACKERY_EMAIL`, `JACKERY_PASSWORD`, `JACKERY_SN`.
+3. **Repository secrets** (Settings > Secrets and variables > Actions): `WATTTIME_USERNAME`, `WATTTIME_PASSWORD`, and optionally `JACKERY_EMAIL`, `JACKERY_PASSWORD`, `JACKERY_SN`.
 4. **GitHub Pages:** run the Plan workflow once (Actions > Plan > Run workflow), then Settings > Pages > Deploy from branch `gh-pages`, folder `/`.
 5. **Jackery app:** Self-powered on, reserve 80%, Quiet Charging on (keeps the charge rate well under the plug's 15 A rating).
 6. **Plug:** keep it in Wi-Fi mode and note its IP address.
