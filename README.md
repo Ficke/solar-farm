@@ -49,6 +49,10 @@ bun device/sim.js            # what the plug would do over the next 24 h with th
 bun device/sim.js --stale    # same, if the plan stopped updating (fallback rules)
 ```
 
+## Google Cloud (in progress)
+
+A private live dashboard is being built on Google Cloud Run, and it will eventually replace the GitHub Pages files. All of it is defined in OpenTofu under [`infra/`](infra/README.md), which also has the one-time setup steps.
+
 ## Development
 
 Tools: [uv](https://docs.astral.sh/uv/) for Python (it installs Python 3.14 itself), [Bun](https://bun.sh) for the plug script's tests, and optionally [just](https://just.systems) for the shortcuts in `justfile`.
