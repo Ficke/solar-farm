@@ -1,0 +1,16 @@
+# Copy to config/device.toml (git-ignored) and fill in.
+
+# The plug's address on your Wi-Fi (Shelly app > device > Device information).
+host = "192.168.1.50"
+
+# Where the planner publishes the plan (GitHub Pages for this repo).
+plan_url = "https://ficke.github.io/solar-farm/plan.json"
+
+timezone = "America/Los_Angeles"
+
+# Optional overrides for the script's defaults (minutes after local midnight,
+# seconds for ages). Leave out anything you don't want to change.
+[tuning]
+threshold = 25        # live-index percentile at or below which grid is on
+peakStart = 960       # 16:00, PG&E E-TOU-C peak start
+peakEnd = 1260        # 21:00, peak end

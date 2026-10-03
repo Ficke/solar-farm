@@ -1,0 +1,8 @@
+config/device.toml
+.env
+__pycache__/
+*.egg-info/
+.pytest_cache/
+node_modules/
+.venv/
+out/
