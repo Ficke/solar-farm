@@ -28,7 +28,7 @@ function load(opts = {}) {
         return;
       }
       if (method === "Switch.Set") {
-        device.sw.output = params.on;
+        if (!opts.switchSetFails) device.sw.output = params.on;
       }
       const r = device.responses[method];
       if (cb && r) cb(typeof r === "function" ? r(params) : r, 0, "");

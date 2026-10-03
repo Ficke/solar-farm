@@ -296,10 +296,14 @@ function tick() {
   var now = nowUnix();
   if (now > 0) {
     if (S.ticks % 10 === 0) fetchPlan(now);
-    if (S.ticks % 5 === 0 && !planIsFresh(now)) fetchIndex(now);
+    // A report uses one of Shelly's two concurrent call slots, so never start
+    // both remote reads on the same tick.
+    else if (S.ticks % 5 === 0 && !planIsFresh(now)) fetchIndex(now);
     if (S.lastOnAt === 0) S.lastOnAt = now; // first boot: start the safety clock
   }
   S.ticks++;
+  var sw = Shelly.getComponentStatus("switch:0");
+  if (sw && typeof sw.output === "boolean") S.on = sw.output;
   applyDecision(decide(S, now, now > 0 ? localMinutes() : -1, CFG), now);
   if (now > 0) sendReport(now);
 }

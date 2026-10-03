@@ -7,16 +7,14 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
-import sys
 import tomllib
 from datetime import datetime
 from pathlib import Path
 
 import requests
-
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 from deploy import ROOT, SCRIPT_NAME, Shelly, load_env  # ty: ignore[unresolved-import]
 
 
@@ -25,8 +23,13 @@ def fmt(ts: int | None) -> str:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", default=str(ROOT / "config" / "device.toml"))
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args()
+
     load_env(ROOT / ".env")
-    cfg = tomllib.loads((ROOT / "config" / "device.toml").read_text())
+    cfg = tomllib.loads(Path(args.config).read_text())
     dev = Shelly(cfg["host"], os.environ.get("SHELLY_PASSWORD") or None)
 
     sw = dev.call("Switch.GetStatus", {"id": 0})
@@ -53,7 +56,7 @@ def main() -> int:
     print("Recent grid charges:")
     for s in st["sessions"][-7:]:
         print(f"  {fmt(s['start'])} to {fmt(s['end'])}  {s['wh']} Wh")
-    if "--json" in sys.argv:
+    if args.json:
         print(json.dumps(st, indent=2))
     return 0
 

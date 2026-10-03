@@ -1,6 +1,8 @@
 import base64
 import subprocess
 
+import pytest
+
 from tools import deploy
 
 
@@ -55,3 +57,45 @@ def test_dry_run_redacts_secret_values(capsys):
     output = capsys.readouterr().out
     assert "gg.wt_auth" in output
     assert "encoded-secret" not in output
+
+
+def test_read_only_calls_retry_connection_failures(monkeypatch):
+    attempts = 0
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"result": {"model": "plug"}}
+
+    def fake_post(*args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise deploy.requests.ConnectionError("offline")
+        return Response()
+
+    monkeypatch.setattr(deploy.requests, "post", fake_post)
+    monkeypatch.setattr(deploy.time, "sleep", lambda seconds: None)
+
+    result = deploy.Shelly("192.0.2.1", None).call("Shelly.GetDeviceInfo")
+
+    assert result == {"model": "plug"}
+    assert attempts == 3
+
+
+def test_deployment_verification_reports_script_failure(monkeypatch):
+    class Device(deploy.Shelly):
+        def __init__(self):
+            pass
+
+        def call(self, method: str, params: dict | None = None):
+            assert method == "Script.GetStatus"
+            assert params == {"id": 1}
+            return {"running": False, "error_msg": "Too many calls in progress"}
+
+    monkeypatch.setattr(deploy.time, "sleep", lambda seconds: None)
+
+    with pytest.raises(RuntimeError, match="Too many calls in progress"):
+        deploy.verify_script(Device(), 1)
