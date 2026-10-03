@@ -17,7 +17,7 @@ def build_plan(
     peak_hours: tuple[int, int] = (16, 21),
     region: str = "CAISO_NORTH",
 ) -> dict:
-    """Return the plan.json the Shelly script follows.
+    """Return the plan the Shelly script follows.
 
     Forecast points are averaged into fixed blocks so the relay never flips
     more often than once per block. Blocks that start inside the PG&E peak

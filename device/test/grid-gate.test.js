@@ -81,7 +81,7 @@ test("startup reads config from KVS, follows the plan and logs a charge session"
   const h = load({
     time: "11:00",
     kvs: {
-      "gg.plan_url": "https://example.github.io/solar-farm/plan.json",
+      "gg.plan_url": "https://solar-edge.example.run.app/plug/plan",
       "gg.cfg": JSON.stringify({ threshold: 30 })
     },
     responses: { "HTTP.GET": { code: 200, body: JSON.stringify(plan) } }

@@ -65,7 +65,7 @@ def plan(store: Store, sources: Sources, settings: Settings, now: datetime) -> d
 
 
 def plug_plan(store: Store) -> dict | None:
-    """The plan as the plug reads it (the same shape plan.json had)."""
+    """The plan as the plug reads it (the shape build_plan returns)."""
     p = store.get_state("plan")
     if p is None:
         return None
