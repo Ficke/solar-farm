@@ -3,6 +3,8 @@
 **/__pycache__
 **/.pytest_cache
 device/node_modules
+web/node_modules
+web/dist
 infra
 out
 .env

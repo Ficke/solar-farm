@@ -14,8 +14,6 @@ Everything in the `solar-farm-510518` project is defined here in [OpenTofu](http
 | Cloud Scheduler | `solar-collect` every 5 min, `solar-plan` at :02 and :32. |
 | Artifact Registry `solar-farm` | Server images; keeps the 5 newest. |
 
-The server code doesn't exist yet. Until it does, both services run Google's placeholder "hello" image. CI owns the image after that, and `tofu apply` leaves it alone.
-
 ## One-time setup
 
 Run everything from your local clone of this repo.
