@@ -42,8 +42,8 @@ def create_app(
         separate_input_output_schemas=False,
     )
 
-    @app.get("/healthz")
-    def healthz() -> dict:
+    @app.get("/health")
+    def health() -> dict:
         return {"ok": True, "role": settings.role}
 
     if settings.role == "edge":

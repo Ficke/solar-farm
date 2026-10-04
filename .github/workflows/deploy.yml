@@ -3,7 +3,7 @@ name: Deploy
 # Builds the server image and rolls it out to both Cloud Run services on
 # every push to main that changes the server, the planner or the dashboard.
 # CI runs first on the same commit. After the rollout the public service's
-# /healthz must answer, or both services go back to the revisions they were
+# /health must answer, or both services go back to the revisions they were
 # serving before.
 on:
   push:
@@ -73,12 +73,13 @@ jobs:
             gcloud run services update-traffic "$svc" --region "$REGION" --to-latest --quiet
           done
       # solar-web sits behind IAP, so only solar-edge can be probed from here.
-      # Both run the same image.
+      # Both run the same image. Not /healthz: Cloud Run's front end reserves
+      # paths ending in z and answers them with its own 404.
       - name: Smoke test
         run: |
           set -o pipefail
           url=$(gcloud run services describe solar-edge --region "$REGION" --format='value(status.url)')
-          curl -fsS --retry 6 --retry-all-errors --retry-delay 5 --max-time 10 "$url/healthz" \
+          curl -fsS --retry 6 --retry-all-errors --retry-delay 5 --max-time 10 "$url/health" \
             | tee /dev/stderr | jq -e '.ok == true and .role == "edge"' >/dev/null
       - name: Roll back
         if: failure() && steps.before.outcome == 'success'
