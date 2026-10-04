@@ -3,9 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "check": "svelte-check --tsconfig ./tsconfig.json && biome check .",
+    "gen": "openapi-typescript openapi.json -o src/lib/schema.d.ts --silent",
+    "dev": "bun run gen && vite",
+    "build": "bun run gen && vite build",
+    "check": "bun run gen && svelte-check --tsconfig ./tsconfig.json && biome check .",
     "fmt": "biome check --write ."
   },
   "dependencies": {
@@ -15,6 +16,7 @@
     "@biomejs/biome": "^2.5.15",
     "@sveltejs/vite-plugin-svelte": "^7.3.1",
     "@tsconfig/svelte": "^5.0.8",
+    "openapi-typescript": "^7.13.0",
     "svelte": "^5.57.1",
     "svelte-check": "^4.7.6",
     "typescript": "^6.0.0",

@@ -9,7 +9,8 @@ from planner.plan import PACIFIC, build_plan
 
 from solar_server.config import Settings
 from solar_server.sources import Sources
-from solar_server.store import FORECASTS, MIX, PLANS, SAMPLES, Store
+from solar_server.store import FORECASTS, MIX, PLANS, PLUG, SAMPLES, Store, day_key
+from solar_server.views import integrate_wh
 
 log = logging.getLogger(__name__)
 
@@ -50,9 +51,49 @@ def collect(store: Store, sources: Sources, now: datetime) -> dict:
     except Exception as e:  # unofficial API: never let it block the rest
         log.warning("jackery failed: %s", e)
     if len(sample) > 1:
-        store.append(SAMPLES, sample)
+        record_sample(store, sample)
     store_mix(store, sources, now, since=t - 3600)
     return sample
+
+
+def record_sample(store: Store, sample: dict) -> None:
+    """Keep the sample, and the latest one with today's solar total for /api/now."""
+    today = _today(store, SAMPLES, "solar_w", store.get_state("sample"), sample)
+    store.append(SAMPLES, sample)
+    store.put_state("sample", {"sample": sample, "today": today})
+
+
+def record_plug(store: Store, report: dict) -> None:
+    """Keep the report, and the latest one with today's grid total for /api/now."""
+    today = _today(store, PLUG, "w", store.get_state("plug"), report)
+    store.append(PLUG, report)
+    store.put_state("plug", {"report": report, "today": today})
+
+
+def _today(store: Store, series: str, key: str, state: dict | None, item: dict) -> dict:
+    """Today's energy from ``key`` watts so far, carried on from the last state.
+
+    The first time, when there is no state yet, it counts what's already stored.
+    """
+    day = day_key(item["t"])
+    last: tuple[int, float] | None = None
+    if state is None:
+        stored = store.day(series, day)
+        points = sorted((i["t"], float(i[key])) for i in stored if i.get(key) is not None)
+        wh, last = integrate_wh(points), (points[-1] if points else None)
+    elif state["today"]["day"] == day:
+        wh = state["today"]["wh"]
+        if state["today"]["last"]:
+            t, w = state["today"]["last"]
+            last = (int(t), float(w))
+    else:
+        wh = 0.0
+    if item.get(key) is not None and (last is None or item["t"] > last[0]):
+        point = (int(item["t"]), float(item[key]))
+        if last is not None:
+            wh += integrate_wh([last, point])
+        last = point
+    return {"day": day, "wh": wh, "last": list(last) if last else None}
 
 
 def store_mix(store: Store, sources: Sources, now: datetime, since: int) -> None:

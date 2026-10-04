@@ -15,6 +15,15 @@ check:
     cd device && bun test
     cd web && bun run check
 
+# Test the Firestore store against the emulator (needs Java 21+ and Node)
+test-firestore:
+    npx -y firebase-tools@15 emulators:exec --only firestore --project demo-solar-farm \
+        "uv run pytest -q server/tests/test_firestore.py"
+
+# Save the dashboard API's schema; the dashboard's types are generated from it
+api:
+    uv run python -m solar_server.openapi > web/openapi.json
+
 # Format Python and the dashboard and apply safe lint fixes
 fmt:
     uv run ruff format .

@@ -1,0 +1,898 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Solar Farm",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/healthz": {
+      "get": {
+        "summary": "Healthz",
+        "operationId": "healthz_healthz_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Healthz Healthz Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/now": {
+      "get": {
+        "summary": "Api Now",
+        "operationId": "api_now_api_now_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Now"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/timeline": {
+      "get": {
+        "summary": "Api Timeline",
+        "operationId": "api_timeline_api_timeline_get",
+        "parameters": [
+          {
+            "name": "past_hours",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 168,
+              "minimum": 1,
+              "default": 24,
+              "title": "Past Hours"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Timeline"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/accuracy": {
+      "get": {
+        "summary": "Api Accuracy",
+        "operationId": "api_accuracy_api_accuracy_get",
+        "parameters": [
+          {
+            "name": "lead_hours",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 23,
+              "minimum": 1,
+              "default": 6,
+              "title": "Lead Hours"
+            }
+          },
+          {
+            "name": "past_hours",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 168,
+              "minimum": 1,
+              "default": 24,
+              "title": "Past Hours"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Accuracy"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daily": {
+      "get": {
+        "summary": "Api Daily",
+        "operationId": "api_daily_api_daily_get",
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 60,
+              "minimum": 1,
+              "default": 14,
+              "title": "Days"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Daily"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Accuracy": {
+        "properties": {
+          "lead_hours": {
+            "type": "integer",
+            "title": "Lead Hours"
+          },
+          "points": {
+            "items": {
+              "prefixItems": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              ],
+              "type": "array",
+              "maxItems": 3,
+              "minItems": 3
+            },
+            "type": "array",
+            "title": "Points"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "compared": {
+            "type": "integer",
+            "title": "Compared"
+          }
+        },
+        "type": "object",
+        "required": [
+          "lead_hours",
+          "points",
+          "error",
+          "compared"
+        ],
+        "title": "Accuracy"
+      },
+      "Daily": {
+        "properties": {
+          "days": {
+            "items": {
+              "$ref": "#/components/schemas/Day"
+            },
+            "type": "array",
+            "title": "Days"
+          },
+          "reserve": {
+            "$ref": "#/components/schemas/Reserve"
+          }
+        },
+        "type": "object",
+        "required": [
+          "days",
+          "reserve"
+        ],
+        "title": "Daily"
+      },
+      "Day": {
+        "properties": {
+          "day": {
+            "type": "string",
+            "title": "Day"
+          },
+          "solar_wh": {
+            "type": "integer",
+            "title": "Solar Wh"
+          },
+          "grid_wh": {
+            "type": "integer",
+            "title": "Grid Wh"
+          },
+          "battery_peak_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Battery Peak Pct"
+          }
+        },
+        "type": "object",
+        "required": [
+          "day",
+          "solar_wh",
+          "grid_wh",
+          "battery_peak_pct"
+        ],
+        "title": "Day"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "MixRow": {
+        "properties": {
+          "t": {
+            "type": "integer",
+            "title": "T"
+          },
+          "solar": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Solar"
+          },
+          "wind": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wind"
+          },
+          "geothermal": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Geothermal"
+          },
+          "biomass": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Biomass"
+          },
+          "biogas": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Biogas"
+          },
+          "small_hydro": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Small Hydro"
+          },
+          "coal": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coal"
+          },
+          "nuclear": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nuclear"
+          },
+          "gas": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gas"
+          },
+          "large_hydro": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Large Hydro"
+          },
+          "batteries": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batteries"
+          },
+          "imports": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Imports"
+          },
+          "other": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Other"
+          }
+        },
+        "type": "object",
+        "required": [
+          "t"
+        ],
+        "title": "MixRow",
+        "description": "CAISO generation by fuel, MW. Batteries are negative while charging."
+      },
+      "Now": {
+        "properties": {
+          "now": {
+            "type": "integer",
+            "title": "Now"
+          },
+          "sample": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Sample"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "plug": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StoredPlugReport"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "today": {
+            "$ref": "#/components/schemas/Today"
+          },
+          "plan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlanSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "now",
+          "sample",
+          "plug",
+          "today",
+          "plan"
+        ],
+        "title": "Now"
+      },
+      "PlanSummary": {
+        "properties": {
+          "generated_at": {
+            "type": "integer",
+            "title": "Generated At"
+          },
+          "windows": {
+            "items": {
+              "$ref": "#/components/schemas/Window"
+            },
+            "type": "array",
+            "title": "Windows"
+          },
+          "index_now": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Index Now"
+          }
+        },
+        "type": "object",
+        "required": [
+          "generated_at",
+          "windows"
+        ],
+        "title": "PlanSummary"
+      },
+      "Reserve": {
+        "properties": {
+          "reserve_pct": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reserve Pct"
+          },
+          "good_day_wh": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Good Day Wh"
+          },
+          "days": {
+            "type": "integer",
+            "title": "Days"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reserve_pct",
+          "days"
+        ],
+        "title": "Reserve"
+      },
+      "Sample": {
+        "properties": {
+          "t": {
+            "type": "integer",
+            "title": "T"
+          },
+          "battery_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Battery Pct"
+          },
+          "solar_w": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Solar W"
+          },
+          "ac_input_w": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ac Input W"
+          },
+          "output_w": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output W"
+          },
+          "moer": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Moer"
+          },
+          "moer_t": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Moer T"
+          },
+          "index": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Index"
+          }
+        },
+        "type": "object",
+        "required": [
+          "t"
+        ],
+        "title": "Sample",
+        "description": "Every 5 minutes: the Jackery and WattTime."
+      },
+      "StoredPlugReport": {
+        "properties": {
+          "t": {
+            "type": "integer",
+            "title": "T"
+          },
+          "on": {
+            "type": "boolean",
+            "title": "On"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "w": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "W"
+          },
+          "wh": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wh"
+          },
+          "index": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Index"
+          },
+          "plan_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan At"
+          },
+          "received": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Received"
+          }
+        },
+        "type": "object",
+        "required": [
+          "t",
+          "on",
+          "reason"
+        ],
+        "title": "StoredPlugReport"
+      },
+      "Timeline": {
+        "properties": {
+          "now": {
+            "type": "integer",
+            "title": "Now"
+          },
+          "since": {
+            "type": "integer",
+            "title": "Since"
+          },
+          "samples": {
+            "items": {
+              "$ref": "#/components/schemas/Sample"
+            },
+            "type": "array",
+            "title": "Samples"
+          },
+          "plug": {
+            "items": {
+              "$ref": "#/components/schemas/StoredPlugReport"
+            },
+            "type": "array",
+            "title": "Plug"
+          },
+          "forecast": {
+            "items": {
+              "prefixItems": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array",
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": "array",
+            "title": "Forecast"
+          },
+          "mix": {
+            "items": {
+              "$ref": "#/components/schemas/MixRow"
+            },
+            "type": "array",
+            "title": "Mix"
+          },
+          "windows": {
+            "items": {
+              "$ref": "#/components/schemas/Window"
+            },
+            "type": "array",
+            "title": "Windows"
+          }
+        },
+        "type": "object",
+        "required": [
+          "now",
+          "since",
+          "samples",
+          "plug",
+          "forecast",
+          "mix",
+          "windows"
+        ],
+        "title": "Timeline"
+      },
+      "Today": {
+        "properties": {
+          "solar_wh": {
+            "type": "integer",
+            "title": "Solar Wh"
+          },
+          "grid_wh": {
+            "type": "integer",
+            "title": "Grid Wh"
+          }
+        },
+        "type": "object",
+        "required": [
+          "solar_wh",
+          "grid_wh"
+        ],
+        "title": "Today"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "Window": {
+        "prefixItems": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "integer"
+          }
+        ],
+        "type": "array",
+        "maxItems": 2,
+        "minItems": 2
+      }
+    }
+  }
+}

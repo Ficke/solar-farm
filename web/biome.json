@@ -1,6 +1,8 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
-  "files": { "includes": ["src/**", "*.ts", "*.json", "!dist"] },
+  "files": {
+    "includes": ["src/**", "*.ts", "*.json", "!dist", "!openapi.json", "!src/lib/schema.d.ts"]
+  },
   "formatter": { "indentStyle": "space", "lineWidth": 100 },
   "linter": { "enabled": true, "rules": { "preset": "recommended" } },
   "html": { "formatter": { "enabled": true, "indentScriptAndStyle": true } },

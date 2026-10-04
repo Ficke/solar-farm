@@ -1,84 +1,30 @@
-// Shapes returned by solar-web (server/solar_server/views.py).
+// Shapes returned by solar-web, generated from openapi.json (server/solar_server/schema.py).
+import type { components, paths } from "./schema";
 
-export interface Sample {
-  t: number;
-  battery_pct?: number;
-  solar_w?: number;
-  ac_input_w?: number;
-  output_w?: number;
-  moer?: number; // WattTime's actual marginal CO2, lb/MWh
-  moer_t?: number;
-  index?: number; // 0-100 percentile of the past month, lower is cleaner
-}
+type Schemas = components["schemas"];
+export type Sample = Schemas["Sample"];
+export type PlugReport = Schemas["StoredPlugReport"];
+export type MixRow = Schemas["MixRow"];
+export type Window = Schemas["Window"];
+export type Now = Schemas["Now"];
+export type Timeline = Schemas["Timeline"];
+export type Accuracy = Schemas["Accuracy"];
+export type Daily = Schemas["Daily"];
 
-export interface PlugReport {
-  t: number;
-  on: boolean;
-  reason: string;
-  w?: number | null;
-  index?: number | null;
-  plan_at?: number | null;
-}
+type Path = keyof paths;
+type Query<P extends Path> = paths[P]["get"]["parameters"]["query"];
+type Response<P extends Path> = paths[P]["get"]["responses"][200]["content"]["application/json"];
 
-export type Window = [number, number];
-
-export interface Now {
-  now: number;
-  sample: Sample | null;
-  plug: PlugReport | null;
-  today: { solar_wh: number; grid_wh: number };
-  plan: { generated_at: number; windows: Window[]; index_now?: number } | null;
-}
-
-export interface Timeline {
-  now: number;
-  since: number;
-  samples: Sample[];
-  plug: PlugReport[];
-  forecast: [number, number][];
-  mix: MixRow[];
-  windows: Window[];
-}
-
-/** CAISO generation by fuel, MW. Batteries are negative while charging. */
-export interface MixRow {
-  t: number;
-  solar: number | null;
-  wind: number | null;
-  geothermal: number | null;
-  biomass: number | null;
-  biogas: number | null;
-  small_hydro: number | null;
-  coal: number | null;
-  nuclear: number | null;
-  gas: number | null;
-  large_hydro: number | null;
-  batteries: number | null;
-  imports: number | null;
-  other: number | null;
-}
-
-export interface Accuracy {
-  lead_hours: number;
-  points: [number, number, number | null][]; // [t, actual, forecast made lead_hours earlier]
-  error: number | null;
-  compared: number;
-}
-
-export interface Daily {
-  days: { day: string; solar_wh: number; grid_wh: number; battery_peak_pct: number | null }[];
-  reserve: { reserve_pct: number | null; good_day_wh?: number; days: number };
-}
-
-async function get<T>(path: string): Promise<T> {
-  const r = await fetch(path, { headers: { accept: "application/json" } });
+async function get<P extends Path>(path: P, query?: Query<P>): Promise<Response<P>> {
+  const qs = query ? `?${new URLSearchParams(query as Record<string, string>)}` : "";
+  const r = await fetch(path + qs, { headers: { accept: "application/json" } });
   if (!r.ok) throw new Error(`${path}: ${r.status}`);
-  return (await r.json()) as T;
+  return (await r.json()) as Response<P>;
 }
 
 export const api = {
-  now: () => get<Now>("/api/now"),
-  timeline: (pastHours = 24) => get<Timeline>(`/api/timeline?past_hours=${pastHours}`),
-  daily: (days = 14) => get<Daily>(`/api/daily?days=${days}`),
-  accuracy: (leadHours: number) => get<Accuracy>(`/api/accuracy?lead_hours=${leadHours}`),
+  now: () => get("/api/now"),
+  timeline: (pastHours = 24) => get("/api/timeline", { past_hours: pastHours }),
+  daily: (days = 14) => get("/api/daily", { days }),
+  accuracy: (leadHours: number) => get("/api/accuracy", { lead_hours: leadHours }),
 };
