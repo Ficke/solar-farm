@@ -171,7 +171,6 @@
           <span class="key" style:background={p.avoided_lb < 0 ? "var(--bad)" : "var(--good)"}></span>
           <strong>{fmtLb(p.avoided_lb)} lb</strong><span class="name">CO₂ avoided</span>
         </div>
-        <div class="sub">{fmtLb(p.load_lb)} lb without the battery, {fmtLb(p.grid_lb)} lb with it</div>
       {:else}
         <div class="name">No readings</div>
       {/if}
@@ -264,10 +263,6 @@
   }
   .name {
     color: var(--ink-3);
-  }
-  .sub {
-    color: var(--ink-3);
-    margin-top: 2px;
   }
   .key {
     width: 10px;

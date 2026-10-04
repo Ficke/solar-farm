@@ -2,10 +2,10 @@ import type { PlugReport } from "./api";
 
 const REASONS: Record<string, string> = {
   peak: "Peak hours, 4–9 PM",
-  safety: "Safety charge after 30 hours off",
-  index: "No current plan, following the live index",
-  fallback: "Offline, using 10 AM–3 PM",
-  "no-time": "Plug clock not set yet",
+  safety: "Safety charge",
+  index: "Following live CO₂ index",
+  fallback: "Offline schedule, 10 AM–3 PM",
+  "no-time": "Plug clock not set",
   start: "Plug starting",
 };
 
