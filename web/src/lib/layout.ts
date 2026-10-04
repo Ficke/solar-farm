@@ -16,3 +16,21 @@ export function hourTicks(from: number, to: number, width: number): number[] {
   }
   return out;
 }
+
+/**
+ * Ticks for any span, on whole local quarter hours or hours, at least
+ * `gap` px apart. Used once a chart is zoomed in.
+ */
+export function timeTicks(from: number, to: number, width: number, gap = 72): number[] {
+  const steps = [5, 10, 15, 30, 60, 120, 180, 360, 720];
+  const fit = (to - from) / 60 / Math.max(1, width / gap);
+  const step = steps.find((s) => s >= fit) ?? 1440;
+  const out: number[] = [];
+  for (let t = from - (from % 300) + 300; t <= to; t += 300) {
+    if (localMinutes(t) % step === 0) out.push(t);
+  }
+  return out;
+}
+
+/** The narrowest span a chart zooms to, in seconds. */
+export const MIN_SPAN = 15 * 60;

@@ -5,12 +5,18 @@
   //
   // The plot is built once and updated in place: new data, a new time range
   // or a new size never recreate it, so hovering survives a refresh. Only a
-  // change of series, height or theme rebuilds it.
+  // change of series or theme rebuilds it.
+  //
+  // With a `title` the chart gets an expand button that opens it full screen
+  // (ChartDialog), where `mode` is "expanded": dragging across it with a mouse
+  // zooms to that span (`view`, reported through `onview`), and a double click
+  // zooms back out. "overview" is the small whole-range chart under it.
   import { untrack } from "svelte";
   import uPlot from "uplot";
   import type { Window } from "./api";
+  import ChartDialog from "./ChartDialog.svelte";
   import { hover } from "./hover.svelte";
-  import { AXIS_W, hourTicks, PAD_R } from "./layout";
+  import { AXIS_W, hourTicks, MIN_SPAN, PAD_R, timeTicks } from "./layout";
   import Tooltip, { type TipRow } from "./Tooltip.svelte";
   import { theme } from "./theme.svelte";
   import { fmtClock, fmtDayClock, fmtWeekday, localMinutes, peakWindows } from "./time";
@@ -42,6 +48,10 @@
     label,
     tipData,
     shade = true,
+    title,
+    mode = "inline",
+    view,
+    onview,
   }: {
     data: (number | null | undefined)[][];
     series: Series[];
@@ -57,10 +67,24 @@
     tipData?: (number | null | undefined)[][];
     /** Paint the peak and plan bands behind the series. */
     shade?: boolean;
+    /** Heading in full screen; charts without one have no expand button. */
+    title?: string;
+    mode?: "inline" | "expanded" | "overview";
+    /** The visible time span when zoomed in; [from, to] otherwise. */
+    view?: [number, number];
+    onview?: (span: [number, number]) => void;
   } = $props();
+
+  const lo = $derived(view?.[0] ?? from);
+  const hi = $derived(view?.[1] ?? to);
+  const zoomed = $derived(hi - lo < to - from);
+  let open = $state(false);
 
   let el: HTMLDivElement;
   let width = $state(600);
+  // Expanded, the chart fills whatever height its box is given.
+  let boxH = $state(0);
+  const plotH = $derived(mode === "expanded" ? Math.max(160, boxH) : height);
   let tip = $state<{ x: number; y: number; t: number; values: (number | null)[] } | null>(null);
   let hovering = false;
 
@@ -75,8 +99,8 @@
     const paint = (spans: [number, number][], color: string) => {
       ctx.fillStyle = color;
       for (const [s, e] of spans) {
-        const x0 = u.valToPos(Math.max(s, from), "x", true);
-        const x1 = u.valToPos(Math.min(e, to), "x", true);
+        const x0 = u.valToPos(Math.max(s, lo), "x", true);
+        const x1 = u.valToPos(Math.min(e, hi), "x", true);
         if (x1 > x0) ctx.fillRect(x0, u.bbox.top, x1 - x0, u.bbox.height);
       }
     };
@@ -97,13 +121,15 @@
       ctx.moveTo(x, u.bbox.top);
       ctx.lineTo(x, u.bbox.top + u.bbox.height);
       ctx.stroke();
-      ctx.fillStyle = css("--ink-2");
-      ctx.font = `500 ${11 * dpr}px ${css("--f-sans")}`;
-      ctx.textAlign = "left";
-      ctx.textBaseline = "top";
-      ctx.fillText("Now", x + 4 * dpr, u.bbox.top + 2 * dpr);
+      if (mode !== "overview") {
+        ctx.fillStyle = css("--ink-2");
+        ctx.font = `500 ${11 * dpr}px ${css("--f-sans")}`;
+        ctx.textAlign = "left";
+        ctx.textBaseline = "top";
+        ctx.fillText("Now", x + 4 * dpr, u.bbox.top + 2 * dpr);
+      }
     }
-    if (yRule) {
+    if (yRule && mode !== "overview") {
       const y = Math.round(u.valToPos(yRule.value, "y", true));
       ctx.strokeStyle = css("--ink-3");
       ctx.lineWidth = dpr;
@@ -174,30 +200,56 @@
     };
   }
 
-  function opts(w: number): uPlot.Options {
+  // A mouse drag across the expanded chart zooms to it; the selection box
+  // is cleared at once since the zoom itself shows the result.
+  function select(u: uPlot) {
+    const { left, width: w } = u.select;
+    if (w > 4) {
+      const a = u.posToVal(left, "x");
+      const b = u.posToVal(left + w, "x");
+      onview?.([a, Math.max(b, a + MIN_SPAN)]);
+    }
+    if (w > 0) u.setSelect({ left: 0, top: 0, width: 0, height: 0 }, false);
+  }
+
+  const fit = () => mode === "expanded" && zoomed && !series.some((s) => s.fill || s.area);
+
+  function opts(w: number, h: number): uPlot.Options {
     const axis = {
       stroke: css("--ink-3"),
       grid: { stroke: css("--rule"), width: 1 },
       ticks: { show: false },
       font: `11px ${css("--f-sans")}`,
     };
+    const mini = mode === "overview";
     return {
       width: w,
-      height,
-      cursor: {
-        sync: { key: "timeline" },
-        y: false,
-        points: { size: 8, width: 2, fill: css("--panel") },
-      },
+      height: h,
+      cursor: mini
+        ? { show: false }
+        : {
+            // Only the dashboard's own charts follow each other.
+            sync: mode === "inline" ? { key: "timeline" } : undefined,
+            y: false,
+            points: { size: 8, width: 2, fill: css("--panel") },
+            drag: { x: mode === "expanded", y: false, setScale: false },
+            bind: { dblclick: () => () => null },
+          },
       legend: { show: false },
       padding: [6, PAD_R, 0, 0],
       scales: {
-        x: { time: true, range: () => [from, to] },
+        x: { time: true, range: () => [lo, hi] },
         // A fixed floor and a fallback ceiling keep the y-axis, and with it
         // the time axis, in place when a chart has no data yet.
+        // Zoomed in, line charts fit the visible values; areas keep their zero.
         y: {
-          range: (_u, _min, max) =>
-            yMax != null ? [0, yMax] : uPlot.rangeNum(0, max ?? 1, 0.1, true),
+          range: (_u, min, max) => {
+            if (fit() && min != null && max != null) {
+              const [a, b] = uPlot.rangeNum(min, max, 0.1, true);
+              return [Math.max(0, a ?? 0), yMax != null ? Math.min(yMax, b ?? yMax) : b];
+            }
+            return yMax != null ? [0, yMax] : uPlot.rangeNum(0, max ?? 1, 0.1, true);
+          },
         },
       },
       axes: [
@@ -205,10 +257,11 @@
           ...axis,
           grid: { show: false },
           size: 28,
-          splits: (u) => hourTicks(from, to, u.width),
+          splits: (u) => (zoomed ? timeTicks(lo, hi, u.width) : hourTicks(lo, hi, u.width)),
           values: (_u, ticks) => ticks.map(tickLabel),
         },
-        { ...axis, size: AXIS_W },
+        // The overview keeps the y-axis gutter blank so its time axis lines up.
+        { ...axis, size: AXIS_W, ...(mini && { values: () => [], grid: { show: false } }) },
       ],
       series: [
         {},
@@ -218,22 +271,30 @@
           stroke: s.ramp ? rampStroke(s.ramp) : s.area ? css("--bg") : css(s.color),
           fill: s.fill ? css(s.fill) : undefined,
           dash: s.dash,
-          width: s.width ?? (s.area ? 1 : 2),
+          width: mini ? 1 : (s.width ?? (s.area ? 1 : 2)),
           spanGaps: false,
           points: { show: false },
         })),
       ],
-      hooks: { drawClear: [bands], draw: [overlays], setCursor: [setCursor] },
+      hooks: {
+        drawClear: [bands],
+        draw: [overlays],
+        setCursor: [setCursor],
+        setSelect: [select],
+      },
     };
   }
 
   let plot: uPlot | undefined;
   // Everything that shapes the plot itself; when this changes it is rebuilt.
-  const shape = $derived(JSON.stringify([series, height, yMax, theme.version]));
+  const shape = $derived(JSON.stringify([series, yMax, mode, theme.version]));
 
   $effect(() => {
     shape;
-    const u = untrack(() => new uPlot(opts(width), data as unknown as uPlot.AlignedData, el));
+    const u = untrack(
+      () => new uPlot(opts(width, plotH), data as unknown as uPlot.AlignedData, el),
+    );
+    u.over.addEventListener("dblclick", () => onview?.([from, to]));
     u.over.addEventListener("mouseenter", () => (hovering = true));
     u.over.addEventListener("mouseleave", () => {
       hovering = false;
@@ -247,17 +308,20 @@
     };
   });
 
-  // New readings or a moved time axis: same plot, new data and scales.
+  // New readings, a moved time axis or a new zoom: same plot, new data and scales.
   $effect(() => {
     const d = data as unknown as uPlot.AlignedData;
-    from;
-    to;
+    lo;
+    hi;
     untrack(() => plot?.setData(d));
   });
 
   $effect(() => {
-    const w = width;
-    untrack(() => plot && plot.width !== w && plot.setSize({ width: w, height }));
+    const [w, h] = [width, plotH];
+    untrack(
+      () =>
+        plot && (plot.width !== w || plot.height !== h) && plot.setSize({ width: w, height: h }),
+    );
   });
 
   // The now line, bands and target rule are drawn in hooks; repaint when they move.
@@ -289,40 +353,57 @@
     });
 </script>
 
-<figure aria-label={label}>
-  <ul class="legend">
-    {#each series as s (s.label)}
-      <li>
-        {#if s.area}
-          <span class="swatch" style:background="var({s.color})"></span>
-        {:else if s.ramp}
-          <span
-            class="ramp"
-            class:dash={s.dash}
-            style:background="linear-gradient(90deg, {s.ramp.map(([, c]) => `var(${c})`).join(', ')})"
-          ></span>
-        {:else}
-        <svg width="18" height="8" aria-hidden="true"
-          ><line
-            x1="1"
-            x2="17"
-            y1="4"
-            y2="4"
-            stroke="var({s.color})"
-            stroke-width={s.width ?? 2}
-            stroke-dasharray={s.dash?.join(" ")}
-          /></svg
+<figure aria-label={label} class={mode}>
+  {#if mode !== "overview"}
+    <div class="top">
+      <ul class="legend">
+        {#each series as s (s.label)}
+          <li>
+            {#if s.area}
+              <span class="swatch" style:background="var({s.color})"></span>
+            {:else if s.ramp}
+              <span
+                class="ramp"
+                class:dash={s.dash}
+                style:background="linear-gradient(90deg, {s.ramp.map(([, c]) => `var(${c})`).join(', ')})"
+              ></span>
+            {:else}
+            <svg width="18" height="8" aria-hidden="true"
+              ><line
+                x1="1"
+                x2="17"
+                y1="4"
+                y2="4"
+                stroke="var({s.color})"
+                stroke-width={s.width ?? 2}
+                stroke-dasharray={s.dash?.join(" ")}
+              /></svg
+            >
+            {/if}{s.label}
+          </li>
+        {/each}
+      </ul>
+      {#if title && mode === "inline"}
+        <button
+          type="button"
+          class="expand"
+          aria-label="Expand {title}"
+          title="Expand"
+          onclick={() => (open = true)}
         >
-        {/if}{s.label}
-      </li>
-    {/each}
-  </ul>
-  <div class="chart" bind:this={el} bind:clientWidth={width}>
+          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"
+            ><path d="M8.5 1.5h4v4M12.5 1.5 8 6M5.5 12.5h-4v-4M1.5 12.5 6 8" /></svg
+          >
+        </button>
+      {/if}
+    </div>
+  {/if}
+  <div class="chart" bind:this={el} bind:clientWidth={width} bind:clientHeight={boxH}>
     {#if tip}
       {@const t = tip}
       <Tooltip
         x={t.x}
-        y={Math.min(t.y, height - 90)}
+        y={Math.max(0, Math.min(t.y, plotH - 40 - 22 * series.length))}
         flip={t.x > width - 200}
         title={fmtDayClock(t.t)}
         rows={tipRows(t.values)}
@@ -331,14 +412,29 @@
   </div>
 </figure>
 
+{#if open && title}
+  <ChartDialog
+    {title}
+    chart={{ data, series, from, to, now, windows, yMax, yRule, label, tipData, shade }}
+    onclose={() => (open = false)}
+  />
+{/if}
+
 <style>
   figure {
     margin: 0;
     min-width: 0;
   }
-  .legend {
-    list-style: none;
+  .top {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
     margin: 0 0 6px;
+  }
+  .legend {
+    flex: 1;
+    list-style: none;
+    margin: 0;
     padding: 0;
     display: flex;
     flex-wrap: wrap;
@@ -362,6 +458,51 @@
   .chart {
     position: relative;
     min-width: 0;
+  }
+  .expand {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    margin: -7px -6px -7px 0;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--ink-3);
+    cursor: pointer;
+  }
+  .expand:hover {
+    color: var(--ink);
+    background: var(--panel-2);
+  }
+  .expand:focus-visible {
+    outline: 2px solid var(--grid);
+    outline-offset: 1px;
+  }
+  .expand path {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .expanded :global(.u-select) {
+    background: color-mix(in srgb, var(--ink) 10%, transparent);
+  }
+  figure.expanded {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+  .expanded .chart {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .expanded :global(.u-over) {
+    cursor: crosshair;
   }
   .swatch {
     width: 10px;

@@ -235,6 +235,7 @@
     </div>
     <TimeChart
       label="Marginal CO2, past 24 hours and forecast"
+      title="CO₂, lb/MWh"
       data={emissionsData}
       {from}
       {to}
@@ -256,6 +257,7 @@
     <h3>Generation by source, GW</h3>
     <TimeChart
       label="CAISO generation by source, past 24 hours"
+      title="Generation by source, GW"
       data={mix.stacked}
       tipData={mix.raw}
       shade={false}
@@ -280,6 +282,7 @@
     <h3>Charge, %</h3>
     <TimeChart
       label="Battery charge, past 24 hours"
+      title="Charge, %"
       data={batteryData}
       {from}
       {to}
@@ -293,6 +296,7 @@
     <h3>Power, W</h3>
     <TimeChart
       label="Solar and grid power in and load out, past 24 hours"
+      title="Power, W"
       data={powerData}
       {from}
       {to}
