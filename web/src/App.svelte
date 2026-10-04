@@ -20,7 +20,6 @@
   let co2 = $state<Co2>();
   let by = $state<Period>("day");
   let error = $state("");
-  let loadedAt = $state(0);
   let clock = $state(Date.now() / 1000);
 
   async function load(what: "now" | "charts" | "all") {
@@ -33,7 +32,7 @@
       }
       await Promise.all(jobs);
       error = "";
-      loadedAt = Date.now() / 1000;
+      tick();
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     }
@@ -49,6 +48,8 @@
     co2 = await api.co2(p, COUNTS[p]);
   }
 
+  const tick = () => (clock = Date.now() / 1000);
+
   onMount(() => {
     load("all");
     // Hidden tabs don't poll; they catch up when shown again.
@@ -59,9 +60,12 @@
       // read many documents, so they refresh less often.
       setInterval(() => visible() && load("charts"), 60_000),
       setInterval(() => visible() && load("all"), 15 * 60_000),
-      setInterval(() => (clock = Date.now() / 1000), 5_000),
+      setInterval(tick, 1_000),
     ];
-    const wake = () => visible() && load("all");
+    const wake = () => {
+      tick();
+      if (visible()) load("all");
+    };
     document.addEventListener("visibilitychange", wake);
     return () => {
       timers.forEach(clearInterval);
@@ -127,13 +131,11 @@
 <main>
   <header>
     <h1>Solar Farm</h1>
-    <p class="sub">
-      {#if stale.length}
+    {#if stale.length}
+      <p class="sub">
         <span class="dot bad"></span>No data from {stale.map((h) => h.name.toLowerCase()).join(", ")}
-      {:else if loadedAt}
-        <span class="dot ok"></span>Updated {ago(clock - loadedAt)}
-      {/if}
-    </p>
+      </p>
+    {/if}
   </header>
 
   {#if error}
@@ -329,9 +331,6 @@
     width: 8px;
     height: 8px;
     border-radius: 50%;
-  }
-  .dot.ok {
-    background: var(--good);
   }
   .dot.bad {
     background: var(--bad);
