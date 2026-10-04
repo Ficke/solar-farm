@@ -63,7 +63,7 @@ The dashboard and the plug's server run on Google Cloud Run. All of it is define
 - **solar-edge** (public) serves the plug, which reads `/plug/plan` and posts `/plug/report` each minute with its `X-Plug-Key`. It also serves Cloud Scheduler: `/tasks/collect` every 5 minutes records Jackery, WattTime and CAISO readings in Firestore, and `/tasks/plan` every 30 minutes builds the plan.
 - **solar-web** (behind Google sign-in) serves the dashboard from `web/` and its API: `/api/now`, `/api/timeline`, `/api/accuracy` and `/api/daily`.
 
-The Deploy workflow builds the image and rolls it out on every merge to `main`.
+The Deploy workflow runs CI, builds the image and rolls it out on every merge to `main`. If solar-edge's `/healthz` doesn't answer afterwards, both services go back to the revisions they were serving before. [Renovate](https://docs.renovatebot.com) opens one grouped update PR a week (`renovate.json`), with GitHub Actions pinned to commit SHAs.
 
 ## Development
 
