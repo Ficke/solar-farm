@@ -18,27 +18,26 @@ def integrate_wh(points: list[tuple[int, float]]) -> float:
     return wh
 
 
-def _series(items: list[dict], key: str) -> list[tuple[int, float]]:
-    return [(i["t"], float(i[key])) for i in items if i.get(key) is not None]
-
-
 def now_view(store: Store, now: int) -> dict:
-    samples = window(store, SAMPLES, now - 2 * 3600, now)
-    reports = window(store, PLUG, now - 3600, now)
+    """The latest readings and today's totals, from three small state documents."""
+    sample = store.get_state("sample") or {}
+    plug = store.get_state("plug") or {}
     today = day_key(now)
-    today_samples = [
-        s for s in window(store, SAMPLES, now - 86400, now) if day_key(s["t"]) == today
-    ]
-    today_plug = [r for r in window(store, PLUG, now - 86400, now) if day_key(r["t"]) == today]
+
+    def latest(state: dict, key: str, max_age: int) -> dict | None:
+        item = state.get(key)
+        return item if item and item["t"] >= now - max_age else None
+
+    def wh(state: dict) -> int:
+        t = state.get("today")
+        return round(t["wh"]) if t and t["day"] == today else 0
+
     plan = store.get_state("plan") or {}
     return {
         "now": now,
-        "sample": samples[-1] if samples else None,
-        "plug": reports[-1] if reports else None,
-        "today": {
-            "solar_wh": round(integrate_wh(_series(today_samples, "solar_w"))),
-            "grid_wh": round(integrate_wh(_series(today_plug, "w"))),
-        },
+        "sample": latest(sample, "sample", 2 * 3600),
+        "plug": latest(plug, "report", 3600),
+        "today": {"solar_wh": wh(sample), "grid_wh": wh(plug)},
         "plan": {k: plan.get(k) for k in ("generated_at", "windows", "index_now")}
         if plan
         else None,

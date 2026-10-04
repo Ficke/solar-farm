@@ -18,7 +18,7 @@ from solar_server import tasks, views
 from solar_server.auth import TokenVerifier, check_plug_key, check_scheduler, google_verifier
 from solar_server.config import Settings
 from solar_server.sources import LiveSources, Sources
-from solar_server.store import PLUG, FirestoreStore, Store
+from solar_server.store import FirestoreStore, Store
 
 # The built dashboard (web/dist). The container sets SOLAR_WEB_DIST; locally
 # it's found next to the source tree.
@@ -76,7 +76,7 @@ def _edge_routes(app, settings, store, sources, verify, clock) -> None:
         check_plug_key(x_plug_key, settings.plug_key)
         item: dict[str, Any] = report.model_dump(exclude_none=True)
         item["received"] = int(clock())
-        store.append(PLUG, item)
+        tasks.record_plug(store, item)
         return Response(status_code=204)
 
     @app.post("/tasks/collect")

@@ -2,8 +2,9 @@
 
 Firestore holds one document per Pacific day per series, with the day's
 points in an `items` array, so a 48-hour view is a handful of document reads
-(well inside the free tier). `state/*` documents hold the latest plan and the
-plug's latest report.
+(well inside the free tier). `state/*` documents hold the latest plan, sample
+and plug report, with today's running totals, so the dashboard's live view
+reads three small documents instead of whole days.
 """
 
 from __future__ import annotations

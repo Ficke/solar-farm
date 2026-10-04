@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 import pytest
 from fastapi.testclient import TestClient
 from planner.jackery import Reading
+from solar_server import tasks
 from solar_server.app import create_app
 from solar_server.config import Settings
 from solar_server.store import FORECASTS, MIX, PLANS, PLUG, SAMPLES, MemoryStore
@@ -205,12 +206,12 @@ def test_dashboard_api_summarizes_the_day():
     # 17:00 Pacific; samples every 5 min from 12:00 with 100 W of sun, plug at 400 W for an hour
     for i in range(61):
         t = NOW - 5 * 3600 + i * 300
-        store.append(
-            SAMPLES, {"t": t, "battery_pct": 70 + i * 0.2, "solar_w": 100.0, "moer": 300.0}
+        tasks.record_sample(
+            store, {"t": t, "battery_pct": 70 + i * 0.2, "solar_w": 100.0, "moer": 300.0}
         )
     for i in range(61):
         t = NOW - 2 * 3600 + i * 60
-        store.append(PLUG, {"t": t, "on": True, "reason": "plan", "w": 400.0})
+        tasks.record_plug(store, {"t": t, "on": True, "reason": "plan", "w": 400.0})
     store.put_state(
         "plan",
         {
@@ -237,3 +238,68 @@ def test_dashboard_api_summarizes_the_day():
         {"day": "2026-10-04", "solar_wh": 500, "grid_wh": 400, "battery_peak_pct": 82.0}
     ]
     assert daily["reserve"]["reserve_pct"] is None  # today isn't a full day yet
+
+
+class CountingStore(MemoryStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self.day_reads = 0
+
+    def day(self, series, day):
+        self.day_reads += 1
+        return super().day(series, day)
+
+
+def test_live_view_reads_only_state_documents():
+    store = CountingStore()
+    c, _ = make("edge", store=store)
+    key = {"X-Plug-Key": "k3y"}
+    for i, w in enumerate((300.0, 300.0, None, 300.0)):
+        report = {"t": NOW - 1800 + i * 600, "on": True, "reason": "plan", "w": w}
+        assert c.post("/plug/report", json=report, headers=key).status_code == 204
+    c.post("/tasks/collect", headers=AUTH)
+    assert store.state["plug"]["report"]["t"] == NOW
+    assert store.state["sample"]["sample"]["solar_w"] == 120.0
+
+    web, _ = make("web", store=store)
+    store.day_reads = 0
+    now = web.get("/api/now").json()
+    assert store.day_reads == 0
+    # 300 W for half an hour; a report without watts doesn't break the total.
+    assert now["today"] == {"solar_wh": 0, "grid_wh": 150}
+    assert now["plug"]["t"] == NOW and now["sample"]["t"] == NOW
+
+
+def test_running_totals_start_from_stored_readings_and_reset_at_midnight():
+    store = MemoryStore()
+    # Readings stored before the state documents existed are counted once.
+    for t in (NOW - 7200, NOW - 3600):
+        store.append(PLUG, {"t": t, "on": True, "reason": "plan", "w": 200.0})
+    tasks.record_plug(store, {"t": NOW, "on": True, "reason": "plan", "w": 200.0})
+    assert store.state["plug"]["today"]["wh"] == 400.0
+    # A repeated or late report adds nothing.
+    tasks.record_plug(store, {"t": NOW - 60, "on": True, "reason": "plan", "w": 900.0})
+    assert store.state["plug"]["today"]["wh"] == 400.0
+
+    midnight = NOW + 7 * 3600  # 00:00 Pacific on the 5th
+    tasks.record_plug(store, {"t": midnight + 60, "on": True, "reason": "plan", "w": 200.0})
+    assert store.state["plug"]["today"] == {
+        "day": "2026-10-05",
+        "wh": 0.0,
+        "last": [midnight + 60, 200.0],
+    }
+
+
+def test_live_view_hides_old_readings_and_yesterdays_totals():
+    store = MemoryStore()
+    tasks.record_plug(store, {"t": NOW - 7200, "on": False, "reason": "peak", "w": 0.0})
+    tasks.record_sample(store, {"t": NOW - 3 * 3600, "solar_w": 50.0})
+    web, _ = make("web", store=store)
+    now = web.get("/api/now").json()
+    assert now["plug"] is None and now["sample"] is None
+
+    tomorrow = MemoryStore()
+    tasks.record_plug(tomorrow, {"t": NOW - 3600, "on": True, "reason": "plan", "w": 100.0})
+    tasks.record_plug(tomorrow, {"t": NOW, "on": True, "reason": "plan", "w": 100.0})
+    late = create_app(Settings(role="web"), tomorrow, FakeSources(), clock=lambda: NOW + 8 * 3600)
+    assert TestClient(late).get("/api/now").json()["today"]["grid_wh"] == 0

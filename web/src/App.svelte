@@ -46,12 +46,14 @@
 
   onMount(() => {
     load("all");
+    // Hidden tabs don't poll; they catch up when shown again.
+    const visible = () => document.visibilityState === "visible";
     const timers = [
-      setInterval(() => load("now"), 30_000),
-      setInterval(() => load("all"), 5 * 60_000),
+      setInterval(() => visible() && load("now"), 30_000),
+      setInterval(() => visible() && load("all"), 5 * 60_000),
       setInterval(() => (clock = Date.now() / 1000), 5_000),
     ];
-    const wake = () => document.visibilityState === "visible" && load("all");
+    const wake = () => visible() && load("all");
     document.addEventListener("visibilitychange", wake);
     return () => {
       timers.forEach(clearInterval);
