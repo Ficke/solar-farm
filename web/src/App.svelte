@@ -1,30 +1,20 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { align } from "./lib/align";
-  import {
-    type Accuracy,
-    api,
-    type Co2,
-    type Daily,
-    type Now,
-    type Period,
-    type Timeline,
-  } from "./lib/api";
-  import Co2Bars from "./lib/Co2Bars.svelte";
-  import { COUNTS, fmtLb, periodName } from "./lib/co2";
+  import { type Accuracy, api, type Co2, type Now, type Period, type Timeline } from "./lib/api";
+  import { COUNTS } from "./lib/co2";
+  import History from "./lib/History.svelte";
   import { FUTURE, PAST } from "./lib/layout";
   import { GROUPS, stackMix } from "./lib/mix";
   import PlanView from "./lib/PlanView.svelte";
   import { explain } from "./lib/status";
   import TimeChart from "./lib/TimeChart.svelte";
   import { ago, fmtWhen, hours } from "./lib/time";
-  import WeekBars from "./lib/WeekBars.svelte";
 
   const LEADS = [1, 3, 6, 12];
 
   let now = $state<Now>();
   let tl = $state<Timeline>();
-  let daily = $state<Daily>();
   let acc = $state<Accuracy>();
   let lead = $state(6);
   let co2 = $state<Co2>();
@@ -32,14 +22,12 @@
   let error = $state("");
   let loadedAt = $state(0);
   let clock = $state(Date.now() / 1000);
-  let weekTable = $state(false);
 
   async function load(what: "now" | "charts" | "all") {
     try {
       const jobs: Promise<unknown>[] = [api.now().then((v) => (now = v))];
       if (what !== "now") jobs.push(api.timeline(24).then((v) => (tl = v)));
       if (what === "all") {
-        jobs.push(api.daily(14).then((v) => (daily = v)));
         jobs.push(api.accuracy(lead).then((v) => (acc = v)));
         jobs.push(api.co2(by, COUNTS[by]).then((v) => (co2 = v)));
       }
@@ -67,7 +55,7 @@
     const visible = () => document.visibilityState === "visible";
     const timers = [
       setInterval(() => visible() && load("now"), 30_000),
-      // Readings arrive every minute. Daily and CO2 totals change slowly and
+      // Readings arrive every minute. CO2 and energy totals change slowly and
       // read many documents, so they refresh less often.
       setInterval(() => visible() && load("charts"), 60_000),
       setInterval(() => visible() && load("all"), 15 * 60_000),
@@ -127,8 +115,6 @@
       (tl?.samples ?? []).map((p) => [p.t, p.output_w]),
     ]),
   );
-  const co2Now = $derived(co2?.by === by ? co2.periods.at(-1) : undefined);
-  const co2Sum = $derived((co2?.periods ?? []).reduce((a, p) => a + p.avoided_lb, 0));
 
   const health = $derived([
     { name: "Battery", t: s?.t, limit: 900 },
@@ -290,9 +276,9 @@
     </p>
   </section>
 
-  <section class="card" aria-labelledby="co2-h">
+  <section class="card" aria-labelledby="hist-h">
     <div class="head">
-      <h2 id="co2-h">CO₂ avoided</h2>
+      <h2 id="hist-h">Last {COUNTS[by]} {by}s</h2>
       <div class="seg" role="group" aria-label="Period">
         {#each Object.keys(COUNTS) as Period[] as p (p)}
           <button aria-pressed={by === p} onclick={() => pickPeriod(p)}
@@ -301,56 +287,7 @@
         {/each}
       </div>
     </div>
-    <dl class="pair">
-      <div>
-        <dt>{co2Now ? periodName(co2Now.start, by) : "–"}</dt>
-        <dd>{co2Now ? fmtLb(co2Now.avoided_lb) : "–"}<small>lb</small></dd>
-      </div>
-      <div>
-        <dt>Without battery</dt>
-        <dd>{co2Now ? fmtLb(co2Now.load_lb) : "–"}<small>lb</small></dd>
-      </div>
-      <div>
-        <dt>From the plug</dt>
-        <dd>{co2Now ? fmtLb(co2Now.grid_lb) : "–"}<small>lb</small></dd>
-      </div>
-      <div>
-        <dt>Last {COUNTS[by]} {by}s</dt>
-        <dd>{co2 ? fmtLb(co2Sum) : "–"}<small>lb</small></dd>
-      </div>
-    </dl>
-    <Co2Bars periods={co2?.by === by ? co2.periods : []} {by} />
-  </section>
-
-  <section class="card" aria-labelledby="week-h">
-    <div class="head">
-      <h2 id="week-h">Last 7 days</h2>
-      <button class="link" onclick={() => (weekTable = !weekTable)}>
-        {weekTable ? "Chart" : "Table"}
-      </button>
-    </div>
-    {#if weekTable}
-      <table>
-        <thead><tr><th>Day</th><th>Solar</th><th>Grid</th><th>Load</th><th>Battery peak</th></tr></thead>
-        <tbody>
-          {#each (daily?.days ?? []).slice(-7) as d (d.day)}
-            <tr>
-              <td>{d.day}</td>
-              <td>{d.solar_wh} Wh</td>
-              <td>{d.grid_wh} Wh</td>
-              <td>{d.load_wh} Wh</td>
-              <td>{d.battery_peak_pct ?? "–"}%</td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
-    {:else}
-      <p class="key">
-        <span><i class="sw solar"></i>Solar</span>
-        <span><i class="sw grid"></i>Grid</span>
-      </p>
-      <WeekBars days={daily?.days ?? []} />
-    {/if}
+    <History co2={co2?.by === by ? co2 : undefined} now={tnow} />
   </section>
 
   <footer>
@@ -451,16 +388,6 @@
   .head h3 {
     margin: 0;
   }
-  .pair {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px 28px;
-    margin: 0 0 6px;
-  }
-  .pair dd {
-    margin: 0;
-    font: 600 28px var(--f-display);
-  }
   .headline {
     display: flex;
     gap: 12px;
@@ -537,15 +464,6 @@
     color: var(--ink);
     font-weight: 600;
   }
-  .link {
-    font: inherit;
-    font-size: 13px;
-    border: 0;
-    background: none;
-    color: var(--accent);
-    cursor: pointer;
-    padding: 0;
-  }
     .key {
     display: flex;
     flex-wrap: wrap;
@@ -574,29 +492,6 @@
     background: var(--peak-band);
     outline: 1px solid var(--peak-ink);
     outline-offset: -1px;
-  }
-  .sw.solar {
-    background: var(--solar);
-  }
-  .sw.grid {
-    background: var(--grid);
-  }
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 14px;
-    font-variant-numeric: tabular-nums;
-  }
-  th {
-    text-align: left;
-    font-weight: 500;
-    font-size: 12px;
-    color: var(--ink-3);
-    padding: 4px 8px 4px 0;
-  }
-  td {
-    padding: 6px 8px 6px 0;
-    border-top: 1px solid var(--line);
   }
   footer {
     display: flex;
