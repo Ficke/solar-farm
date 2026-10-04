@@ -6,7 +6,7 @@ from planner.jackery import Reading
 from solar_server import tasks, totals, views
 from solar_server.app import create_app
 from solar_server.config import Settings
-from solar_server.store import FORECASTS, MIX, PLANS, PLUG, SAMPLES, MemoryStore
+from solar_server.store import FORECASTS, MIX, PLANS, PLUG, PRICES, SAMPLES, MemoryStore
 
 NOW = 1791158400  # This is Sunday, October 4, 2026, at 17:00 Pacific.
 SCHED = "solar-scheduler@p.iam.gserviceaccount.com"
@@ -38,6 +38,13 @@ class FakeSources:
 
     def mix(self, day, now):
         return [{"t": t, "solar": 0, "gas": 15000} for t in (NOW - 7200, NOW - 600, NOW + 300)]
+
+    def prices(self, since, now):
+        return [
+            {"t": t, "np15": 38.5, "sp15": 24.9}
+            for t in (NOW - 7200, NOW - 600, NOW + 300)
+            if t >= since.timestamp()
+        ]
 
     def jackery(self, now):
         if not self.with_jackery:
@@ -165,6 +172,10 @@ def test_plan_task_feeds_the_plug_without_the_forecast():
             "t": NOW,
             "windows": [{"s": NOW + 18 * 3600, "e": NOW + 19 * 3600}],
             "strategy": "fallback",
+            "forecast_at": NOW,
+            "forecast_until": NOW + 24 * 3600,
+            "missing": ["battery"],
+            "zeros_doubted_since": None,
         }
     ]
     (snap,) = store.day(FORECASTS, "2026-10-04")
@@ -185,6 +196,20 @@ def test_grid_mix_is_stored_once_per_row():
     assert tl["mix"] == [
         {"t": NOW - 7200, "solar": 0, "gas": 15000},
         {"t": NOW - 600, "solar": 0, "gas": 15000},
+    ]
+
+
+def test_hub_prices_are_stored_once_per_row():
+    c, store = make("edge")
+    c.post("/tasks/collect", headers=AUTH)
+    c.post("/tasks/plan", headers=AUTH)
+    c.post("/tasks/collect", headers=AUTH)
+    assert sorted(r["t"] for r in store.day(PRICES, "2026-10-04")) == [NOW - 7200, NOW - 600]
+
+    web, _ = make("web", store=store)
+    assert web.get("/api/timeline").json()["prices"] == [
+        {"t": NOW - 7200, "np15": 38.5, "sp15": 24.9},
+        {"t": NOW - 600, "np15": 38.5, "sp15": 24.9},
     ]
 
 

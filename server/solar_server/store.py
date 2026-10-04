@@ -18,6 +18,7 @@ PLUG = "plug"
 PLANS = "plans"
 FORECASTS = "forecasts"
 MIX = "mix"
+PRICES = "prices"
 TOTALS = "totals"
 LOCKS = "locks"
 

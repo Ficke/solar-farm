@@ -9,7 +9,7 @@
 | --- | --- |
 | `solar-web` (Cloud Run, IAP on) | Private dashboard and its API. Only `DASHBOARD_USERS` can sign in. |
 | `solar-edge` (Cloud Run, public) | `/plug/*` for the Shelly plug (checks `X-Plug-Key`) and `/tasks/*` for Cloud Scheduler (checks a Google-signed token). |
-| Firestore `(default)` | Telemetry, mix, plan and forecast history, live state, and totals. Weekly backups retained for 14 weeks; seven-day point-in-time recovery. |
+| Firestore `(default)` | Telemetry, mix, prices, plan and forecast history, live state, and totals. Weekly backups retained for 14 weeks; seven-day point-in-time recovery. |
 | Secret Manager | WattTime and Jackery logins, plus the plug key (generated here). |
 | Cloud Scheduler | `solar-collect` every minute. |
 | Artifact Registry `solar-farm` | Keeps the five newest image versions; deletes other versions older than seven days. |
@@ -91,4 +91,4 @@ Edit `.tf` files and open a PR; CI checks formatting, provider locks and validit
 - Main state and plans contain secret values and use `TOFU_STATE_PASSPHRASE` for encryption. For local commands, set `state_passphrase` in `infra/terraform.tfvars`. The private state bucket retains up to 20 archived versions.
 - Alerts match server health logs and Cloud Scheduler failures. Recipients are `alert_emails`, or `dashboard_users` when no override is set, with at most one notification per policy every six hours.
 - Only workflows on `main` of `Ficke/solar-farm` can obtain Google credentials. The infra account has project-owner access to manage IAM; the deploy account has image-push and service-deployment roles.
-- `claude-reader` has Cloud Datastore Viewer access for cloud sessions. Its manually managed key belongs in the cloud environment's API credentials (type “GCP access token”, host `firestore.googleapis.com`), outside this repository and OpenTofu state. Rotate by creating a key, replacing the credential, then deleting the old key.
+- `agent-reader` has Cloud Datastore Viewer access for AI agents; OpenTofu adopts the account created manually in the console. Keep its key in each agent's credential store, outside this repository and OpenTofu state. Claude cloud sessions use an API credential of type “GCP access token” for `firestore.googleapis.com`. Rotate by creating a key, replacing the credential, then deleting the old key.

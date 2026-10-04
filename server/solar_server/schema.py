@@ -60,6 +60,14 @@ class MixRow(BaseModel):
     other: float | None = None
 
 
+class PriceRow(BaseModel):
+    """Real-time price at CAISO's north and south trading hubs, $/MWh."""
+
+    t: int
+    np15: float | None = None
+    sp15: float | None = None
+
+
 class Today(BaseModel):
     solar_wh: int
     grid_wh: int
@@ -79,6 +87,10 @@ class PlanSummary(BaseModel):
     charge_w: float | None = None
     grid_wh: int | None = None
     shortfall_wh: int | None = None
+    forecast_at: int | None = None
+    forecast_until: int | None = None
+    missing: list[Literal["battery", "forecast", "forecast_horizon"]] = []
+    zeros_doubted_since: int | None = None
 
 
 class Now(BaseModel):
@@ -96,6 +108,7 @@ class Timeline(BaseModel):
     plug: list[StoredPlugReport]
     forecast: list[tuple[int, float]]  # Pairs contain Unix seconds and lb/MWh.
     mix: list[MixRow]
+    prices: list[PriceRow]
     windows: list[Window]
 
 

@@ -15,7 +15,7 @@ from planner.plan import PACIFIC, build_plan
 from solar_server import tasks, totals
 from solar_server.app import create_app
 from solar_server.config import Settings
-from solar_server.store import FORECASTS, MIX, PLANS, MemoryStore
+from solar_server.store import FORECASTS, MIX, PLANS, PRICES, MemoryStore
 
 STEP = 300
 
@@ -29,6 +29,16 @@ def _moer(t: int) -> float:
     # Approximate gas-dominated rates with a midday solar-curtailment interval.
     h = _hour(t)
     return 0.0 if 10.5 <= h < 14 else 950 + 40 * math.sin(t / 5000)
+
+
+def _prices(t: int) -> dict:
+    # About $45 overnight and $30 midday, with the north above the south
+    # while the lines between them are full in the morning.
+    h = _hour(t)
+    sun = max(0.0, math.sin(math.pi * (h - 7) / 12)) if 7 <= h < 19 else 0.0
+    south = 45 - 18 * sun + 25 * math.exp(-(((h - 19) / 1.5) ** 2)) + 3 * math.sin(t / 900)
+    north = south + (10 if 8.5 <= h < 10 else 1)
+    return {"t": t, "np15": round(north, 2), "sp15": round(south, 2)}
 
 
 def _mix(t: int) -> dict:
@@ -84,6 +94,7 @@ def sample_store(now: int) -> MemoryStore:
             },
         )
         store.append(MIX, _mix(t))
+        store.append(PRICES, _prices(t))
         if t % 1800 == 0:
             # Increase timing uncertainty with forecast lead time.
             values = []
@@ -137,6 +148,9 @@ class NoSources:
         return None
 
     def mix(self, day: object, now: datetime) -> list:
+        return []
+
+    def prices(self, since: object, now: datetime) -> list:
         return []
 
     def jackery(self, now: object) -> None:

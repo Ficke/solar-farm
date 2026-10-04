@@ -6,7 +6,7 @@ Grid-aware charging for a Jackery Explorer 3000 v2 with a 250 W solar panel in S
 
 - **Server** (`server/`, `planner/`): reads Jackery telemetry and WattTime's 24-hour marginal-emissions forecast every minute, then replans charging toward a full battery by the next 4 pm.
 - **Plug** (`device/src/grid-gate.js`): decides every minute whether to allow grid power. Reports normally return the current plan; separate plan requests recover from missing reports.
-- **Dashboard** (`web/`): shows grid state, charging windows, battery and power history, emissions, CAISO generation, forecast accuracy, and energy and CO₂ totals.
+- **Dashboard** (`web/`): shows grid state, charging windows, battery and power history, emissions, CAISO generation, forecast accuracy, hub prices, and energy and CO₂ totals.
 
 The plug applies these rules in order:
 
@@ -22,6 +22,8 @@ While on, the plug bridges gaps of up to three minutes between planned windows t
 ## Charging policy
 
 The planner targets **100% (3,072 Wh) by the next 4 pm Pacific**, with a **20% floor**. It selects the cleanest available 15-minute forecast blocks outside peak hours. Emissions are grouped by rounding to the nearest **50 lb/MWh**; within a group, later blocks win to allow solar to arrive first.
+
+The current block uses a live marginal rate when it is no more than 15 minutes old. When a live rate of at least **300 lb/MWh** contradicts a zero forecast, the remaining zeros that Pacific day use the recorded rate until a live rate falls below **100 lb/MWh**. Blocks without usable forecast rates are skipped.
 
 Grid charging fills the battery, leaving room for half the estimated later solar only when that allowance reaches **150 Wh**. Additional blocks cover projected floor or deadline deficits above **30 Wh**. Partial windows round up to whole minutes; infeasible plans report a shortfall.
 
@@ -67,10 +69,10 @@ The [private dashboard](https://solar-web-v5whpbqqpq-uw.a.run.app) requires Goog
 
 One container image serves two Cloud Run services:
 
-- **solar-edge** is public. `/plug/plan` and `/plug/report` require `X-Plug-Key`. Cloud Scheduler calls `/tasks/collect` every minute with a verified Google ID token; it collects readings, fetches the forecast and replans. CAISO mix and daily totals update every five minutes; forecasts are archived every 30 minutes. `/tasks/plan` refreshes the plan on demand.
+- **solar-edge** is public. `/plug/plan` and `/plug/report` require `X-Plug-Key`. Cloud Scheduler calls `/tasks/collect` every minute with a verified Google ID token; it collects readings, fetches the forecast and replans. CAISO mix, hub prices and daily totals update every five minutes; forecasts are archived every 30 minutes. `/tasks/plan` refreshes the plan on demand.
 - **solar-web** is behind IAP and serves the dashboard and `/api/now`, `/api/timeline`, `/api/accuracy`, `/api/daily`, and `/api/co2`.
 
-Firestore retains collected readings, mix rows and plug reports. Plan history keeps window changes and five-minute snapshots; forecast history keeps half-hour snapshots. Weekly backups are retained for 14 weeks, with seven days of point-in-time recovery.
+Firestore retains collected readings, mix rows, hub prices and plug reports. Plan history keeps window changes and five-minute snapshots; forecast history keeps half-hour snapshots. Weekly backups are retained for 14 weeks, with seven days of point-in-time recovery.
 
 On relevant pushes to `main`, Deploy runs CI, builds the image and updates both services. A failed rollout or solar-edge `/health` check restores previously recorded serving revisions. OpenTofu manages infrastructure; [infra/README.md](infra/README.md) covers changes. Renovate opens grouped weekly dependency updates; GitHub Actions are pinned to commit SHAs.
 

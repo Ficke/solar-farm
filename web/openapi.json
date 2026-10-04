@@ -791,6 +791,52 @@
               }
             ],
             "title": "Shortfall Wh"
+          },
+          "forecast_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Forecast At"
+          },
+          "forecast_until": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Forecast Until"
+          },
+          "missing": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "battery",
+                "forecast",
+                "forecast_horizon"
+              ]
+            },
+            "type": "array",
+            "title": "Missing",
+            "default": []
+          },
+          "zeros_doubted_since": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Zeros Doubted Since"
           }
         },
         "type": "object",
@@ -799,6 +845,42 @@
           "windows"
         ],
         "title": "PlanSummary"
+      },
+      "PriceRow": {
+        "properties": {
+          "t": {
+            "type": "integer",
+            "title": "T"
+          },
+          "np15": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Np15"
+          },
+          "sp15": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sp15"
+          }
+        },
+        "type": "object",
+        "required": [
+          "t"
+        ],
+        "title": "PriceRow",
+        "description": "Real-time price at CAISO's north and south trading hubs, $/MWh."
       },
       "Reserve": {
         "properties": {
@@ -1053,6 +1135,13 @@
             "type": "array",
             "title": "Mix"
           },
+          "prices": {
+            "items": {
+              "$ref": "#/components/schemas/PriceRow"
+            },
+            "type": "array",
+            "title": "Prices"
+          },
           "windows": {
             "items": {
               "$ref": "#/components/schemas/Window"
@@ -1069,6 +1158,7 @@
           "plug",
           "forecast",
           "mix",
+          "prices",
           "windows"
         ],
         "title": "Timeline"

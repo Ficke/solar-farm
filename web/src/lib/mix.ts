@@ -23,14 +23,11 @@ const SMOOTH = 15 * 60;
 /**
  * Return raw group values and a smoothed cumulative stack, in GW.
  * Average the stack over a centered 30-minute span; keep tooltip values raw.
- * Clamp negative supply, including charging batteries, to zero.
+ * Stack charging batteries and exports downward from zero.
  */
 export function stackMix(rows: MixRow[]) {
   const gw = (r: MixRow, keys: (keyof MixRow)[]) =>
-    Math.max(
-      0,
-      keys.reduce((sum, k) => sum + ((r[k] as number | null) ?? 0), 0),
-    ) / 1000;
+    keys.reduce((sum, k) => sum + ((r[k] as number | null) ?? 0), 0) / 1000;
   const raw = align(
     GROUPS.map((g) => rows.map((r) => [r.t, gw(r, g.keys)] as [number, number])),
     GROUPS.map(() => 15 * 60),
@@ -61,13 +58,20 @@ export function stackMix(rows: MixRow[]) {
         }),
   );
   const stacked = smooth.map((col) => [...col]);
+  // Accumulate each side of zero separately because layers fill toward zero.
   for (let i = 0; i < raw[0].length; i++) {
-    let total = 0;
+    let up = 0;
+    let down = 0;
     for (let k = GROUPS.length; k >= 1; k--) {
       const v = smooth[k][i];
       if (v == null) continue;
-      total += v;
-      stacked[k][i] = total;
+      if (v < 0) {
+        down += v;
+        stacked[k][i] = down;
+      } else {
+        up += v;
+        stacked[k][i] = up;
+      }
     }
   }
   return { raw, stacked };

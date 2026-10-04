@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import logging
 import math
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from planner.adaptive import MIN_CHARGE_W, build_adaptive_plan, estimates
 from planner.plan import PACIFIC, build_plan
@@ -12,7 +13,17 @@ from planner.plan import PACIFIC, build_plan
 from solar_server import totals
 from solar_server.config import Settings
 from solar_server.sources import Sources
-from solar_server.store import FORECASTS, MIX, PLANS, PLUG, SAMPLES, Store, day_key, window
+from solar_server.store import (
+    FORECASTS,
+    MIX,
+    PLANS,
+    PLUG,
+    PRICES,
+    SAMPLES,
+    Store,
+    day_key,
+    window,
+)
 from solar_server.totals import integrate_wh
 
 log = logging.getLogger(__name__)
@@ -25,7 +36,7 @@ def _num(v: float | None) -> float | None:
 def collect(store: Store, sources: Sources, now: datetime) -> dict:
     """Store available Jackery data and newly published WattTime readings.
 
-    Every five minutes, backfill the last hour of CAISO mix and update totals.
+    Every five minutes, backfill an hour of CAISO mix and prices and update totals.
     Source failures do not discard other readings.
     """
     t = int(now.timestamp())
@@ -59,6 +70,7 @@ def collect(store: Store, sources: Sources, now: datetime) -> dict:
         record_sample(store, sample)
     if five:
         store_mix(store, sources, now, since=t - 3600)
+        store_prices(store, sources, now, since=t - 3600)
         try:
             totals.update(store, t)
         except Exception as e:
@@ -126,6 +138,17 @@ def store_mix(store: Store, sources: Sources, now: datetime, since: int) -> None
         store.extend(MIX, [r for r in rows if since <= r["t"] <= t])
 
 
+def store_prices(store: Store, sources: Sources, now: datetime, since: int) -> None:
+    """Store hub prices from ``since`` to now, skipping exact duplicates."""
+    t = int(now.timestamp())
+    try:
+        rows = sources.prices(datetime.fromtimestamp(since, UTC), now)
+    except Exception as e:
+        log.warning("caiso prices failed: %s", e)
+        return
+    store.extend(PRICES, [r for r in rows if since <= r["t"] <= t])
+
+
 def archive_due(now: datetime) -> bool:
     """Archive forecasts at half-hour marks."""
     return now.minute % 30 == 0
@@ -137,14 +160,14 @@ def plan(
     """Refresh the emissions forecast and the battery-aware charging plan.
 
     The latest forecast lives in ``state/plan``. With ``archive``, the forecast
-    is also kept in ``forecasts`` and the last day's grid mix is filled in.
+    is also kept in ``forecasts`` and the last day's grid mix and prices are filled in.
     """
-    points = sources.forecast(24)
-    if not any(now <= t < now + timedelta(hours=24) for t, _ in points) or not all(
-        math.isfinite(v) for _, v in points
-    ):
+    points = clean_forecast(sources.forecast(24))
+    if not any(now <= t < now + timedelta(hours=24) for t, _ in points):
         raise ValueError("unusable emissions forecast; keeping the previous plan")
-    p = charging_plan(store, points, settings, now)
+    p = charging_plan(store, live_check(store, points, now), settings, now)
+    note_inputs(p, points, int(now.timestamp()))
+    p["zeros_doubted_since"] = (store.get_state("zero_check") or {}).get("since")
     # Reuse the percentile collected with the latest WattTime reading.
     p["index_now"] = ((store.get_state("sample") or {}).get("sample") or {}).get("index")
     if p["index_now"] is None:
@@ -153,24 +176,93 @@ def plan(
         except Exception as e:
             log.warning("signal-index skipped: %s", e)
     p["forecast"] = [[int(t.timestamp()), round(v, 1)] for t, v in points]
-    p["forecast_at"] = int(now.timestamp())
     if archive:
+        # Fill any gaps in the last day's grid mix and prices.
         store_mix(store, sources, now, since=int(now.timestamp()) - 86400)
+        store_prices(store, sources, now, since=int(now.timestamp()) - 86400)
     old = store.get_state("plan") or {}
     store.put_state("plan", p)
     keep_plan(store, old, p)
     # Preserve forecasts for comparison with later actual emissions.
     if archive and points:
+        # Values sit on a 5-minute grid from the first point; a gap stays null.
+        start = int(points[0][0].timestamp())
+        values: list[int | None] = [None] * ((int(points[-1][0].timestamp()) - start) // 300 + 1)
+        for t, v in points:
+            values[(int(t.timestamp()) - start) // 300] = round(v)
         store.append(
-            FORECASTS,
-            {
-                "t": p["generated_at"],
-                "start": int(points[0][0].timestamp()),
-                "step": 300,
-                "values": [round(v) for _, v in points],
-            },
+            FORECASTS, {"t": p["generated_at"], "start": start, "step": 300, "values": values}
         )
     return p
+
+
+def clean_forecast(points: list[tuple[datetime, float]]) -> list[tuple[datetime, float]]:
+    """Sort and deduplicate rates, excluding non-finite or negative values.
+
+    Keep real zeros because they can represent renewable curtailment.
+    """
+    by_time = {t: v for t, v in points if math.isfinite(v) and v >= 0}
+    return sorted(by_time.items())
+
+
+LIVE_HIGH = 300  # Doubt zero forecasts at or above this live rate in lb/MWh.
+LIVE_CLEAN = 100  # Clear doubt below this live rate in lb/MWh.
+LIVE_MAX_AGE = 900
+
+
+def live_check(
+    store: Store, points: list[tuple[datetime, float]], now: datetime
+) -> list[tuple[datetime, float]]:
+    """Replace current-block forecasts with a fresh WattTime actual.
+
+    When a high actual contradicts a zero forecast, replace today's other zeros
+    with that recorded rate. Persist doubt until a clean actual or a new Pacific day.
+    """
+    t = int(now.timestamp())
+    today = now.astimezone(PACIFIC).date().isoformat()
+    check = store.get_state("zero_check") or {}
+    doubt: dict[str, Any] = (
+        dict(check) if check.get("day") == today else {"day": today, "since": None}
+    )
+    live = (store.get_state("sample") or {}).get("sample") or {}
+    moer, moer_t = live.get("moer"), live.get("moer_t")
+    rate = None
+    if moer is not None and moer_t is not None and 0 <= t - moer_t <= LIVE_MAX_AGE:
+        rate = float(moer)
+        forecast_now = next((v for p_t, v in points if p_t.timestamp() >= moer_t), None)
+        if rate >= LIVE_HIGH and forecast_now == 0 and doubt["since"] is None:
+            doubt.update(since=moer_t, rate=rate)
+        elif rate < LIVE_CLEAN:
+            doubt = {"day": today, "since": None}
+    if doubt != check:
+        store.put_state("zero_check", doubt)
+    block = t // 900 * 900
+    doubted = doubt["since"] is not None
+    out = []
+    for p_t, v in points:
+        if rate is not None and block <= p_t.timestamp() < block + 900:
+            v = rate
+        elif doubted and v == 0 and p_t.astimezone(PACIFIC).date().isoformat() == today:
+            v = float(doubt["rate"])
+        out.append((p_t, v))
+    return out
+
+
+FORECAST_STALE = 600  # Flag forecasts older than ten minutes.
+
+
+def note_inputs(p: dict, points: list[tuple[datetime, float]], forecast_at: int) -> None:
+    """Record what the plan was built from and which inputs were missing or stale."""
+    p["forecast_at"] = forecast_at
+    p["forecast_until"] = int(points[-1][0].timestamp()) + 300
+    missing = []
+    if p.get("strategy") == "fallback":
+        missing.append("battery")
+    if p["generated_at"] - forecast_at > FORECAST_STALE:
+        missing.append("forecast")
+    if p["forecast_until"] < p.get("deadline", 0):
+        missing.append("forecast_horizon")
+    p["missing"] = missing
 
 
 def charging_plan(
@@ -233,11 +325,13 @@ def refresh_charging_plan(store: Store, settings: Settings, now: datetime) -> No
     forecast = old.get("forecast", [])
     if not forecast or int(now.timestamp()) - old.get("forecast_at", old["generated_at"]) > 7200:
         return
-    points = [(datetime.fromtimestamp(t, now.tzinfo), v) for t, v in forecast]
+    points = clean_forecast([(datetime.fromtimestamp(t, now.tzinfo), v) for t, v in forecast])
     if not any(t >= now for t, _ in points):
         return
-    p = charging_plan(store, points, settings, now)
-    p.update(forecast=forecast, forecast_at=old.get("forecast_at", old["generated_at"]))
+    p = charging_plan(store, live_check(store, points, now), settings, now)
+    note_inputs(p, points, old.get("forecast_at", old["generated_at"]))
+    p["zeros_doubted_since"] = (store.get_state("zero_check") or {}).get("since")
+    p["forecast"] = forecast
     p["index_now"] = old.get("index_now")
     store.put_state("plan", p)
     keep_plan(store, old, p)
@@ -260,6 +354,10 @@ PLAN_HISTORY_KEYS = (
     "solar_days",
     "load_w",
     "charge_w",
+    "forecast_at",
+    "forecast_until",
+    "missing",
+    "zeros_doubted_since",
 )
 
 

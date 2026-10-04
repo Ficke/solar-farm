@@ -235,3 +235,14 @@ def test_slow_charging_still_fills_by_4pm():
     assert pct >= 99
     gaps = [b - a - 60 for a, b in pairwise(on_minutes) if b - a > 60]
     assert all(g <= 180 or g >= 15 * 60 for g in gaps), gaps
+
+
+def test_blocks_without_forecast_are_never_scheduled():
+    # Missing forecast points mean unknown, not 0 lb/MWh: the clean hour is
+    # used, the gap before it is not, even though the rest of the day is dirty.
+    gap = range(4 * 12, 5 * 12)  # 11 am-noon Pacific
+    points = [p for i, p in enumerate(forecast(clean=12)) if i not in gap]
+    plan = build_adaptive_plan(points, NOW, 40, inputs(load=20, solar=0))
+    assert plan["windows"]
+    for s, _ in plan["windows"]:
+        assert datetime.fromtimestamp(s, PACIFIC).hour != 11

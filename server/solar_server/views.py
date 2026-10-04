@@ -8,7 +8,7 @@ from planner.plan import PACIFIC
 
 from planner import telemetry
 from solar_server import totals
-from solar_server.store import FORECASTS, MIX, PLUG, SAMPLES, Store, day_key, window
+from solar_server.store import FORECASTS, MIX, PLUG, PRICES, SAMPLES, Store, day_key, window
 
 
 def now_view(store: Store, now: int) -> dict:
@@ -49,6 +49,10 @@ def now_view(store: Store, now: int) -> dict:
                 "charge_w",
                 "grid_wh",
                 "shortfall_wh",
+                "forecast_at",
+                "forecast_until",
+                "missing",
+                "zeros_doubted_since",
             )
         }
         if plan
@@ -70,6 +74,7 @@ def timeline_view(store: Store, now: int, past_hours: int = 24) -> dict:
         "forecast": [p for p in plan.get("forecast", []) if p[0] >= now - 300],
         # CAISO sometimes revises a row; the latest stored copy wins.
         "mix": list({i["t"]: i for i in window(store, MIX, since, now)}.values()),
+        "prices": list({i["t"]: i for i in window(store, PRICES, since, now)}.values()),
         "windows": plan.get("windows", []),
     }
 

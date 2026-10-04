@@ -54,14 +54,20 @@ resource "google_service_account_iam_member" "deploy_wif" {
   member             = "principalSet://iam.googleapis.com/projects/${local.project_number}/locations/global/workloadIdentityPools/github/attribute.repository/${var.github_repo}"
 }
 
-# Manage the reader key outside OpenTofu; see README.md for credential storage.
-resource "google_service_account" "claude_reader" {
-  account_id   = "claude-reader"
-  display_name = "Claude sessions: read-only Firestore"
+# Adopt the account created in the console; manage its key outside OpenTofu.
+# See README.md for agent credential storage.
+import {
+  to = google_service_account.agent_reader
+  id = "projects/${var.project_id}/serviceAccounts/agent-reader@${var.project_id}.iam.gserviceaccount.com"
 }
 
-resource "google_project_iam_member" "claude_reader_firestore" {
+resource "google_service_account" "agent_reader" {
+  account_id   = "agent-reader"
+  display_name = "AI agents: read-only Firestore"
+}
+
+resource "google_project_iam_member" "agent_reader_firestore" {
   project = var.project_id
   role    = "roles/datastore.viewer"
-  member  = "serviceAccount:${google_service_account.claude_reader.email}"
+  member  = "serviceAccount:${google_service_account.agent_reader.email}"
 }

@@ -19,6 +19,7 @@ class Sources(Protocol):
     def signal_index(self) -> float: ...
     def actual(self, signal: str, now: datetime) -> tuple[datetime, float] | None: ...
     def mix(self, day: date, now: datetime) -> list[dict]: ...
+    def prices(self, since: datetime, now: datetime) -> list[dict]: ...
     def jackery(self, now: datetime) -> Reading | None: ...
 
 
@@ -50,6 +51,9 @@ class LiveSources:
 
     def mix(self, day: date, now: datetime) -> list[dict]:
         return caiso.mix(day, now)
+
+    def prices(self, since: datetime, now: datetime) -> list[dict]:
+        return caiso.prices(since, now)
 
     def jackery(self, now: datetime) -> Reading | None:
         s = self.settings
