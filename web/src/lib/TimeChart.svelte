@@ -2,10 +2,17 @@
   // One uPlot chart on the shared clock. Plan windows and the PG&E peak are
   // painted behind the series and a line marks now. Hovering shows a tooltip
   // with the time and every series; the cursor is synced across charts.
+  //
+  // The plot is built once and updated in place: new data, a new time range
+  // or a new size never recreate it, so hovering survives a refresh. Only a
+  // change of series, height or theme rebuilds it.
+  import { untrack } from "svelte";
   import uPlot from "uplot";
   import type { Window } from "./api";
   import { hover } from "./hover.svelte";
   import { AXIS_W, hourTicks, PAD_R } from "./layout";
+  import Tooltip, { type TipRow } from "./Tooltip.svelte";
+  import { theme } from "./theme.svelte";
   import { fmtClock, fmtDayClock, fmtWeekday, localMinutes, peakWindows } from "./time";
 
   export interface Series {
@@ -63,6 +70,8 @@
   function bands(u: uPlot) {
     if (!shade) return;
     const { ctx } = u;
+    // uPlot caches the canvas styles it last set, so hooks restore theirs.
+    ctx.save();
     const paint = (spans: [number, number][], color: string) => {
       ctx.fillStyle = color;
       for (const [s, e] of spans) {
@@ -73,10 +82,12 @@
     };
     paint(peakWindows(from, to), css("--peak-band"));
     paint(windows, css("--plan-band"));
+    ctx.restore();
   }
 
   function overlays(u: uPlot) {
     const { ctx } = u;
+    ctx.save();
     const dpr = devicePixelRatio;
     const x = Math.round(u.valToPos(now, "x", true));
     if (x >= u.bbox.left && x <= u.bbox.left + u.bbox.width) {
@@ -105,9 +116,18 @@
       ctx.fillStyle = css("--ink-2");
       ctx.font = `${11 * dpr}px ${css("--f-sans")}`;
       ctx.textAlign = "left";
-      ctx.textBaseline = "bottom";
-      ctx.fillText(yRule.label, u.bbox.left + 6 * dpr, y - 3 * dpr);
+      // At the right end, over the future where no readings are drawn, and
+      // below the rule when there's no room above it.
+      const below = y - u.bbox.top < 16 * dpr;
+      ctx.textAlign = "right";
+      ctx.textBaseline = below ? "top" : "bottom";
+      ctx.fillText(
+        yRule.label,
+        u.bbox.left + u.bbox.width - 6 * dpr,
+        below ? y + 3 * dpr : y - 3 * dpr,
+      );
     }
+    ctx.restore();
   }
 
   // Midnight ticks name the day, so a 48-hour axis reads "Sun" instead of "12 AM".
@@ -172,7 +192,7 @@
       legend: { show: false },
       padding: [6, PAD_R, 0, 0],
       scales: {
-        x: { time: true, min: from, max: to },
+        x: { time: true, range: () => [from, to] },
         // A fixed floor and a fallback ceiling keep the y-axis, and with it
         // the time axis, in place when a chart has no data yet.
         y: {
@@ -185,7 +205,7 @@
           ...axis,
           grid: { show: false },
           size: 28,
-          splits: () => hourTicks(from, to, w),
+          splits: (u) => hourTicks(from, to, u.width),
           values: (_u, ticks) => ticks.map(tickLabel),
         },
         { ...axis, size: AXIS_W },
@@ -208,19 +228,45 @@
   }
 
   let plot: uPlot | undefined;
+  // Everything that shapes the plot itself; when this changes it is rebuilt.
+  const shape = $derived(JSON.stringify([series, height, yMax, theme.version]));
+
   $effect(() => {
-    const d = data as unknown as uPlot.AlignedData;
-    const w = width;
-    plot?.destroy();
-    plot = new uPlot(opts(w), d, el);
-    const over = plot.over;
-    over.addEventListener("mouseenter", () => (hovering = true));
-    over.addEventListener("mouseleave", () => {
+    shape;
+    const u = untrack(() => new uPlot(opts(width), data as unknown as uPlot.AlignedData, el));
+    u.over.addEventListener("mouseenter", () => (hovering = true));
+    u.over.addEventListener("mouseleave", () => {
       hovering = false;
       tip = null;
       hover.t = null;
     });
-    return () => plot?.destroy();
+    plot = u;
+    return () => {
+      u.destroy();
+      plot = undefined;
+    };
+  });
+
+  // New readings or a moved time axis: same plot, new data and scales.
+  $effect(() => {
+    const d = data as unknown as uPlot.AlignedData;
+    from;
+    to;
+    untrack(() => plot?.setData(d));
+  });
+
+  $effect(() => {
+    const w = width;
+    untrack(() => plot && plot.width !== w && plot.setSize({ width: w, height }));
+  });
+
+  // The now line, bands and target rule are drawn in hooks; repaint when they move.
+  $effect(() => {
+    now;
+    windows;
+    yRule;
+    shade;
+    untrack(() => plot?.redraw(false));
   });
 
   // Follow the pointer on the plan strip; charts already sync with each other.
@@ -234,8 +280,13 @@
     );
   });
 
-  const fmt = (v: number | null, s: Series) =>
-    v == null ? "–" : `${v.toFixed(s.digits ?? 0)} ${s.unit}`;
+  const tipRows = (values: (number | null)[]): TipRow[] =>
+    series.flatMap((s, k) => {
+      const v = values[k];
+      if (v == null) return [];
+      const value = `${v.toFixed(s.digits ?? 0)} ${s.unit}`;
+      return [{ color: s.color, shape: s.area ? "square" : "line", value, name: s.label }];
+    });
 </script>
 
 <figure aria-label={label}>
@@ -268,23 +319,14 @@
   </ul>
   <div class="chart" bind:this={el} bind:clientWidth={width}>
     {#if tip}
-      <div
-        class="tip"
-        class:left={tip.x > width - 200}
-        style:left="{tip.x}px"
-        style:top="{Math.min(tip.y, height - 90)}px"
-      >
-        <div class="when">{fmtDayClock(tip.t)}</div>
-        {#each series as s, k (s.label)}
-          {#if tip.values[k] != null}
-          <div class="row">
-            <span class="key" class:area={s.area} style:background="var({s.color})"></span>
-            <strong>{fmt(tip.values[k], s)}</strong>
-            <span class="name">{s.label}</span>
-          </div>
-          {/if}
-        {/each}
-      </div>
+      {@const t = tip}
+      <Tooltip
+        x={t.x}
+        y={Math.min(t.y, height - 90)}
+        flip={t.x > width - 200}
+        title={fmtDayClock(t.t)}
+        rows={tipRows(t.values)}
+      />
     {/if}
   </div>
 </figure>
@@ -321,45 +363,6 @@
     position: relative;
     min-width: 0;
   }
-  .tip {
-    position: absolute;
-    z-index: 2;
-    pointer-events: none;
-    transform: translate(12px, 0);
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    box-shadow: 0 2px 8px rgb(0 0 0 / 0.08);
-    padding: 6px 10px;
-    font-size: 12px;
-    white-space: nowrap;
-  }
-  .tip.left {
-    transform: translate(calc(-100% - 12px), 0);
-  }
-  .when {
-    color: var(--ink-2);
-    margin-bottom: 4px;
-  }
-  .row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    line-height: 1.6;
-  }
-  .row strong {
-    color: var(--ink);
-    font-variant-numeric: tabular-nums;
-  }
-  .name {
-    color: var(--ink-3);
-  }
-  .key {
-    width: 10px;
-    height: 2px;
-    border-radius: 1px;
-  }
-  .key.area,
   .swatch {
     width: 10px;
     height: 10px;

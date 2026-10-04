@@ -3,6 +3,7 @@
   import type { Window } from "./api";
   import { hover } from "./hover.svelte";
   import { AXIS_W, hourTicks, PAD_R } from "./layout";
+  import Tooltip from "./Tooltip.svelte";
   import {
     fmtClock,
     fmtDayClock,
@@ -113,11 +114,16 @@
     {/each}
   </svg>
   {#if tip}
-    <div class="tip" class:left={x(tip.t) > width - 200} style:left="{x(tip.t)}px">
-      <div class="when">{fmtDayClock(tip.t)}</div>
-      <div><strong>{tip.state}</strong></div>
-      {#if tip.co2 != null}<div><strong>{tip.co2} lb/MWh</strong> <span class="name">Forecast</span></div>{/if}
-    </div>
+    <Tooltip
+      x={x(tip.t)}
+      y={36}
+      flip={x(tip.t) > width - 200}
+      title={fmtDayClock(tip.t)}
+      rows={[
+        { value: tip.state },
+        ...(tip.co2 != null ? [{ value: `${tip.co2} lb/MWh`, name: "Forecast" }] : []),
+      ]}
+    />
   {/if}
 </div>
 
@@ -146,32 +152,6 @@
     display: block;
     width: 100%;
     touch-action: pan-y;
-  }
-  .tip {
-    position: absolute;
-    top: 36px;
-    z-index: 2;
-    pointer-events: none;
-    transform: translate(12px, 0);
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    box-shadow: 0 2px 8px rgb(0 0 0 / 0.08);
-    padding: 6px 10px;
-    font-size: 12px;
-    line-height: 1.6;
-    white-space: nowrap;
-    font-variant-numeric: tabular-nums;
-  }
-  .tip.left {
-    transform: translate(calc(-100% - 12px), 0);
-  }
-  .when,
-  .name {
-    color: var(--ink-3);
-  }
-  .when {
-    color: var(--ink-2);
   }
   .tick,
   .lab {
