@@ -56,3 +56,18 @@ resource "google_service_account_iam_member" "deploy_wif" {
   role               = "roles/iam.workloadIdentityUser"
   member             = "principalSet://iam.googleapis.com/projects/${local.project_number}/locations/global/workloadIdentityPools/github/attribute.repository/${var.github_repo}"
 }
+
+# Claude cloud sessions read production Firestore as this account. Its only
+# role is read-only; the JSON key is created by hand and stored as a "GCP
+# access token" API credential on the cloud environment, so it never lands in
+# state or in a session.
+resource "google_service_account" "claude_reader" {
+  account_id   = "claude-reader"
+  display_name = "Claude sessions: read-only Firestore"
+}
+
+resource "google_project_iam_member" "claude_reader_firestore" {
+  project = var.project_id
+  role    = "roles/datastore.viewer"
+  member  = "serviceAccount:${google_service_account.claude_reader.email}"
+}
