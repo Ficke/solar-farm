@@ -187,7 +187,7 @@
 
   <section class="card" aria-labelledby="plan-h">
     <h2 id="plan-h">Plan</h2>
-    <PlanView {windows} {forecast} {from} {to} now={tnow} />
+    <PlanView {windows} {forecast} {from} {to} now={tnow} need={now?.plan?.need ?? null} />
   </section>
 
   <section class="card charts" aria-labelledby="grid-h">

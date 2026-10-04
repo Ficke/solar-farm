@@ -59,3 +59,21 @@ def test_parse_forecast():
 def test_parse_signal_index():
     body = {"data": [{"point_time": "2026-10-03T17:35:00+00:00", "value": 37.0}], "meta": {}}
     assert parse_signal_index(body) == 37.0
+
+
+def test_takes_the_blocks_it_is_given_before_the_deadline():
+    pts = forecast_from(NOW, {11: 300, 12: 40, 13: 400, 22: 10, 23: 10})
+    deadline = datetime(2026, 10, 3, 16, 0, tzinfo=PACIFIC)
+    plan = build_plan(pts, NOW, blocks=3, deadline=deadline)
+    assert local_hours(plan) == {11, 12}
+    s, e = plan["windows"][0]
+    assert e - s == 3 * 1800
+    assert build_plan(pts, NOW, blocks=0, deadline=deadline)["windows"] == []
+
+
+def test_later_block_wins_a_near_tie():
+    pts = forecast_from(NOW, {9: 100, 13: 105})
+    plan = build_plan(pts, NOW, blocks=2)
+    assert local_hours(plan) == {13}
+    pts = forecast_from(NOW, {9: 100, 13: 160})
+    assert local_hours(build_plan(pts, NOW, blocks=2)) == {9}

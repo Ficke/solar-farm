@@ -649,6 +649,55 @@
         ],
         "title": "Now"
       },
+      "PlanNeed": {
+        "properties": {
+          "deadline": {
+            "type": "integer",
+            "title": "Deadline"
+          },
+          "battery_pct": {
+            "type": "number",
+            "title": "Battery Pct"
+          },
+          "reserve_pct": {
+            "type": "number",
+            "title": "Reserve Pct"
+          },
+          "solar_wh": {
+            "type": "integer",
+            "title": "Solar Wh"
+          },
+          "load_wh": {
+            "type": "integer",
+            "title": "Load Wh"
+          },
+          "grid_wh": {
+            "type": "integer",
+            "title": "Grid Wh"
+          },
+          "rate_w": {
+            "type": "integer",
+            "title": "Rate W"
+          },
+          "blocks": {
+            "type": "integer",
+            "title": "Blocks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "deadline",
+          "battery_pct",
+          "reserve_pct",
+          "solar_wh",
+          "load_wh",
+          "grid_wh",
+          "rate_w",
+          "blocks"
+        ],
+        "title": "PlanNeed",
+        "description": "What the battery needs from the grid by the next peak (planner/need.py)."
+      },
       "PlanSummary": {
         "properties": {
           "generated_at": {
@@ -672,6 +721,16 @@
               }
             ],
             "title": "Index Now"
+          },
+          "need": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlanNeed"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",

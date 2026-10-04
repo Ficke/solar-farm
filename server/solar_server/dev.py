@@ -10,12 +10,13 @@ import random
 import time
 from datetime import UTC, datetime
 
+from planner.need import grid_need
 from planner.plan import PACIFIC, build_plan
 
 from solar_server import tasks, totals
 from solar_server.app import create_app
 from solar_server.config import Settings
-from solar_server.store import FORECASTS, MIX, PLANS, MemoryStore
+from solar_server.store import FORECASTS, MIX, PLANS, SAMPLES, MemoryStore, window
 
 STEP = 300
 
@@ -107,8 +108,13 @@ def sample_store(now: int) -> MemoryStore:
     last = now - now % 1800
     forecast = next(f for f in reversed(store.day(FORECASTS, _day(last))) if f["t"] == last)
     points = [[forecast["start"] + i * STEP, v] for i, v in enumerate(forecast["values"])]
+    at = datetime.fromtimestamp(now, UTC)
+    need = grid_need(window(store, SAMPLES, now - 7 * 86400, now), at)
     plan = build_plan(
-        [(datetime.fromtimestamp(t, UTC), v) for t, v in points], datetime.fromtimestamp(now, UTC)
+        [(datetime.fromtimestamp(t, UTC), v) for t, v in points],
+        at,
+        blocks=need["blocks"] if need else None,
+        deadline=datetime.fromtimestamp(need["deadline"], UTC) if need else None,
     )
     windows = plan["windows"]
     store.put_state(
@@ -118,6 +124,7 @@ def sample_store(now: int) -> MemoryStore:
             "windows": windows,
             "forecast": points,
             "index_now": 70,
+            **({"need": need} if need else {}),
         },
     )
     return store

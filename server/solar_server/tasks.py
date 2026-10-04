@@ -5,12 +5,13 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
+from planner.need import grid_need
 from planner.plan import PACIFIC, build_plan
 
 from solar_server import totals
 from solar_server.config import Settings
 from solar_server.sources import Sources
-from solar_server.store import FORECASTS, MIX, PLANS, PLUG, SAMPLES, Store, day_key
+from solar_server.store import FORECASTS, MIX, PLANS, PLUG, SAMPLES, Store, day_key, window
 from solar_server.totals import integrate_wh
 
 log = logging.getLogger(__name__)
@@ -116,9 +117,22 @@ def store_mix(store: Store, sources: Sources, now: datetime, since: int) -> None
 
 
 def plan(store: Store, sources: Sources, settings: Settings, now: datetime) -> dict:
-    """Pick tomorrow's cleanest hours and keep the forecast for the dashboard."""
+    """Pick the cleanest hours to cover what the battery needs by the next peak.
+
+    Also keeps the forecast for the dashboard. Without a recent battery
+    reading it falls back to the cleanest ``budget_hours``.
+    """
     points = sources.forecast(24)
-    p = build_plan(points, now, budget_hours=settings.budget_hours, region=settings.region)
+    t = int(now.timestamp())
+    need = grid_need(window(store, SAMPLES, t - 7 * 86400, t), now, settings.reserve_pct)
+    if need is None:
+        p = build_plan(points, now, budget_hours=settings.budget_hours, region=settings.region)
+    else:
+        deadline = datetime.fromtimestamp(need["deadline"], PACIFIC)
+        p = build_plan(
+            points, now, region=settings.region, blocks=need["blocks"], deadline=deadline
+        )
+        p["need"] = need
     try:
         p["index_now"] = sources.signal_index()
     except Exception as e:
@@ -131,7 +145,11 @@ def plan(store: Store, sources: Sources, settings: Settings, now: datetime) -> d
     # against what happened and later features can look back.
     store.append(
         PLANS,
-        {"t": p["generated_at"], "windows": [{"s": s, "e": e} for s, e in p["windows"]]},
+        {
+            "t": p["generated_at"],
+            "windows": [{"s": s, "e": e} for s, e in p["windows"]],
+            **({"need": need} if need else {}),
+        },
     )
     if points:
         store.append(

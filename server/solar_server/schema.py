@@ -66,10 +66,24 @@ class Today(BaseModel):
     grid_wh: int
 
 
+class PlanNeed(BaseModel):
+    """What the battery needs from the grid by the next peak (planner/need.py)."""
+
+    deadline: int
+    battery_pct: float
+    reserve_pct: float
+    solar_wh: int
+    load_wh: int
+    grid_wh: int
+    rate_w: int
+    blocks: int
+
+
 class PlanSummary(BaseModel):
     generated_at: int
     windows: list[Window]
     index_now: float | None = None
+    need: PlanNeed | None = None  # absent when there was no battery reading
 
 
 class Now(BaseModel):

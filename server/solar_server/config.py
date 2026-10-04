@@ -11,7 +11,8 @@ class Settings:
     role: str = "web"
     project: str = ""
     region: str = "CAISO_NORTH"
-    budget_hours: float = 4.0
+    budget_hours: float = 4.0  # grid hours a plan takes when there's no battery reading
+    reserve_pct: float = 80.0  # the Jackery's Self-powered reserve, set by hand in its app
     plug_key: str = field(default="", repr=False)
     scheduler_sa: str = ""
     watttime_username: str = field(default="", repr=False)
@@ -28,6 +29,7 @@ class Settings:
             project=e("GOOGLE_CLOUD_PROJECT", ""),
             region=e("WATTTIME_REGION", "CAISO_NORTH"),
             budget_hours=float(e("BUDGET_HOURS", "4")),
+            reserve_pct=float(e("RESERVE_PCT", "80")),
             plug_key=e("PLUG_KEY", ""),
             scheduler_sa=e("SCHEDULER_SERVICE_ACCOUNT", ""),
             watttime_username=e("WATTTIME_USERNAME", ""),

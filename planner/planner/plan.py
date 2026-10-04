@@ -16,14 +16,19 @@ def build_plan(
     block_minutes: int = 30,
     peak_hours: tuple[int, int] = (16, 21),
     region: str = "CAISO_NORTH",
+    blocks: int | None = None,
+    deadline: datetime | None = None,
+    tie: float = 25.0,
 ) -> dict:
     """Return the plan the Shelly script follows.
 
     Forecast points are averaged into fixed blocks so the relay never flips
     more often than once per block. Blocks that start inside the PG&E peak
-    (local time) or have already ended are dropped; the cleanest remaining
-    blocks are taken until they cover ``budget_hours`` and merged into
-    windows of unix timestamps.
+    (local time), at or after ``deadline``, or have already ended are
+    dropped. The cleanest ``blocks`` remaining (``budget_hours`` worth when
+    not given) are merged into windows of unix timestamps. Blocks within
+    ``tie`` lb/MWh of each other count as equally clean and the later one
+    wins, so the panel gets its turn before the grid tops the battery up.
     """
     block = timedelta(minutes=block_minutes)
     sums: dict[datetime, list[float]] = defaultdict(list)
@@ -39,10 +44,13 @@ def build_plan(
         local_hour = start.astimezone(PACIFIC).hour
         if peak_hours[0] <= local_hour < peak_hours[1]:
             continue
+        if deadline is not None and start >= deadline:
+            continue
         candidates.append((sum(values) / len(values), start))
 
-    wanted = round(budget_hours * 60 / block_minutes)
-    chosen = sorted(start for _, start in sorted(candidates)[:wanted])
+    wanted = blocks if blocks is not None else round(budget_hours * 60 / block_minutes)
+    ranked = sorted(candidates, key=lambda c: (round(c[0] / tie), -c[1].timestamp()))
+    chosen = sorted(start for _, start in ranked[:wanted])
 
     windows: list[list[int]] = []
     for start in chosen:

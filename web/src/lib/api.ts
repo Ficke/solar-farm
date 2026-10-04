@@ -6,6 +6,7 @@ export type Sample = Schemas["Sample"];
 export type PlugReport = Schemas["StoredPlugReport"];
 export type MixRow = Schemas["MixRow"];
 export type Window = Schemas["Window"];
+export type PlanNeed = Schemas["PlanNeed"];
 export type Now = Schemas["Now"];
 export type Timeline = Schemas["Timeline"];
 export type Accuracy = Schemas["Accuracy"];

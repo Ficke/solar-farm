@@ -31,7 +31,7 @@ def now_view(store: Store, now: int) -> dict:
         "sample": latest(sample, "sample", 2 * 3600),
         "plug": latest(plug, "report", 3600),
         "today": {"solar_wh": wh(sample), "grid_wh": wh(plug)},
-        "plan": {k: plan.get(k) for k in ("generated_at", "windows", "index_now")}
+        "plan": {k: plan.get(k) for k in ("generated_at", "windows", "index_now", "need")}
         if plan
         else None,
     }

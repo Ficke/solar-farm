@@ -119,15 +119,38 @@ def test_plan_task_feeds_the_plug_without_the_forecast():
     assert not any(k.startswith("forecast") for k in plan)
     assert plan["generated_at"] == NOW
     assert plan["index_now"] == 82.0
-    # 4 clean hours, all in the cheap stretch 18 h out
-    assert plan["windows"] == [[NOW + 18 * 3600, NOW + 22 * 3600]]
+    # No battery reading: 4 clean hours, the latest in the cheap stretch 18 h out
+    assert plan["windows"] == [[NOW + 19 * 3600, NOW + 23 * 3600]]
+    assert "need" not in plan
 
     # Every plan and its forecast are kept, not just the latest.
     assert store.day(PLANS, "2026-10-04") == [
-        {"t": NOW, "windows": [{"s": NOW + 18 * 3600, "e": NOW + 22 * 3600}]}
+        {"t": NOW, "windows": [{"s": NOW + 19 * 3600, "e": NOW + 23 * 3600}]}
     ]
     (snap,) = store.day(FORECASTS, "2026-10-04")
     assert snap["t"] == NOW and snap["step"] == 300 and len(snap["values"]) == 288
+
+
+def test_plan_covers_what_the_battery_needs_by_the_next_peak():
+    c, store = make("edge")
+    # A week of readings: no solar, a steady 100 W load, the grid charging at 1,100 W.
+    for t in range(NOW - 7 * 86400, NOW + 1, 300):
+        store.append(
+            SAMPLES,
+            {"t": t, "battery_pct": 50.0, "solar_w": 0.0, "ac_input_w": 1200.0, "output_w": 100.0},
+        )
+    c.post("/tasks/plan", headers=AUTH)
+    plan = c.get("/plug/plan", headers={"X-Plug-Key": "k3y"}).json()
+    need = plan["need"]
+    # 17:00 now, so the deadline is tomorrow's 16:00: 23 h of 100 W load.
+    assert need["deadline"] == NOW + 23 * 3600
+    assert need["load_wh"] == 2300 and need["solar_wh"] == 0
+    # 30% of 3,072 Wh plus the load, at 550 Wh a half-hour, plus one spare.
+    assert need["grid_wh"] == round(0.3 * 3072 + 2300)
+    assert need["rate_w"] == 1100 and need["blocks"] == 7
+    # The clean stretch starts 18 h out; the latest blocks before the deadline win.
+    assert plan["windows"] == [[NOW + 19.5 * 3600, NOW + 23 * 3600]]
+    assert store.day(PLANS, "2026-10-04")[0]["need"] == need
 
 
 def test_grid_mix_is_stored_once_per_row():

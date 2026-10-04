@@ -1,6 +1,6 @@
 <script lang="ts">
   // The plan: a strip on the same time axis as the charts, then the windows.
-  import type { Window } from "./api";
+  import type { PlanNeed, Window } from "./api";
   import { AXIS_W, hourTicks, PAD_R } from "./layout";
   import {
     fmtClock,
@@ -18,13 +18,17 @@
     from,
     to,
     now,
+    need,
   }: {
     windows: Window[];
     forecast: [number, number][];
     from: number;
     to: number;
     now: number;
+    need: PlanNeed | null;
   } = $props();
+
+  const kwh = (wh: number) => `${(wh / 1000).toFixed(1)} kWh`;
 
   let width = $state(600);
   const H = 52;
@@ -46,6 +50,14 @@
       });
   });
 </script>
+
+{#if need}
+  <p class="need">
+    {need.grid_wh > 0 ? `${kwh(need.grid_wh)} from the grid` : "Nothing from the grid"} to reach
+    {need.reserve_pct}% by {fmtWhen(need.deadline, now)}
+    <span>Battery {Math.round(need.battery_pct)}% · solar {kwh(need.solar_wh)} · load {kwh(need.load_wh)} · charges at {need.rate_w.toLocaleString("en-US")} W</span>
+  </p>
+{/if}
 
 <div bind:clientWidth={width}>
   <svg viewBox="0 0 {width} {H}" height={H} role="img" aria-label="Grid on times, past and next 24 hours">
@@ -132,6 +144,16 @@
     background: var(--grid-fill);
     color: var(--ink);
     font-weight: 600;
+  }
+  .need {
+    margin: 0 0 8px;
+    font-size: 14px;
+    font-variant-numeric: tabular-nums;
+  }
+  .need span {
+    display: block;
+    color: var(--ink-3);
+    font-size: 12px;
   }
   .muted {
     color: var(--ink-3);
