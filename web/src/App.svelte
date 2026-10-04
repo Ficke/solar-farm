@@ -4,7 +4,7 @@
   import { type Accuracy, api, type Co2, type Now, type Period, type Timeline } from "./lib/api";
   import { COUNTS } from "./lib/co2";
   import History from "./lib/History.svelte";
-  import { FUTURE, PAST } from "./lib/layout";
+  import { FUTURE, LINE_THIN, PAST } from "./lib/layout";
   import { GROUPS, stackMix } from "./lib/mix";
   import PlanView from "./lib/PlanView.svelte";
   import Segmented from "./lib/Segmented.svelte";
@@ -14,7 +14,7 @@
   import { ago, fmtWhen, hours } from "./lib/time";
 
   const MODES: { value: Mode; label: string }[] = [
-    { value: "system", label: "Auto" },
+    { value: "system", label: "System" },
     { value: "light", label: "Light" },
     { value: "dark", label: "Dark" },
   ];
@@ -244,6 +244,7 @@
     </div>
     <TimeChart
       label="Marginal CO2, past 24 hours and forecast"
+      title="CO₂, lb/MWh"
       data={emissionsData}
       {from}
       {to}
@@ -257,7 +258,7 @@
           color: "--co2-mid",
           ramp: CO2_RAMP,
           dash: [4, 4],
-          width: 1.5,
+          width: LINE_THIN,
           unit: "lb/MWh",
         },
       ]}
@@ -265,6 +266,7 @@
     <h3>Generation by source, GW</h3>
     <TimeChart
       label="CAISO generation by source, past 24 hours"
+      title="Generation by source, GW"
       data={mix.stacked}
       tipData={mix.raw}
       shade={false}
@@ -277,7 +279,7 @@
         color: g.color,
         fill: g.color,
         area: true,
-        width: 1,
+        width: LINE_THIN,
         unit: "GW",
         digits: 1,
       }))}
@@ -289,6 +291,7 @@
     <h3>Charge, %</h3>
     <TimeChart
       label="Battery charge, past 24 hours"
+      title="Charge, %"
       data={batteryData}
       {from}
       {to}
@@ -302,6 +305,7 @@
     <h3>Power, W</h3>
     <TimeChart
       label="Solar and grid power in and load out, past 24 hours"
+      title="Power, W"
       data={powerData}
       {from}
       {to}
@@ -311,7 +315,7 @@
       series={[
         { label: "Solar", color: "--solar", fill: "--solar-fill", unit: "W" },
         { label: "Grid", color: "--grid", fill: "--grid-fill", unit: "W" },
-        { label: "Load", color: "--ink-3", width: 1.5, unit: "W" },
+        { label: "Load", color: "--ink-3", width: LINE_THIN, unit: "W" },
       ]}
     />
     <p class="key">
