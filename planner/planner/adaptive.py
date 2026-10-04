@@ -14,6 +14,7 @@ from statistics import mean, median
 
 from planner.plan import PACIFIC
 from planner.telemetry import CAPACITY_WH
+from planner.watttime import drop_padding
 
 TIE_MOER = 50  # lb/MWh; forecasts this close count as equally clean
 MIN_SOLAR_WH = 150  # later solar below this is not worth keeping room for
@@ -122,14 +123,15 @@ def build_adaptive_plan(
     counts half the usual output and only when that is at least MIN_SOLAR_WH:
     a little solar is not worth missing a clean window for. The battery never
     plans below its floor. An infeasible plan is reported, never hidden by
-    scheduling during peak or outside the supplied forecast.
+    scheduling during peak or outside the supplied forecast. Blocks with no
+    forecast, including a forecast's zero-padded tail, are never scheduled.
     """
     tnow = int(now.timestamp())
     floor = CAPACITY_WH * floor_pct / 100
     target = CAPACITY_WH
     deadline = next_deadline(now)
     signals: dict[int, list[float]] = defaultdict(list)
-    for t, value in points:
+    for t, value in drop_padding(sorted(points)):
         ts = int(t.timestamp())
         # Points from the start of the current block keep it plannable until it ends.
         if tnow // 900 * 900 <= ts < deadline and math.isfinite(value):
