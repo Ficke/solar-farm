@@ -165,6 +165,7 @@
     { name: "Battery", t: s?.t, limit: 900 },
     { name: "Plug", t: plug?.t, limit: 300 },
     { name: "Plan", t: now?.plan?.generated_at, limit: 3 * 3600 },
+    { name: "Forecast", t: now?.plan?.forecast_at, limit: 600 },
   ]);
   const stale = $derived(health.filter((h) => age(h.t) > h.limit));
 </script>
