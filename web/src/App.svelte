@@ -12,6 +12,12 @@
   import { ago, fmtWhen, hours } from "./lib/time";
 
   const LEADS = [1, 3, 6, 12];
+  // Marginal CO2 is colored by its value, so clean hours read at a glance.
+  const CO2_RAMP: [number, string][] = [
+    [250, "--co2-clean"],
+    [550, "--co2-mid"],
+    [850, "--co2-dirty"],
+  ];
 
   let now = $state<Now>();
   let tl = $state<Timeline>();
@@ -130,7 +136,7 @@
 
 <main>
   <header>
-    <h1>Solar Farm</h1>
+    <h1><i class="mark" aria-hidden="true"></i>Solar Farm</h1>
     {#if stale.length}
       <p class="sub">
         <span class="dot bad"></span>No data from {stale.map((h) => h.name.toLowerCase()).join(", ")}
@@ -154,6 +160,9 @@
       <div>
         <dt>Battery</dt>
         <dd><b>{s?.battery_pct ?? "–"}</b><small>%</small></dd>
+        <dd class="gauge" aria-hidden="true">
+          <i style:width="{s?.battery_pct ?? 0}%"></i>
+        </dd>
       </div>
       <div>
         <dt>Solar</dt>
@@ -214,8 +223,8 @@
       {windows}
       height={180}
       series={[
-        { label: "Marginal", color: "--ink", unit: "lb/MWh" },
-        { label: "Forecast", color: "--accent", dash: [5, 4], unit: "lb/MWh" },
+        { label: "Marginal", color: "--co2-mid", ramp: CO2_RAMP, unit: "lb/MWh" },
+        { label: "Forecast", color: "--co2-mid", ramp: CO2_RAMP, dash: [4, 4], width: 1.5, unit: "lb/MWh" },
       ]}
     />
     <h3>Generation by source, GW</h3>
@@ -253,7 +262,7 @@
       height={110}
       yMax={100}
       yRule={now?.plan?.target_pct != null ? { value: now.plan.target_pct, label: `Grid target ${now.plan.target_pct}%` } : undefined}
-      series={[{ label: "Battery", color: "--accent", unit: "%" }]}
+      series={[{ label: "Battery", color: "--battery", unit: "%" }]}
     />
     <h3>Power, W</h3>
     <TimeChart
@@ -267,7 +276,7 @@
       series={[
         { label: "Solar", color: "--solar", fill: "--solar-fill", unit: "W" },
         { label: "Grid", color: "--grid", fill: "--grid-fill", unit: "W" },
-        { label: "Load", color: "--ink-2", width: 1.5, unit: "W" },
+        { label: "Load", color: "--ink-3", width: 1.5, unit: "W" },
       ]}
     />
     <p class="key">
@@ -302,34 +311,46 @@
     max-width: 1080px;
     margin: 0 auto;
     display: grid;
-    gap: 16px;
+    gap: 40px;
   }
   header {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     justify-content: space-between;
     gap: 12px;
     flex-wrap: wrap;
+    margin-bottom: -16px;
   }
   h1 {
-    font: 600 24px var(--f-display);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font: 600 15px var(--f-sans);
+    letter-spacing: -0.005em;
     margin: 0;
   }
+  .mark {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--solar);
+  }
   h2 {
-    font: 600 16px var(--f-display);
-    margin: 0 0 8px;
+    font: 600 15px var(--f-sans);
+    letter-spacing: -0.005em;
+    margin: 0 0 10px;
   }
   .sub {
     margin: 0;
     font-size: 13px;
-    color: var(--ink-3);
+    color: var(--bad);
     display: flex;
     align-items: center;
     gap: 6px;
   }
   .sub .dot {
-    width: 8px;
-    height: 8px;
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
   }
   .dot.bad {
@@ -338,32 +359,35 @@
   .banner {
     margin: 0;
     padding: 10px 14px;
-    border-radius: 8px;
+    border-radius: 6px;
     background: var(--bad-bg);
     color: var(--bad);
+    font-size: 14px;
   }
   .card {
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    padding: 16px 18px;
+    border-top: 1px solid var(--line);
+    padding-top: 16px;
     min-width: 0;
+  }
+  .card.now {
+    border-top: 0;
+    padding-top: 0;
   }
   .head {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     justify-content: space-between;
     gap: 8px 12px;
     flex-wrap: wrap;
-    margin-bottom: 8px;
+    margin-bottom: 10px;
   }
   .head h2 {
     margin: 0;
   }
   h3 {
-    font: 500 12px var(--f-body);
-    color: var(--ink-3);
-    margin: 14px 0 2px;
+    font: 500 13px var(--f-sans);
+    color: var(--ink-2);
+    margin: 24px 0 4px;
   }
   .charts h2 + h3 {
     margin-top: 4px;
@@ -371,11 +395,11 @@
   .ctl {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 10px;
     flex-wrap: wrap;
   }
   .stat {
-    font-size: 12px;
+    font-size: 13px;
     color: var(--ink-3);
   }
   .stat b {
@@ -388,84 +412,125 @@
   .headline {
     display: flex;
     gap: 12px;
-    align-items: flex-start;
+    align-items: baseline;
   }
   .headline h2 {
-    font-size: 20px;
+    font-size: 30px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
     margin: 0;
   }
   .headline p {
-    margin: 2px 0 0;
+    margin: 4px 0 0;
     color: var(--ink-2);
   }
   .state {
-    width: 14px;
-    height: 14px;
-    margin-top: 6px;
+    width: 12px;
+    height: 12px;
     border-radius: 50%;
-    background: var(--ink-3);
+    border: 2px solid var(--ink-3);
     flex: none;
+    transform: translateY(-3px);
   }
   .now.on .state {
+    border-color: var(--grid);
     background: var(--grid);
     box-shadow: 0 0 0 4px var(--grid-fill);
   }
   .tiles {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-    gap: 16px;
-    margin: 16px 0 0;
-    padding-top: 14px;
-    border-top: 1px solid var(--line);
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    margin: 28px 0 0;
+  }
+  .tiles > div {
+    padding: 2px 20px;
+    border-left: 1px solid var(--line);
+  }
+  .tiles > div:first-child {
+    padding-left: 0;
+    border-left: 0;
+  }
+  @media (max-width: 640px) {
+    .tiles {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      row-gap: 20px;
+    }
+    .tiles > div:nth-child(3) {
+      padding-left: 0;
+      border-left: 0;
+    }
+    .headline h2 {
+      font-size: 24px;
+    }
   }
   dt {
     font-size: 13px;
-    color: var(--ink-3);
+    font-weight: 500;
+    color: var(--ink-2);
   }
   dd {
     margin: 0;
   }
   dd b {
-    font: 600 28px var(--f-display);
-    font-variant-numeric: tabular-nums;
+    font: 500 36px / 1.15 var(--f-sans);
+    letter-spacing: -0.025em;
   }
   dd small {
-    font-size: 13px;
-    margin-left: 4px;
+    font-size: 14px;
+    margin-left: 3px;
     color: var(--ink-3);
+  }
+  .gauge {
+    height: 4px;
+    margin: 8px 0 2px;
+    border-radius: 2px;
+    background: var(--panel-2);
+    overflow: hidden;
+  }
+  .gauge i {
+    display: block;
+    height: 100%;
+    background: var(--ink);
+    border-radius: 2px;
   }
   .n {
     font-size: 13px;
-    color: var(--ink-2);
+    color: var(--ink-3);
   }
   .seg {
     display: inline-flex;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    overflow: hidden;
+    padding: 2px;
+    gap: 2px;
+    border-radius: 7px;
+    background: var(--panel-2);
   }
   .seg button {
     font: inherit;
-    font-size: 12px;
-    padding: 4px 10px;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 3px 10px;
     border: 0;
+    border-radius: 5px;
     background: transparent;
     color: var(--ink-2);
     cursor: pointer;
   }
-  .seg button + button {
-    border-left: 1px solid var(--line);
+  .seg button:hover {
+    color: var(--ink);
   }
   .seg button[aria-pressed="true"] {
-    background: var(--panel-2);
+    background: var(--panel);
     color: var(--ink);
-    font-weight: 600;
+    box-shadow:
+      0 0 0 1px var(--line),
+      0 1px 2px rgb(0 0 0 / 0.06);
   }
-    .key {
+  .key {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px 14px;
-    margin: 8px 0 0;
+    gap: 4px 16px;
+    margin: 10px 0 0;
     font-size: 12px;
     color: var(--ink-2);
   }
@@ -482,13 +547,11 @@
   }
   .sw.plan {
     background: var(--plan-band);
-    outline: 1px solid var(--grid);
-    outline-offset: -1px;
+    box-shadow: inset 0 -2px 0 var(--grid);
   }
   .sw.peak {
     background: var(--peak-band);
-    outline: 1px solid var(--peak-ink);
-    outline-offset: -1px;
+    box-shadow: inset 0 -2px 0 var(--peak-ink);
   }
   footer {
     display: flex;
@@ -496,14 +559,17 @@
     flex-wrap: wrap;
     font-size: 12px;
     color: var(--ink-3);
+    border-top: 1px solid var(--line);
+    padding-top: 12px;
+    margin-top: -16px;
   }
   footer i {
     display: inline-block;
-    width: 8px;
-    height: 8px;
+    width: 6px;
+    height: 6px;
     border-radius: 50%;
     background: var(--good);
-    margin-right: 6px;
+    margin: 0 6px 1px 0;
   }
   footer .stale {
     color: var(--bad);

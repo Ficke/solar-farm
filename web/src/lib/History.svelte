@@ -18,7 +18,7 @@
   const LABELS = 22;
 
   const gw = $derived((width - M.l - M.r) / Math.max(cols.length, 1));
-  const bw = $derived(Math.max(4, Math.min(28, gw * 0.6)));
+  const bw = $derived(Math.max(4, Math.min(20, gw * 0.5)));
   const cx = (i: number) => M.l + gw * i + gw / 2;
   // Skip period labels when they'd collide; always keep the latest.
   const every = $derived(Math.max(1, Math.ceil((by === "month" ? 36 : 48) / gw)));
@@ -93,7 +93,7 @@
     <dd><b>{co2 ? totals.grid[0] : "–"}</b><small>{totals.grid[1]}</small></dd>
   </div>
   <div>
-    <dt><i class="sw" style:background="var(--ink-3)"></i>Load</dt>
+    <dt><i class="sw" style:background="var(--load)"></i>Load</dt>
     <dd><b>{co2 ? totals.load[0] : "–"}</b><small>{totals.load[1]}</small></dd>
   </div>
   <div>
@@ -115,7 +115,7 @@
   <h3>Energy in and out, kWh</h3>
   <svg viewBox="0 0 {width} {EH}" height={EH} role="img" aria-label="Solar, grid and load energy per {by}">
     {#each eTicks as v (v)}
-      <line x1={M.l} x2={width - M.r} y1={ey(v)} y2={ey(v)} stroke={v ? "var(--line)" : "var(--ink-3)"} />
+      <line x1={M.l} x2={width - M.r} y1={ey(v)} y2={ey(v)} stroke={v ? "var(--rule)" : "var(--ink-3)"} />
       <text x={M.l - 6} y={ey(v) + 4} text-anchor="end" class="tick">{fmtTick(Math.abs(v))}</text>
     {/each}
     {#if hovered != null}
@@ -127,8 +127,8 @@
         {@const s = p.solar_wh / 1000}
         {@const g = p.grid_wh / 1000}
         <path d={bar(x, ey(0), ey(s), g === 0)} fill="var(--solar)" />
-        <path d={bar(x, ey(s), ey(s + g), true)} fill="var(--grid)" />
-        <path d={bar(x, ey(0), ey(-p.load_wh / 1000), true)} fill="var(--ink-3)" />
+        <path d={bar(x, s > 0 ? ey(s) - 2 : ey(s), ey(s + g), true)} fill="var(--grid)" />
+        <path d={bar(x, ey(0) + 1, ey(-p.load_wh / 1000), true)} fill="var(--load)" />
       {/if}
     {/each}
   </svg>
@@ -136,7 +136,7 @@
   <h3>Net CO₂ avoided, lb</h3>
   <svg viewBox="0 0 {width} {CH}" height={CH} role="img" aria-label="CO2 avoided per {by}">
     {#each cTicks as v (v)}
-      <line x1={M.l} x2={width - M.r} y1={cy(v)} y2={cy(v)} stroke={v ? "var(--line)" : "var(--ink-3)"} />
+      <line x1={M.l} x2={width - M.r} y1={cy(v)} y2={cy(v)} stroke={v ? "var(--rule)" : "var(--ink-3)"} />
       <text x={M.l - 6} y={cy(v) + 4} text-anchor="end" class="tick">{fmtTick(v)}</text>
     {/each}
     {#if hovered != null}
@@ -169,7 +169,7 @@
       {#if p}
         <div class="row"><span class="key" style:background="var(--solar)"></span><strong>{span(fmtWh(p.solar_wh))}</strong><span class="name">Solar</span></div>
         <div class="row"><span class="key" style:background="var(--grid)"></span><strong>{span(fmtWh(p.grid_wh))}</strong><span class="name">Grid</span></div>
-        <div class="row"><span class="key" style:background="var(--ink-3)"></span><strong>{span(fmtWh(p.load_wh))}</strong><span class="name">Load</span></div>
+        <div class="row"><span class="key" style:background="var(--load)"></span><strong>{span(fmtWh(p.load_wh))}</strong><span class="name">Load</span></div>
         <div class="row">
           <span class="key" style:background={p.avoided_lb < 0 ? "var(--bad)" : "var(--good)"}></span>
           <strong>{fmtLb(Math.abs(p.avoided_lb))} lb</strong><span class="name">{co2Label(p.avoided_lb)}</span>
@@ -190,7 +190,8 @@
   }
   dt {
     font-size: 13px;
-    color: var(--ink-3);
+    font-weight: 500;
+    color: var(--ink-2);
     display: flex;
     align-items: center;
     gap: 6px;
@@ -199,8 +200,8 @@
     margin: 0;
   }
   dd b {
-    font: 600 28px var(--f-display);
-    font-variant-numeric: tabular-nums;
+    font: 500 28px / 1.2 var(--f-sans);
+    letter-spacing: -0.02em;
   }
   dd small {
     font-size: 13px;
@@ -214,9 +215,9 @@
     border-radius: 2px;
   }
   h3 {
-    font: 500 12px var(--f-body);
-    color: var(--ink-3);
-    margin: 14px 0 2px;
+    font: 500 13px var(--f-sans);
+    color: var(--ink-2);
+    margin: 24px 0 4px;
   }
   .plot {
     position: relative;
@@ -227,7 +228,7 @@
     width: 100%;
   }
   .tick {
-    font: 11px var(--f-mono);
+    font: 11px var(--f-sans);
     fill: var(--ink-3);
   }
   .tick.on {
@@ -244,9 +245,9 @@
     pointer-events: none;
     background: var(--panel);
     border: 1px solid var(--line);
-    border-radius: 8px;
-    box-shadow: 0 4px 16px rgb(0 0 0 / 0.15);
-    padding: 8px 10px;
+    border-radius: 6px;
+    box-shadow: 0 2px 8px rgb(0 0 0 / 0.08);
+    padding: 6px 10px;
     font-size: 12px;
     white-space: nowrap;
   }

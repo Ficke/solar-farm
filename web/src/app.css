@@ -1,64 +1,74 @@
-/* Same palette as the design mockup. Series colors validated for CVD
-   separation on both surfaces; amber needs direct labels on light. */
+/* Warm neutrals with one hue per energy source. The fuel-mix steps are
+   validated for CVD separation on both surfaces; Imports and Other are
+   deliberately neutral. */
 :root {
-  --bg: #eef1f4;
+  --bg: #fafaf9;
   --panel: #ffffff;
-  --panel-2: #f6f8fa;
-  --ink: #121820;
-  --ink-2: #485361;
-  --ink-3: #6f7a88;
-  --line: #d9dfe6;
-  --accent: #1d5fa8;
-  --solar: #eda100;
-  --solar-fill: rgba(237, 161, 0, 0.22);
-  --grid: #2a78d6;
-  --grid-fill: rgba(42, 120, 214, 0.18);
-  --plan-band: rgba(42, 120, 214, 0.1);
-  --peak-band: rgba(208, 59, 59, 0.09);
-  --peak-ink: #b33232;
-  --mix-gas: #c8553d;
-  --mix-imports: #b3a589;
-  --mix-batteries: #3a9a48;
-  --mix-wind: #7cb6e0;
-  --mix-hydro: #2b8a99;
-  --mix-other: #9aa3ae;
-  --mix-nuclear: #8a68ba;
-  --good: #0a7d0a;
-  --good-bg: rgba(12, 163, 12, 0.12);
-  --bad: #c03030;
-  --bad-bg: rgba(208, 59, 59, 0.12);
-  --f-display: "Familjen Grotesk", "Helvetica Neue", Arial, sans-serif;
-  --f-body: "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --f-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --panel-2: #f1f0ed;
+  --ink: #1c1b19;
+  --ink-2: #55524d;
+  --ink-3: #85817a;
+  --line: #e4e2de;
+  --rule: #eeece9;
+  --solar: #e0a100;
+  --solar-fill: rgba(224, 161, 0, 0.16);
+  --grid: #2f6fd0;
+  --grid-fill: rgba(47, 111, 208, 0.14);
+  --battery: #1c1b19;
+  --load: #bdb8b0;
+  --plan-band: rgba(47, 111, 208, 0.07);
+  --peak-band: rgba(176, 82, 40, 0.06);
+  --peak-ink: #a5502d;
+  --co2-clean: #23896a;
+  --co2-mid: #c99400;
+  --co2-dirty: #b5482c;
+  --mix-gas: #b85c3c;
+  --mix-imports: #b8ab98;
+  --mix-batteries: #2f8f5f;
+  --mix-wind: #5fa8e3;
+  --mix-hydro: #2a63a8;
+  --mix-other: #a39d95;
+  --mix-nuclear: #8a6cc4;
+  --good: #23896a;
+  --good-bg: rgba(35, 137, 106, 0.12);
+  --bad: #b5482c;
+  --bad-bg: rgba(181, 72, 44, 0.1);
+  --f-sans:
+    "IBM Plex Sans Variable", "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #11151a;
-    --panel: #192028;
-    --panel-2: #1e252e;
-    --ink: #eef1f4;
-    --ink-2: #b6bfca;
-    --ink-3: #8a95a3;
-    --line: #2c343f;
-    --accent: #6da7ec;
+    --bg: #161615;
+    --panel: #201f1d;
+    --panel-2: #282725;
+    --ink: #f2f1ee;
+    --ink-2: #bdb9b2;
+    --ink-3: #8c8881;
+    --line: #34322f;
+    --rule: #262523;
     --solar: #c98500;
-    --solar-fill: rgba(201, 133, 0, 0.28);
-    --grid: #3987e5;
-    --grid-fill: rgba(57, 135, 229, 0.25);
-    --plan-band: rgba(57, 135, 229, 0.14);
-    --peak-band: rgba(230, 103, 103, 0.12);
-    --peak-ink: #f08a8a;
-    --mix-gas: #c9573f;
-    --mix-imports: #857b66;
-    --mix-batteries: #43a851;
-    --mix-wind: #5d9ccc;
-    --mix-hydro: #2f9aab;
-    --mix-other: #66707c;
-    --mix-nuclear: #9776c6;
-    --good: #4cc94c;
-    --good-bg: rgba(12, 163, 12, 0.2);
-    --bad: #f08a8a;
-    --bad-bg: rgba(230, 103, 103, 0.18);
+    --solar-fill: rgba(201, 133, 0, 0.22);
+    --grid: #4a86e0;
+    --grid-fill: rgba(74, 134, 224, 0.22);
+    --battery: #f2f1ee;
+    --load: #66625c;
+    --plan-band: rgba(74, 134, 224, 0.11);
+    --peak-band: rgba(214, 112, 70, 0.08);
+    --peak-ink: #e08a66;
+    --co2-clean: #3fae88;
+    --co2-mid: #d6a531;
+    --co2-dirty: #df6c4c;
+    --mix-gas: #ad4c33;
+    --mix-imports: #aaa190;
+    --mix-batteries: #2b8656;
+    --mix-wind: #6aaee0;
+    --mix-hydro: #3a64b0;
+    --mix-other: #7d7871;
+    --mix-nuclear: #9a7ad0;
+    --good: #3fae88;
+    --good-bg: rgba(63, 174, 136, 0.16);
+    --bad: #df6c4c;
+    --bad-bg: rgba(223, 108, 76, 0.14);
     color-scheme: dark;
   }
 }
@@ -69,10 +79,11 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--ink);
-  font: 15px / 1.5 var(--f-body);
-  padding: max(16px, env(safe-area-inset-top)) 16px max(32px, env(safe-area-inset-bottom));
+  font: 15px / 1.5 var(--f-sans);
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  padding: max(20px, env(safe-area-inset-top)) 20px max(32px, env(safe-area-inset-bottom));
 }
-.uplot,
-.u-legend {
-  font-family: var(--f-mono);
+.uplot {
+  font-family: var(--f-sans);
 }

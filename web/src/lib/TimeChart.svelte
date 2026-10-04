@@ -15,6 +15,8 @@
     /** Solid area: a square key instead of a line. */
     area?: boolean;
     dash?: number[];
+    /** Color the line by its value: [value, color token] stops, low to high. */
+    ramp?: [number, string][];
     width?: number;
     unit: string;
     digits?: number;
@@ -78,30 +80,30 @@
     const dpr = devicePixelRatio;
     const x = Math.round(u.valToPos(now, "x", true));
     if (x >= u.bbox.left && x <= u.bbox.left + u.bbox.width) {
-      ctx.strokeStyle = css("--ink-2");
+      ctx.strokeStyle = css("--ink-3");
       ctx.lineWidth = dpr;
       ctx.beginPath();
       ctx.moveTo(x, u.bbox.top);
       ctx.lineTo(x, u.bbox.top + u.bbox.height);
       ctx.stroke();
       ctx.fillStyle = css("--ink-2");
-      ctx.font = `${11 * dpr}px ${css("--f-body")}`;
+      ctx.font = `500 ${11 * dpr}px ${css("--f-sans")}`;
       ctx.textAlign = "left";
       ctx.textBaseline = "top";
-      ctx.fillText("now", x + 4 * dpr, u.bbox.top + 2 * dpr);
+      ctx.fillText("Now", x + 4 * dpr, u.bbox.top + 2 * dpr);
     }
     if (yRule) {
       const y = Math.round(u.valToPos(yRule.value, "y", true));
       ctx.strokeStyle = css("--ink-3");
       ctx.lineWidth = dpr;
-      ctx.setLineDash([4 * dpr, 3 * dpr]);
+      ctx.setLineDash([2 * dpr, 3 * dpr]);
       ctx.beginPath();
       ctx.moveTo(u.bbox.left, y);
       ctx.lineTo(u.bbox.left + u.bbox.width, y);
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.fillStyle = css("--ink-2");
-      ctx.font = `${11 * dpr}px ${css("--f-body")}`;
+      ctx.font = `${11 * dpr}px ${css("--f-sans")}`;
       ctx.textAlign = "left";
       ctx.textBaseline = "bottom";
       ctx.fillText(yRule.label, u.bbox.left + 6 * dpr, y - 3 * dpr);
@@ -138,12 +140,26 @@
     };
   }
 
+  // A vertical gradient whose stops sit at the ramp's values on the y scale.
+  function rampStroke(ramp: [number, string][]) {
+    return (u: uPlot) => {
+      const lo = ramp[0][0];
+      const hi = ramp[ramp.length - 1][0];
+      const y0 = u.valToPos(lo, "y", true);
+      const y1 = u.valToPos(hi, "y", true);
+      if (!Number.isFinite(y0) || !Number.isFinite(y1) || y0 === y1) return css(ramp[0][1]);
+      const g = u.ctx.createLinearGradient(0, y0, 0, y1);
+      for (const [v, c] of ramp) g.addColorStop((v - lo) / (hi - lo), css(c));
+      return g;
+    };
+  }
+
   function opts(w: number): uPlot.Options {
     const axis = {
       stroke: css("--ink-3"),
-      grid: { stroke: css("--line"), width: 1 },
+      grid: { stroke: css("--rule"), width: 1 },
       ticks: { show: false },
-      font: `11px ${css("--f-body")}`,
+      font: `11px ${css("--f-sans")}`,
     };
     return {
       width: w,
@@ -167,6 +183,7 @@
       axes: [
         {
           ...axis,
+          grid: { show: false },
           size: 28,
           splits: () => hourTicks(from, to, w),
           values: (_u, ticks) => ticks.map(tickLabel),
@@ -177,10 +194,11 @@
         {},
         ...series.map((s) => ({
           label: s.label,
-          stroke: css(s.color),
+          // Stacked areas get a surface-colored edge so adjacent fills separate.
+          stroke: s.ramp ? rampStroke(s.ramp) : s.area ? css("--bg") : css(s.color),
           fill: s.fill ? css(s.fill) : undefined,
           dash: s.dash,
-          width: s.width ?? 2,
+          width: s.width ?? (s.area ? 1 : 2),
           spanGaps: false,
           points: { show: false },
         })),
@@ -226,6 +244,12 @@
       <li>
         {#if s.area}
           <span class="swatch" style:background="var({s.color})"></span>
+        {:else if s.ramp}
+          <span
+            class="ramp"
+            class:dash={s.dash}
+            style:background="linear-gradient(90deg, {s.ramp.map(([, c]) => `var(${c})`).join(', ')})"
+          ></span>
         {:else}
         <svg width="18" height="8" aria-hidden="true"
           ><line
@@ -272,13 +296,21 @@
   }
   .legend {
     list-style: none;
-    margin: 0 0 4px;
+    margin: 0 0 6px;
     padding: 0;
     display: flex;
     flex-wrap: wrap;
-    gap: 4px 14px;
+    gap: 4px 16px;
     font-size: 12px;
     color: var(--ink-2);
+  }
+  .ramp {
+    width: 18px;
+    height: 2px;
+    border-radius: 1px;
+  }
+  .ramp.dash {
+    mask: repeating-linear-gradient(90deg, #000 0 4px, transparent 4px 7px);
   }
   .legend li {
     display: flex;
@@ -296,9 +328,9 @@
     transform: translate(12px, 0);
     background: var(--panel);
     border: 1px solid var(--line);
-    border-radius: 8px;
-    box-shadow: 0 4px 16px rgb(0 0 0 / 0.15);
-    padding: 8px 10px;
+    border-radius: 6px;
+    box-shadow: 0 2px 8px rgb(0 0 0 / 0.08);
+    padding: 6px 10px;
     font-size: 12px;
     white-space: nowrap;
   }
