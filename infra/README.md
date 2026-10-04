@@ -82,7 +82,7 @@ The dashboard URL appears in the run log as `dashboard_url`.
 
 ## Changing things
 
-Edit the `.tf` files and open a PR. CI checks formatting and validates the config, and merging applies it. To preview locally, copy `terraform.tfvars.example` to `terraform.tfvars` (git-ignored) and run `tofu -chdir=infra init && tofu -chdir=infra plan`.
+Edit the `.tf` files and open a PR. CI checks formatting and validates the config, and merging applies it. To preview locally, copy `terraform.tfvars.example` to `terraform.tfvars` (git-ignored) and run `tofu -chdir=infra init && tofu -chdir=infra plan`. Provider versions are pinned in the committed `.terraform.lock.hcl` files; after changing a provider version, run `just lock` and commit them.
 
 ## Notes
 

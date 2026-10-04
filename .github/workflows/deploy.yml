@@ -2,6 +2,9 @@ name: Deploy
 
 # Builds the server image and rolls it out to both Cloud Run services on
 # every push to main that changes the server, the planner or the dashboard.
+# CI runs first on the same commit. After the rollout the public service's
+# /healthz must answer, or both services go back to the revisions they were
+# serving before.
 on:
   push:
     branches: [main]
@@ -19,35 +22,75 @@ permissions:
   contents: read
   id-token: write
 
-concurrency:
-  group: deploy
-  cancel-in-progress: false
-
 env:
   REGION: us-west1
+  SERVICES: solar-edge solar-web
   IMAGE: us-west1-docker.pkg.dev/solar-farm-510518/solar-farm/server:${{ github.sha }}
 
 jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
   deploy:
+    needs: ci
     runs-on: ubuntu-latest
+    # Shared with Infra so an apply and a rollout never touch the services at once.
+    concurrency:
+      group: production
+      cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v5
-      - uses: google-github-actions/auth@v3
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           workload_identity_provider: projects/644948460803/locations/global/workloadIdentityPools/github/providers/solar-farm
           service_account: github-deploy@solar-farm-510518.iam.gserviceaccount.com
-      - uses: google-github-actions/setup-gcloud@v3
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
       - run: gcloud auth configure-docker us-west1-docker.pkg.dev --quiet
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           push: true
           tags: ${{ env.IMAGE }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Record serving revisions
+        id: before
+        run: |
+          set -o pipefail
+          for svc in $SERVICES; do
+            rev=$(gcloud run services describe "$svc" --region "$REGION" --format=json \
+              | jq -r '[.status.traffic[] | select(.percent == 100)][0].revisionName // empty')
+            echo "$svc is serving ${rev:-nothing yet}"
+            echo "${svc//-/_}=$rev" >> "$GITHUB_OUTPUT"
+          done
+      # `services update` waits until the new revision is ready and fails if it
+      # never starts. --to-latest undoes any earlier rollback's pinned traffic.
       - name: Roll out
         run: |
-          for svc in solar-edge solar-web; do
+          for svc in $SERVICES; do
             gcloud run services update "$svc" --region "$REGION" --image "$IMAGE" --quiet
+            gcloud run services update-traffic "$svc" --region "$REGION" --to-latest --quiet
+          done
+      # solar-web sits behind IAP, so only solar-edge can be probed from here.
+      # Both run the same image.
+      - name: Smoke test
+        run: |
+          set -o pipefail
+          url=$(gcloud run services describe solar-edge --region "$REGION" --format='value(status.url)')
+          curl -fsS --retry 6 --retry-all-errors --retry-delay 5 --max-time 10 "$url/healthz" \
+            | tee /dev/stderr | jq -e '.ok == true and .role == "edge"' >/dev/null
+      - name: Roll back
+        if: failure() && steps.before.outcome == 'success'
+        env:
+          BEFORE: ${{ toJSON(steps.before.outputs) }}
+        run: |
+          for svc in $SERVICES; do
+            rev=$(jq -r --arg k "${svc//-/_}" '.[$k] // empty' <<<"$BEFORE")
+            if [ -z "$rev" ]; then
+              echo "::warning::No earlier revision recorded for $svc; leaving it as is."
+              continue
+            fi
+            echo "::error::Rolling $svc back to $rev"
+            gcloud run services update-traffic "$svc" --region "$REGION" --to-revisions "$rev=100" --quiet
           done

@@ -2,7 +2,8 @@ name: Infra
 
 # Applies infra/ (everything in the Google Cloud project except the one-time
 # bootstrap) on every push to main that touches it. Authenticates with
-# Workload Identity Federation, so no Google key is stored in GitHub.
+# Workload Identity Federation, so no Google key is stored in GitHub. CI runs
+# first on the same commit.
 on:
   push:
     branches: [main]
@@ -13,13 +14,17 @@ permissions:
   contents: read
   id-token: write
 
-concurrency:
-  group: infra
-  cancel-in-progress: false
-
 jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
   apply:
+    needs: ci
     runs-on: ubuntu-latest
+    # Shared with Deploy so an apply and a rollout never touch the services at once.
+    concurrency:
+      group: production
+      cancel-in-progress: false
     defaults:
       run:
         working-directory: infra
@@ -35,15 +40,15 @@ jobs:
       TF_VAR_jackery_password: ${{ secrets.JACKERY_PASSWORD }}
       TF_VAR_jackery_sn: ${{ secrets.JACKERY_SN }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: google-github-actions/auth@v3
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           # Both created by infra/bootstrap; neither is secret.
           workload_identity_provider: projects/644948460803/locations/global/workloadIdentityPools/github/providers/solar-farm
           service_account: github-infra@solar-farm-510518.iam.gserviceaccount.com
-      - uses: opentofu/setup-opentofu@v1
+      - uses: opentofu/setup-opentofu@9d84900f3238fab8cd84ce47d658d25dd008be2f # v1.0.8
         with:
           tofu_wrapper: false
-      - run: tofu init
+      - run: tofu init -lockfile=readonly
       - run: tofu plan -out=tfplan
       - run: tofu apply tfplan

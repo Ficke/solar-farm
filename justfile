@@ -36,3 +36,8 @@ status:
 # Dry-run the plug script against the live plan
 sim *args:
     bun device/sim.js {{args}}
+
+# Regenerate the OpenTofu provider lock files for Linux (CI) and Apple silicon
+lock:
+    tofu -chdir=infra providers lock -platform=linux_amd64 -platform=darwin_arm64
+    tofu -chdir=infra/bootstrap providers lock -platform=linux_amd64 -platform=darwin_arm64
