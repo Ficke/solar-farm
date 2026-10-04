@@ -351,6 +351,10 @@
             "type": "number",
             "title": "Grid Lb"
           },
+          "used_lb": {
+            "type": "number",
+            "title": "Used Lb"
+          },
           "avoided_lb": {
             "type": "number",
             "title": "Avoided Lb"
@@ -364,6 +368,7 @@
           "solar_wh",
           "load_lb",
           "grid_lb",
+          "used_lb",
           "avoided_lb"
         ],
         "title": "Co2Period",

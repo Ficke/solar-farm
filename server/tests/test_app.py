@@ -394,6 +394,7 @@ def test_co2_avoided_compares_the_load_with_what_the_plug_drew():
     # 400 Wh of the 500 Wh load ran at 1000 lb/MWh; the grid ran at 0.
     assert day["load_lb"] == pytest.approx(0.4, abs=0.002)
     assert day["grid_lb"] == pytest.approx(0.0, abs=0.002)
+    assert day["used_lb"] == pytest.approx(0.0, abs=0.002)
 
     web, _ = make("web", store=store)
     rows = web.get("/api/co2", params={"by": "day", "count": 2}).json()["periods"]
@@ -403,6 +404,60 @@ def test_co2_avoided_compares_the_load_with_what_the_plug_drew():
     assert [r["start"] for r in week] == ["2026-09-28"]
     month = web.get("/api/co2", params={"by": "month", "count": 3}).json()["periods"]
     assert [(r["start"], r["load_wh"]) for r in month] == [("2026-10", 500)]
+
+
+def test_co2_avoided_doesnt_count_energy_shifted_to_another_day():
+    store = MemoryStore()
+    day = 86400
+    # Oct 3: the plug charges 400 Wh at 1000 lb/MWh and nothing runs.
+    for i in range(61):
+        t = NOW - day - 5 * 3600 + i * 60
+        pct = 50 + 400 / 3072 * 100 * min(i, 60) / 60
+        tasks.record_sample(
+            store, {"t": t, "output_w": 0.0, "battery_pct": pct, "moer": 1000.0, "moer_t": t}
+        )
+        tasks.record_plug(store, {"t": t, "on": True, "reason": "plan", "w": 400.0})
+    # Oct 4: the load runs 500 Wh from the battery at the same rate.
+    end = 50 + 400 / 3072 * 100
+    for i in range(61):
+        t = NOW - 5 * 3600 + i * 300
+        pct = end - 500 / 3072 * 100 * i / 60
+        tasks.record_sample(
+            store, {"t": t, "output_w": 100.0, "battery_pct": pct, "moer": 1000.0, "moer_t": t}
+        )
+    totals.update(store, NOW)
+    oct3, oct4 = store.days["2026-10-03"], store.days["2026-10-04"]
+    # The plug's CO2 counts when the load uses it, so moving energy at the
+    # same rate saves nothing on either day.
+    assert oct3["grid_lb"] == pytest.approx(0.4, abs=0.002)
+    assert oct3["used_lb"] == 0.0
+    assert oct4["load_lb"] == pytest.approx(0.5, abs=0.002)
+    assert oct4["used_lb"] == pytest.approx(0.5, abs=0.01)
+
+
+def test_solar_adds_energy_without_co2():
+    store = MemoryStore()
+    # 300 W of solar for an hour, then 300 Wh of load, at 1000 lb/MWh; the
+    # battery starts empty.
+    for i in range(121):
+        t = NOW - 4 * 3600 + i * 60
+        sun = i <= 60
+        pct = 300 / 3072 * 100 * (min(i, 60) / 60 - max(0, i - 60) / 60)
+        tasks.record_sample(
+            store,
+            {
+                "t": t,
+                "solar_w": 300.0 if sun else 0.0,
+                "output_w": 0.0 if i < 60 else 300.0,
+                "battery_pct": pct,
+                "moer": 1000.0,
+                "moer_t": t,
+            },
+        )
+    totals.update(store, NOW)
+    d = store.days["2026-10-04"]
+    assert d["load_lb"] == pytest.approx(0.3, abs=0.01)
+    assert d["used_lb"] == 0.0
 
 
 def test_totals_pick_up_from_the_last_day_updated():
@@ -418,7 +473,7 @@ def test_collect_updates_the_daily_totals():
     c, store = make("edge")
     assert c.post("/tasks/collect", headers=AUTH).status_code == 200
     assert store.days["2026-10-04"]["battery_peak_pct"] == 81.0
-    assert store.state["totals"] == {"day": "2026-10-04"}
+    assert store.state["totals"] == {"day": "2026-10-04", "v": 2}
 
 
 def test_full_days_need_three_hours_of_solar_readings(monkeypatch):
