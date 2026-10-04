@@ -100,7 +100,7 @@ def test_history_learns_solar_and_load_without_extrapolating_gaps():
     assert estimate["solar_days"] == 1
     assert estimate["solar_day_wh"] == pytest.approx(500)
     assert estimate["load_w"] == pytest.approx(40)
-    assert estimate["charge_w"] == 1700  # observed AC input doesn't override the assumption
+    assert estimate["charge_w"] == pytest.approx(1160)  # AC in less load, as measured
     assert estimate["solar_profile"][48] == pytest.approx(100)
     sparse = estimates([samples[0], samples[-1]], int(NOW.timestamp()), 500, 100, 1700)
     assert sparse["solar_days"] == 0
@@ -180,3 +180,14 @@ def test_invalid_and_duplicate_samples_do_not_distort_estimates():
     estimate = estimates(list(reversed(samples)), int(NOW.timestamp()), 500, 100, 1700)
     assert estimate["solar_day_wh"] == 0
     assert estimate["load_w"] == pytest.approx(40)
+
+
+def test_charge_rate_ignores_passthrough_and_needs_a_few_readings():
+    t = int(NOW.timestamp())
+    few = [{"t": t - 600, "ac_input_w": 1500.0, "output_w": 0.0}]
+    assert estimates(few, t, 500, 100, 1700)["charge_w"] == 1700
+    readings = [
+        {"t": t - 300 * i, "ac_input_w": w, "output_w": 50.0}
+        for i, w in enumerate([1050.0, 1050.0, 1100.0, 150.0, 220.0, float("nan")])
+    ]
+    assert estimates(readings, t, 500, 100, 1700)["charge_w"] == pytest.approx(1000)

@@ -139,7 +139,11 @@ def test_plan_task_feeds_the_plug_without_the_forecast():
 
     # Every plan and its forecast are kept, not just the latest.
     assert store.day(PLANS, "2026-10-04") == [
-        {"t": NOW, "windows": [{"s": NOW + 18 * 3600, "e": NOW + 19 * 3600}]}
+        {
+            "t": NOW,
+            "windows": [{"s": NOW + 18 * 3600, "e": NOW + 19 * 3600}],
+            "strategy": "fallback",
+        }
     ]
     (snap,) = store.day(FORECASTS, "2026-10-04")
     assert snap["t"] == NOW and snap["step"] == 300 and len(snap["values"]) == 288

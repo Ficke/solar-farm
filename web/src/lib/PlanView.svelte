@@ -1,9 +1,11 @@
 <script lang="ts">
   // The plan: a strip on the same time axis as the charts, then the windows.
   import type { Window } from "./api";
+  import { hover } from "./hover.svelte";
   import { AXIS_W, hourTicks, PAD_R } from "./layout";
   import {
     fmtClock,
+    fmtDayClock,
     fmtRange,
     fmtWeekday,
     fmtWhen,
@@ -31,6 +33,36 @@
   const x = (t: number) => AXIS_W + ((t - from) / (to - from)) * (width - AXIS_W - PAD_R);
   const clip = (s: number, e: number) => [x(Math.max(s, from)), x(Math.min(e, to))];
 
+  const span = () => width - AXIS_W - PAD_R;
+
+  function move(e: PointerEvent) {
+    const px = e.clientX - (e.currentTarget as Element).getBoundingClientRect().left;
+    const t = from + ((px - AXIS_W) / span()) * (to - from);
+    hover.t = t >= from && t <= to ? t : null;
+    hover.from = "plan";
+  }
+  function leave() {
+    hover.t = null;
+    hover.from = "plan";
+  }
+
+  // What the strip says at the hovered time: grid state and the forecast.
+  const tip = $derived.by(() => {
+    const t = hover.t;
+    if (t == null || hover.from !== "plan") return null;
+    const on = windows.some(([s, e]) => t >= s && t < e);
+    const peak = peakWindows(from, to).some(([s, e]) => t >= s && t < e);
+    let co2: number | null = null;
+    let best = 600;
+    for (const [ft, v] of forecast) {
+      if (Math.abs(ft - t) <= best) {
+        best = Math.abs(ft - t);
+        co2 = Math.round(v);
+      }
+    }
+    return { t, state: on ? "Grid on" : peak ? "Peak, grid off" : "Grid off", co2 };
+  });
+
   const avg = (s: number, e: number) => {
     const vs = forecast.filter(([t]) => t >= s && t < e).map(([, v]) => v);
     return vs.length ? Math.round(vs.reduce((a, b) => a + b, 0) / vs.length) : null;
@@ -47,8 +79,15 @@
   });
 </script>
 
-<div bind:clientWidth={width}>
-  <svg viewBox="0 0 {width} {H}" height={H} role="img" aria-label="Grid on times, past and next 24 hours">
+<div class="strip" bind:clientWidth={width}>
+  <svg
+    viewBox="0 0 {width} {H}"
+    height={H}
+    role="img"
+    aria-label="Grid on times, past and next 24 hours"
+    onpointermove={move}
+    onpointerleave={leave}
+  >
     <text x={AXIS_W - 8} y="22" text-anchor="end" class="lab">Grid</text>
     <rect x={AXIS_W} y="8" width={Math.max(0, width - AXIS_W - PAD_R)} height="20" rx="4" fill="var(--panel-2)" />
     {#each peakWindows(from, to) as [s, e] (s)}
@@ -64,12 +103,22 @@
       {/if}
     {/each}
     <line x1={x(now)} x2={x(now)} y1="4" y2="32" stroke="var(--ink)" stroke-width="1.5" />
+    {#if hover.t != null}
+      <line x1={x(hover.t)} x2={x(hover.t)} y1="4" y2="32" stroke="var(--ink-2)" stroke-width="1" stroke-dasharray="3 3" />
+    {/if}
     {#each hourTicks(from, to, width) as t (t)}
       <text x={x(t)} y={H - 4} text-anchor="middle" class="tick"
         >{localMinutes(t) === 0 ? fmtWeekday(t) : fmtClock(t)}</text
       >
     {/each}
   </svg>
+  {#if tip}
+    <div class="tip" class:left={x(tip.t) > width - 200} style:left="{x(tip.t)}px">
+      <div class="when">{fmtDayClock(tip.t)}</div>
+      <div><strong>{tip.state}</strong></div>
+      {#if tip.co2 != null}<div><strong>{tip.co2} lb/MWh</strong> <span class="name">Forecast</span></div>{/if}
+    </div>
+  {/if}
 </div>
 
 {#if rows.length}
@@ -90,9 +139,39 @@
 {/if}
 
 <style>
+  .strip {
+    position: relative;
+  }
   svg {
     display: block;
     width: 100%;
+    touch-action: pan-y;
+  }
+  .tip {
+    position: absolute;
+    top: 36px;
+    z-index: 2;
+    pointer-events: none;
+    transform: translate(12px, 0);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgb(0 0 0 / 0.15);
+    padding: 8px 10px;
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  .tip.left {
+    transform: translate(calc(-100% - 12px), 0);
+  }
+  .when,
+  .name {
+    color: var(--ink-3);
+  }
+  .when {
+    color: var(--ink-2);
   }
   .tick,
   .lab {
