@@ -1,4 +1,4 @@
-# IAP's own service agent is what actually calls solar-web after sign-in.
+# Only the IAP service agent may invoke solar-web.
 resource "google_project_service_identity" "iap" {
   provider   = google-beta
   service    = "iap.googleapis.com"
@@ -12,8 +12,7 @@ resource "google_cloud_run_v2_service_iam_member" "iap_invoker" {
   member   = "serviceAccount:${google_project_service_identity.iap.email}"
 }
 
-# A project with no Google organization must bring its own OAuth client for
-# IAP's sign-in page. Created by hand once (README); this wires it in.
+# Use the manually created OAuth client described in README.md.
 resource "google_iap_settings" "project" {
   name = "projects/${local.project_number}/iap_web"
   access_settings {

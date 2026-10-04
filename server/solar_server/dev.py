@@ -1,4 +1,4 @@
-"""A local server with three days of made-up readings, for working on the dashboard.
+"""Serve three days of synthetic readings for local dashboard development.
 
 uv run uvicorn solar_server.dev:app --port 8000
 """
@@ -26,15 +26,13 @@ def _hour(t: int) -> float:
 
 
 def _moer(t: int) -> float:
-    # California's marginal rate is mostly gas (~950) with midday stretches
-    # where curtailed solar sets it near zero.
+    # Approximate gas-dominated rates with a midday solar-curtailment interval.
     h = _hour(t)
     return 0.0 if 10.5 <= h < 14 else 950 + 40 * math.sin(t / 5000)
 
 
 def _mix(t: int) -> dict:
-    # Roughly CAISO in October: solar to ~15 GW at noon, batteries charging
-    # midday and discharging into the evening peak, gas filling the rest.
+    # Approximate an October mix with midday solar and evening battery discharge.
     h = _hour(t)
     sun = max(0.0, math.sin(math.pi * (h - 7) / 12)) if 7 <= h < 19 else 0.0
     batteries = -4000 * sun if sun else (6000 if 17 <= h < 22 else 800)
@@ -87,8 +85,7 @@ def sample_store(now: int) -> MemoryStore:
         )
         store.append(MIX, _mix(t))
         if t % 1800 == 0:
-            # Forecasts get the curtailment stretch roughly right, with its
-            # edges off by up to an hour the further out they look.
+            # Increase timing uncertainty with forecast lead time.
             values = []
             for i in range(288):
                 ft = t + i * STEP

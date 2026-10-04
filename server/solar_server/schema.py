@@ -1,7 +1,6 @@
-"""What the API returns. The dashboard's TypeScript types are generated from these.
+"""Define dashboard API models and generated TypeScript contracts.
 
-After changing a model, run `just api` to update web/openapi.json; the
-dashboard's types follow from it on its next check or build.
+Run ``just api`` after model changes, then regenerate types with the web check or build.
 """
 
 from __future__ import annotations
@@ -10,24 +9,24 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-type Window = tuple[int, int]  # [start, end), unix seconds
+type Window = tuple[int, int]  # Endpoints use half-open Unix seconds.
 
 
 class Sample(BaseModel):
-    """Every minute from the Jackery; WattTime when it has a new reading."""
+    """Record available Jackery telemetry and new WattTime readings."""
 
     t: int
     battery_pct: float | None = None
     solar_w: float | None = None
     ac_input_w: float | None = None
-    output_w: float | None = None  # what the Jackery is powering
-    moer: float | None = None  # WattTime's actual marginal CO2, lb/MWh
+    output_w: float | None = None
+    moer: float | None = None  # WattTime reports marginal CO2 in lb/MWh.
     moer_t: int | None = None
-    index: float | None = None  # 0-100 percentile of the past month, lower is cleaner
+    index: float | None = None  # Lower percentiles indicate cleaner grid power.
 
 
 class PlugReport(BaseModel):
-    """Every minute, from the plug."""
+    """Record the plug's minute status."""
 
     t: int
     on: bool
@@ -43,7 +42,7 @@ class StoredPlugReport(PlugReport):
 
 
 class MixRow(BaseModel):
-    """CAISO generation by fuel, MW. Batteries are negative while charging."""
+    """Record CAISO generation in MW; batteries are negative while charging."""
 
     t: int
     solar: float | None = None
@@ -95,14 +94,14 @@ class Timeline(BaseModel):
     since: int
     samples: list[Sample]
     plug: list[StoredPlugReport]
-    forecast: list[tuple[int, float]]  # [t, lb/MWh]
+    forecast: list[tuple[int, float]]  # Pairs contain Unix seconds and lb/MWh.
     mix: list[MixRow]
     windows: list[Window]
 
 
 class Accuracy(BaseModel):
     lead_hours: int
-    points: list[tuple[int, float, float | None]]  # [t, actual, forecast made lead_hours earlier]
+    points: list[tuple[int, float, float | None]]  # Each point holds time, actual and forecast.
     error: int | None
     compared: int
 
@@ -127,16 +126,16 @@ class Daily(BaseModel):
 
 
 class Co2Period(BaseModel):
-    """One day, week (starting Monday) or month ("2026-10")."""
+    """Summarize a Pacific day, Monday-based week or month."""
 
     start: str
-    load_wh: int  # what the Jackery powered
-    grid_wh: int  # what the plug drew from the wall
+    load_wh: int
+    grid_wh: int
     solar_wh: int
-    load_lb: float  # CO2 had the load run straight from the wall
-    grid_lb: float  # CO2 from what the plug drew in the period
-    used_lb: float  # CO2 of the energy the load used, stored grid energy included
-    avoided_lb: float  # load_lb - used_lb
+    load_lb: float  # Model direct-grid load emissions.
+    grid_lb: float  # Attribute grid emissions to charging time.
+    used_lb: float  # Attribute stored grid emissions to load time.
+    avoided_lb: float  # Subtract used_lb from the direct-grid baseline.
 
 
 class Co2(BaseModel):

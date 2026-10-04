@@ -1,24 +1,10 @@
-"""Each day's energy and CO2, one small document per Pacific day.
+"""Aggregate energy and estimated CO2 per Pacific day.
 
-Totals for any week, month or year are sums of these, so the dashboard never
-has to read raw readings to aggregate.
-
-CO2 avoided compares two ways of running the same load:
-
-- without the battery: every Wh the Jackery put out would have come from the
-  wall at that moment, at that moment's marginal rate (``load_lb``);
-- what happened: the CO2 of the energy the load actually used (``used_lb``).
-  Every Wh the plug draws adds its CO2, at the marginal rate when it was
-  drawn, to the battery; solar adds energy but no CO2. The load takes CO2 out
-  in proportion to the share of the battery's energy it uses.
-
-``load_lb - used_lb`` is what the battery avoided. Energy only drops out of
-the comparison through solar: grid energy stored one day and used the next
-counts on the day it's used, so shifting doesn't look like saving. Charging
-losses stay in the battery's CO2 and count against it. ``grid_lb`` is the CO2
-of what the plug drew that day. The rate is WattTime's actual marginal CO2 for
-CAISO_NORTH, in lb/MWh. Stretches with no rate from the last half hour count
-toward Wh but not toward CO2.
+Avoided CO2 is ``load_lb`` (direct grid use at load time) minus ``used_lb``
+(emissions attributed to the battery energy used). Grid draw adds emissions
+at charging time to a pool carried across days; solar adds none. Load removes
+its proportional share, so stored energy counts when used, not when charged.
+Rates use WattTime actuals in lb/MWh; missing rates count toward Wh only.
 """
 
 from __future__ import annotations
@@ -37,19 +23,15 @@ log = logging.getLogger(__name__)
 
 # Nothing was recorded before this; the first update fills in every day since.
 FIRST_DAY = "2026-10-01"
-MAX_GAP = 3600  # don't integrate across outages longer than an hour
-RATE_GAP = 1800  # use a marginal rate up to half an hour from when it applied
-VERSION = 2  # bump to recompute every day from FIRST_DAY
+MAX_GAP = 3600  # Cap each integration interval at one hour.
+RATE_GAP = 1800  # Carry each marginal rate for at most 30 minutes.
+VERSION = 2  # Increment to recompute history from FIRST_DAY.
 
 type Rate = Callable[[float], float | None]
 
 
 def rate_lookup(samples: list[dict]) -> Rate:
-    """The marginal rate in force at each moment, from the samples' WattTime actuals.
-
-    Each actual applies from its ``moer_t`` until the next one, for up to
-    ``RATE_GAP`` seconds.
-    """
+    """Carry each actual rate from ``moer_t`` until the next, for at most RATE_GAP."""
     points = sorted(
         {
             int(s.get("moer_t", s["t"])): float(s["moer"])
@@ -67,7 +49,7 @@ def rate_lookup(samples: list[dict]) -> Rate:
 
 
 def covered_h(points: list[tuple[int, float]]) -> float:
-    """Hours between readings, not counting outages longer than ``MAX_GAP``."""
+    """Sum coverage hours, capping each gap at ``MAX_GAP`` seconds."""
     return sum(min(t1 - t0, MAX_GAP) for (t0, _), (t1, _) in pairwise(points)) / 3600
 
 
@@ -76,7 +58,7 @@ def integrate_wh(points: list[tuple[int, float]]) -> float:
 
 
 def energy(points: list[tuple[int, float]], rate: Rate) -> tuple[float, float]:
-    """Wh, and lb of CO2 at the marginal rate when each Wh was used."""
+    """Integrate Wh and CO2 in lb, using interval-midpoint rates and capped gaps."""
     wh = lb = 0.0
     for (t0, w0), (t1, w1) in pairwise(points):
         seg = (w0 + w1) / 2 * min(t1 - t0, MAX_GAP) / 3600
@@ -88,7 +70,7 @@ def energy(points: list[tuple[int, float]], rate: Rate) -> tuple[float, float]:
 
 
 def cumulative(points: list[tuple[int, float]], rate: Rate) -> Callable[[float], float]:
-    """lb of CO2 drawn from the start of ``points`` up to any moment."""
+    """Return cumulative CO2 in lb from the first point to a given time."""
     times = [t for t, _ in points]
     sums = [0.0]
     for a, b in pairwise(points):
@@ -110,10 +92,9 @@ def cumulative(points: list[tuple[int, float]], rate: Rate) -> Callable[[float],
 def used_co2(
     samples: list[dict], grid_lb_by: Callable[[float], float], stored_lb: float
 ) -> tuple[float, float]:
-    """CO2 of the energy the load used, and the CO2 left in the battery after.
+    """Return load-attributed and remaining battery CO2 in lb.
 
-    Between readings, the plug's CO2 goes into the battery and the load takes
-    out its share: the Wh it used over the Wh the battery held before it did.
+    Add grid emissions between readings, then withdraw the load's energy share.
     """
     used = 0.0
     rows = [s for s in samples if s.get("output_w") is not None]
@@ -129,8 +110,10 @@ def used_co2(
 
 
 def day_totals(store: Store, day: str, stored_lb: float | None = None) -> dict | None:
-    """``stored_lb`` is the CO2 in the battery at the start of the day. Without
-    it, whatever the battery first holds counts as grid energy at the first rate."""
+    """Compute daily totals from initial battery emissions in ``stored_lb``.
+
+    If omitted, estimate initial emissions from the first battery level and rate.
+    """
     samples = sorted(store.day(SAMPLES, day), key=lambda s: s["t"])
     plug = sorted(store.day(PLUG, day), key=lambda r: r["t"])
     if not samples and not plug:
@@ -203,5 +186,5 @@ def _days_from(first: str, last: str) -> list[str]:
 
 
 def read(store: Store, since: int, until: int) -> list[dict]:
-    """Stored day totals from ``since`` to ``until``; days without data are left out."""
+    """Read stored daily totals for the range, omitting days without data."""
     return store.totals(day_keys(since, until))

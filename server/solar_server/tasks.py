@@ -1,4 +1,4 @@
-"""What Cloud Scheduler triggers: a reading, forecast and plan every minute."""
+"""Collect telemetry and rebuild charging plans for Cloud Scheduler."""
 
 from __future__ import annotations
 
@@ -23,13 +23,10 @@ def _num(v: float | None) -> float | None:
 
 
 def collect(store: Store, sources: Sources, now: datetime) -> dict:
-    """One sample a minute from the Jackery, plus WattTime's newest marginal rate.
+    """Store available Jackery data and newly published WattTime readings.
 
-    WattTime publishes a rate every 5 minutes; it and its percentile are added
-    only when a new one has come out. On 5-minute marks CAISO's grid mix for
-    the last hour and today's totals are updated.
-
-    Each source is optional; a sample is stored with whatever arrived.
+    Every five minutes, backfill the last hour of CAISO mix and update totals.
+    Source failures do not discard other readings.
     """
     t = int(now.timestamp())
     sample: dict = {"t": t}
@@ -56,7 +53,7 @@ def collect(store: Store, sources: Sources, now: datetime) -> dict:
                 ac_input_w=_num(r.ac_input_w),
                 output_w=_num(r.output_w),
             )
-    except Exception as e:  # unofficial API: never let it block the rest
+    except Exception as e:
         log.warning("jackery failed: %s", e)
     if len(sample) > 1:
         record_sample(store, sample)
@@ -70,14 +67,11 @@ def collect(store: Store, sources: Sources, now: datetime) -> dict:
 
 
 WATTTIME_KEYS = ("moer", "moer_t", "index")
-WATTTIME_KEEP = 1800  # show WattTime's last reading for up to half an hour
+WATTTIME_KEEP = 1800  # Carry live WattTime readings for at most 30 minutes.
 
 
 def record_sample(store: Store, sample: dict) -> None:
-    """Keep the sample, and the latest one with today's solar total for /api/now.
-
-    The latest one keeps WattTime's last reading between its 5-minute updates.
-    """
+    """Archive the sample and update live solar totals, carrying recent WattTime data."""
     state = store.get_state("sample")
     today = _today(store, SAMPLES, "solar_w", state, sample)
     store.append(SAMPLES, sample)
@@ -89,17 +83,14 @@ def record_sample(store: Store, sample: dict) -> None:
 
 
 def record_plug(store: Store, report: dict) -> None:
-    """Keep the report, and the latest one with today's grid total for /api/now."""
+    """Archive the report and update live grid totals."""
     today = _today(store, PLUG, "w", store.get_state("plug"), report)
     store.append(PLUG, report)
     store.put_state("plug", {"report": report, "today": today})
 
 
 def _today(store: Store, series: str, key: str, state: dict | None, item: dict) -> dict:
-    """Today's energy from ``key`` watts so far, carried on from the last state.
-
-    The first time, when there is no state yet, it counts what's already stored.
-    """
+    """Accumulate today's Wh, recovering stored history if state is missing."""
     day = day_key(item["t"])
     last: tuple[int, float] | None = None
     if state is None:
@@ -122,7 +113,7 @@ def _today(store: Store, series: str, key: str, state: dict | None, item: dict) 
 
 
 def store_mix(store: Store, sources: Sources, now: datetime, since: int) -> None:
-    """CAISO's grid mix from ``since`` to now; rows already stored are skipped."""
+    """Store CAISO rows from ``since`` to now, skipping exact duplicates."""
     t = int(now.timestamp())
     today = now.astimezone(PACIFIC).date()
     days = sorted({datetime.fromtimestamp(since, PACIFIC).date(), today})
@@ -136,7 +127,7 @@ def store_mix(store: Store, sources: Sources, now: datetime, since: int) -> None
 
 
 def archive_due(now: datetime) -> bool:
-    """A forecast is kept for good every 30 minutes; the rest only drive the plan."""
+    """Archive forecasts at half-hour marks."""
     return now.minute % 30 == 0
 
 
@@ -154,7 +145,7 @@ def plan(
     ):
         raise ValueError("unusable emissions forecast; keeping the previous plan")
     p = charging_plan(store, points, settings, now)
-    # collect stores the percentile with each new WattTime reading.
+    # Reuse the percentile collected with the latest WattTime reading.
     p["index_now"] = ((store.get_state("sample") or {}).get("sample") or {}).get("index")
     if p["index_now"] is None:
         try:
@@ -164,13 +155,11 @@ def plan(
     p["forecast"] = [[int(t.timestamp()), round(v, 1)] for t, v in points]
     p["forecast_at"] = int(now.timestamp())
     if archive:
-        # Fill any gaps in the last day's grid mix.
         store_mix(store, sources, now, since=int(now.timestamp()) - 86400)
     old = store.get_state("plan") or {}
     store.put_state("plan", p)
     keep_plan(store, old, p)
-    # Keep a forecast every 30 minutes, so the dashboard can check it against
-    # what happened and later features can look back.
+    # Preserve forecasts for comparison with later actual emissions.
     if archive and points:
         store.append(
             FORECASTS,
@@ -219,12 +208,11 @@ def charging_plan(
 
 
 ESTIMATES_MAX_AGE = 1800
-ESTIMATES_MAX_AGE_CHARGING = 300  # so a slower charge than planned gets more time today
+ESTIMATES_MAX_AGE_CHARGING = 300  # Detect charging-speed changes sooner.
 
 
 def charging_estimates(store: Store, settings: Settings, now: int) -> dict:
-    """Read history at most twice an hour, or every 5 minutes while the grid
-    is charging the battery; replans normally use one state read."""
+    """Cache history estimates for 30 minutes, or five while AC charging is detected."""
     inputs = [settings.solar_day_wh, settings.load_w, settings.charge_w]
     cached = store.get_state("charging_estimates") or {}
     latest = (store.get_state("sample") or {}).get("sample") or {}
@@ -256,14 +244,12 @@ def refresh_charging_plan(store: Store, settings: Settings, now: datetime) -> No
 
 
 def keep_plan(store: Store, old: dict, new: dict) -> None:
-    """Plans are made every minute. Keep one every 5 minutes, and any that
-    changed the windows, so a day's history stays well under Firestore's 1 MB."""
+    """Keep five-minute snapshots and window changes to limit document growth."""
     changed = [list(w) for w in new["windows"]] != [list(w) for w in old.get("windows", [])]
     if changed or new["generated_at"] % 300 < 60:
         store.append(PLANS, plan_record(new))
 
 
-# Numbers kept with each stored plan, so its choices can be checked later.
 PLAN_HISTORY_KEYS = (
     "strategy",
     "battery_pct",
@@ -278,7 +264,7 @@ PLAN_HISTORY_KEYS = (
 
 
 def plan_record(p: dict) -> dict:
-    """The stored history row for a plan: its windows and the numbers behind them."""
+    """Return windows and decision inputs for plan history."""
     return {
         "t": p["generated_at"],
         "windows": [{"s": s, "e": e} for s, e in p["windows"]],
@@ -287,7 +273,7 @@ def plan_record(p: dict) -> dict:
 
 
 def plug_plan(store: Store) -> dict | None:
-    """The plan as the plug reads it (the shape build_plan returns)."""
+    """Return the current plan without forecast data."""
     p = store.get_state("plan")
     if p is None:
         return None

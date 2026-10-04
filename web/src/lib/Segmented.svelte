@@ -1,5 +1,4 @@
 <script lang="ts" generics="T extends string | number">
-  // A row of toggle buttons where exactly one is pressed.
   let {
     options,
     value,
@@ -8,7 +7,7 @@
   }: {
     options: { value: T; label: string }[];
     value: T;
-    /** What the group chooses, for screen readers. */
+    /** Label the choice for screen readers. */
     label: string;
     onpick: (v: T) => void;
   } = $props();

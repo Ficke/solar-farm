@@ -1,5 +1,4 @@
 <script lang="ts">
-  // The plan: a strip on the same time axis as the charts, then the windows.
   import type { Window } from "./api";
   import { hover } from "./hover.svelte";
   import { AXIS_W, hourTicks, LINE_THIN, PAD_R } from "./layout";
@@ -47,7 +46,6 @@
     hover.from = "plan";
   }
 
-  // What the strip says at the hovered time: grid state and the forecast.
   const tip = $derived.by(() => {
     const t = hover.t;
     if (t == null || hover.from !== "plan") return null;

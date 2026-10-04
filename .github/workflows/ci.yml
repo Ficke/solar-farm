@@ -1,8 +1,6 @@
 name: CI
 
-# Runs on pull requests. On main, Deploy and Infra call it as their first job,
-# so nothing reaches Google Cloud until it passes on the exact commit being
-# shipped, and it doesn't run a second time on its own.
+# Deploy and Infra reuse these checks on the commit they will ship.
 on:
   pull_request:
   workflow_call:
@@ -47,8 +45,7 @@ jobs:
       - run: uv run ty check
       - run: uv run pytest -q
 
-  # FirestoreStore against the Firestore emulator. The other tests use
-  # MemoryStore and run in the python job.
+  # Emulator tests exercise real storage behavior; other tests use MemoryStore.
   firestore:
     runs-on: ubuntu-latest
     steps:
@@ -75,8 +72,7 @@ jobs:
       - run: tofu fmt -check -recursive infra
       - run: tofu -chdir=infra init -backend=false
       - run: tofu -chdir=infra/bootstrap init -backend=false
-      # init rewrites the lock files when a provider or version is missing from
-      # them, so a dirty tree means they need regenerating (`just lock`).
+      # Init may rewrite missing or stale locks; require committed, current files.
       - name: Provider lock files are committed and current
         run: |
           if [ -n "$(git status --porcelain -- infra)" ]; then

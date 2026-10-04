@@ -1,12 +1,10 @@
-# Common commands. Needs uv and Bun; `just --list` shows them all.
-
-# Install Python and JS dependencies
+# Install Python and JavaScript dependencies.
 setup:
     uv sync
     cd device && bun install
     cd web && bun install
 
-# Lint, format check, type check and test everything (what CI runs)
+# Run Python checks and tests, plug tests, and dashboard checks.
 check:
     uv run ruff check .
     uv run ruff format --check .
@@ -15,38 +13,38 @@ check:
     cd device && bun test
     cd web && bun run check
 
-# Test the Firestore store against the emulator (needs Java 21+ and Node)
+# Test Firestore against the emulator; requires Java 21+ and Node.
 test-firestore:
     npx -y firebase-tools@15 emulators:exec --only firestore --project demo-solar-farm \
         "uv run pytest -q server/tests/test_firestore.py"
 
-# Save the dashboard API's schema; the dashboard's types are generated from it
+# Save the API schema used to generate dashboard types.
 api:
     uv run python -m solar_server.openapi > web/openapi.json
 
-# Format Python and the dashboard and apply safe lint fixes
+# Format Python and dashboard code and apply safe lint fixes.
 fmt:
     uv run ruff format .
     uv run ruff check --fix .
     cd web && bun run fmt
 
-# Run the dashboard locally against made-up readings
+# Run the dashboard locally with synthetic readings.
 web:
     cd server && uv run uvicorn solar_server.dev:app --port 8000 & cd web && bun run dev
 
-# Push the script and settings to the plug
+# Deploy the script and settings to the plug.
 deploy *args:
     uv run tools/deploy.py {{args}}
 
-# Show what the plug is doing
+# Show plug status.
 status:
     uv run tools/status.py
 
-# Dry-run the plug script against the live plan
+# Simulate fixed windows from the live plan.
 sim *args:
     bun device/sim.js {{args}}
 
-# Regenerate the OpenTofu provider lock files for Linux (CI) and Apple silicon
+# Regenerate provider locks for Linux CI and Apple silicon.
 lock:
     tofu -chdir=infra providers lock -platform=linux_amd64 -platform=darwin_arm64
     tofu -chdir=infra/bootstrap providers lock -platform=linux_amd64 -platform=darwin_arm64

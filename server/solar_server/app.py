@@ -21,8 +21,6 @@ from solar_server.schema import Accuracy, Co2, Daily, Now, PlugReport, Timeline
 from solar_server.sources import LiveSources, Sources
 from solar_server.store import FirestoreStore, Store
 
-# The built dashboard (web/dist). The container sets SOLAR_WEB_DIST; locally
-# it's found next to the source tree.
 WEB_DIST = Path(
     os.environ.get("SOLAR_WEB_DIST", Path(__file__).resolve().parents[2] / "web" / "dist")
 )
@@ -76,8 +74,7 @@ def _edge_routes(app, settings, store, sources, verify, clock) -> None:
         x_plug_key: Annotated[str | None, Header()] = None,
         plan: bool = False,
     ) -> Response | dict:
-        """Store the plug's minute report. With ``?plan=1`` the reply carries
-        the current plan, so the plug follows each replan within a minute."""
+        """Store a report; ``?plan=1`` also returns the current plan when available."""
         check_plug_key(x_plug_key, settings.plug_key)
         item: dict[str, Any] = report.model_dump(exclude_none=True)
         item["received"] = int(clock())
@@ -90,8 +87,7 @@ def _edge_routes(app, settings, store, sources, verify, clock) -> None:
         check_scheduler(request, settings.scheduler_sa, verify)
         t = now()
         log = logging.getLogger(__name__)
-        # A slow run can still be going when the next minute's starts. Only
-        # one may run, so an older reading or plan never overwrites a newer one.
+        # Prevent overlapping scheduled collects while the lease is held.
         if not store.claim("collect", int(t.timestamp()), COLLECT_LEASE):
             log.warning("previous collect still running; skipped")
             return {"t": int(t.timestamp()), "skipped": True}
@@ -118,8 +114,7 @@ def _edge_routes(app, settings, store, sources, verify, clock) -> None:
 
 
 def _web_routes(app, store, clock) -> None:
-    # Responses are checked against the models in schema.py; keys a view
-    # leaves out stay out rather than coming back as null.
+    # Preserve omitted keys instead of filling them with model defaults.
     def route(path: str, model: type):
         return app.get(path, response_model=model, response_model_exclude_unset=True)
 

@@ -1,27 +1,27 @@
 # Google Cloud infrastructure
 
-Everything in the `solar-farm-510518` project is defined here in [OpenTofu](https://opentofu.org). There are two parts:
+[OpenTofu](https://opentofu.org) manages the `solar-farm-510518` project:
 
-- **`bootstrap/`**: the part CI can't create for itself. That's the state bucket, keyless GitHub access (Workload Identity Federation) and a $5 budget alert. You run it once from your machine.
-- **`./`**: everything else. That's the APIs, Firestore, Secret Manager, Artifact Registry, the two Cloud Run services, IAP, Cloud Scheduler, alerts and the deploy account. The Infra workflow applies it on every push to `main` that touches `infra/`.
+- **`bootstrap/`** creates the state bucket, keyless GitHub access (Workload Identity Federation), and a $5 budget alert. Apply it locally once; later bootstrap changes also require a local apply.
+- **`./`** manages application resources. Infra runs CI and applies changes on relevant pushes to `main`, excluding bootstrap-only changes.
 
 | Resource | What it's for |
 | --- | --- |
 | `solar-web` (Cloud Run, IAP on) | Private dashboard and its API. Only `DASHBOARD_USERS` can sign in. |
 | `solar-edge` (Cloud Run, public) | `/plug/*` for the Shelly plug (checks `X-Plug-Key`) and `/tasks/*` for Cloud Scheduler (checks a Google-signed token). |
-| Firestore `(default)` | Readings, plans and plug reports. Weekly backups and 7 days of point-in-time recovery. |
+| Firestore `(default)` | Telemetry, mix, plan and forecast history, live state, and totals. Weekly backups retained for 14 weeks; seven-day point-in-time recovery. |
 | Secret Manager | WattTime and Jackery logins, plus the plug key (generated here). |
 | Cloud Scheduler | `solar-collect` every minute. |
-| Artifact Registry `solar-farm` | Server images; keeps the 5 newest. |
-| Alert policies | Email when the plug is silent for 10 min, readings stop for 30 min, the plan is over 2 h old, or a scheduled task fails. |
+| Artifact Registry `solar-farm` | Keeps the five newest image versions; deletes other versions older than seven days. |
+| Alert policies | Email for missing reports (10 min), missing readings (30 min), stale plans (2 h), low charging power (10 min below 95% battery), or failed tasks. |
 
 ## One-time setup
 
-Run everything from your local clone of this repo.
+Run commands from the repository root unless shown otherwise.
 
 **1. Install the tools and sign in**
 
-On a Mac with Homebrew (Homebrew checks each download's integrity itself):
+On macOS with Homebrew:
 
 ```sh
 brew install opentofu gh
@@ -39,8 +39,6 @@ gh auth login                             # for setting GitHub variables and sec
 
 **2. Link billing, create the state bucket, apply the bootstrap**
 
-From the repo root:
-
 ```sh
 gcloud billing accounts list              # note the ACCOUNT_ID
 gcloud billing projects link solar-farm-510518 --billing-account=ACCOUNT_ID
@@ -54,13 +52,13 @@ gh variable set DASHBOARD_USERS --body '["you@gmail.com"]'
 openssl rand -base64 32 | tee /dev/tty | gh secret set TOFU_STATE_PASSPHRASE
 ```
 
-The last command encrypts OpenTofu's state. Save the passphrase it prints in your password manager: without it the state can't be read.
+Save the printed passphrase in a password manager; it is required to decrypt main state and plan files.
 
-The workflows already know the two values the bootstrap prints, since they're fixed names in this project.
+Workflows already contain this project's bootstrap provider and service-account names.
 
 **3. Create the sign-in client for IAP**
 
-A project without a Google Workspace organization has to supply its own OAuth client, and Google has no API for creating one, so this step happens in the console:
+This setup uses a manually created OAuth client for IAP. In the Google Cloud console:
 
 1. Go to [Google Auth Platform](https://console.cloud.google.com/auth/overview?project=solar-farm-510518) and click **Get started**. Set the app name to "Solar Farm", use your Gmail for both email fields, and choose **External** for the audience.
 2. Under **Audience > Test users**, add your Gmail. Leave the app in Testing mode, so only test users can sign in.
@@ -72,11 +70,11 @@ A project without a Google Workspace organization has to supply its own OAuth cl
    gh secret set IAP_OAUTH_CLIENT_SECRET
    ```
 
-The existing secrets `WATTTIME_USERNAME`, `WATTTIME_PASSWORD`, `JACKERY_EMAIL`, `JACKERY_PASSWORD` and `JACKERY_SN` get copied into Secret Manager on each apply.
+Set `WATTTIME_USERNAME` and `WATTTIME_PASSWORD` as GitHub secrets. Optional `JACKERY_EMAIL` and `JACKERY_PASSWORD` enable telemetry; `JACKERY_SN` selects the station. Infra copies credentials into Secret Manager and passes the serial number directly to Cloud Run.
 
 **4. Apply the rest**
 
-Merge to `main`, or run it now:
+Push application infrastructure changes to `main`, or dispatch Infra:
 
 ```sh
 gh workflow run infra.yml && gh run watch
@@ -86,12 +84,11 @@ The dashboard URL appears in the run log as `dashboard_url`.
 
 ## Changing things
 
-Edit the `.tf` files and open a PR. CI checks formatting and validates the config, and merging applies it. To preview locally, copy `terraform.tfvars.example` to `terraform.tfvars` (git-ignored) and run `tofu -chdir=infra init && tofu -chdir=infra plan`. Provider versions are pinned in the committed `.terraform.lock.hcl` files; after changing a provider version, run `just lock` and commit them.
+Edit `.tf` files and open a PR; CI checks formatting, provider locks and validity. Merging application infrastructure changes applies them. For a local preview, copy `infra/terraform.tfvars.example` to `infra/terraform.tfvars`, fill in the values, and run `tofu -chdir=infra init && tofu -chdir=infra plan`. Local state and variable files are excluded by `infra/.gitignore`. After changing provider constraints, run `just lock` and commit both `.terraform.lock.hcl` files.
 
 ## Notes
 
-- The state holds the secret values, because OpenTofu needs them to manage the secret versions, so it's encrypted with `TOFU_STATE_PASSPHRASE` (OpenTofu state encryption). The bucket is also private and versioned. For a local `tofu plan`, put the passphrase in `terraform.tfvars` as `state_passphrase`.
-- Alerts are log-match policies, which are free. The server logs a line for each stale part on every collect (`server/solar_server/health.py`); Cloud Scheduler logs its own failures. They go to `DASHBOARD_USERS`, at most one email per alert every 6 hours.
-- Only workflows on `main` of `Ficke/solar-farm` can get Google credentials. Pull requests and forks can't.
-- The infra account is a project owner, which lets it manage IAM. It has no access outside this project.
-- Claude cloud sessions read Firestore as `claude-reader`, which only has Cloud Datastore Viewer. Its key lives in the cloud environment's API credentials (type "GCP access token", allowed website `firestore.googleapis.com`), never in environment variables, chat or this repo. To rotate it, create a new key, replace the credential, then delete the old key.
+- Main state and plans contain secret values and use `TOFU_STATE_PASSPHRASE` for encryption. For local commands, set `state_passphrase` in `infra/terraform.tfvars`. The private state bucket retains up to 20 archived versions.
+- Alerts match server health logs and Cloud Scheduler failures. Recipients are `alert_emails`, or `dashboard_users` when no override is set, with at most one notification per policy every six hours.
+- Only workflows on `main` of `Ficke/solar-farm` can obtain Google credentials. The infra account has project-owner access to manage IAM; the deploy account has image-push and service-deployment roles.
+- `claude-reader` has Cloud Datastore Viewer access for cloud sessions. Its manually managed key belongs in the cloud environment's API credentials (type “GCP access token”, host `firestore.googleapis.com`), outside this repository and OpenTofu state. Rotate by creating a key, replacing the credential, then deleting the old key.

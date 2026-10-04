@@ -1,9 +1,4 @@
 <script lang="ts">
-  // One chart full screen. Dragging across it with a mouse zooms in; the
-  // overview under it shows the whole range with the visible span framed,
-  // and the frame can be drawn, moved or resized by mouse, touch or keys.
-  // Double click or Reset zoom goes back to the whole range.
-
   import type { ComponentProps } from "svelte";
   import { onMount } from "svelte";
   import { AXIS_W, MIN_SPAN, PAD_R } from "./layout";
@@ -20,7 +15,7 @@
 
   const from = $derived(chart.from);
   const to = $derived(chart.to);
-  // A zoom stays on the same clock times while the axis moves on, kept inside it.
+  // Preserve zoomed clock times while clamping to the rolling range.
   const lo = $derived(zoom ? Math.max(from, Math.min(zoom[0], to - MIN_SPAN)) : from);
   const hi = $derived(zoom ? Math.min(to, Math.max(zoom[1], lo + MIN_SPAN)) : to);
   const zoomed = $derived(zoom != null);
@@ -45,7 +40,6 @@
     };
   });
 
-  // The overview frame, in px across the brush.
   let bw = $state(0);
   const px = (t: number) => ((t - from) / (to - from)) * bw;
   const at = (x: number) => from + (x / Math.max(1, bw)) * (to - from);
@@ -295,7 +289,7 @@
   }
   .brush {
     position: absolute;
-    /* Over the plot, not the time axis under it. */
+    /* Leave the time axis outside the brush overlay. */
     top: 16px;
     height: 46px;
     touch-action: none;

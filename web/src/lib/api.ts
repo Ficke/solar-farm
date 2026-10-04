@@ -1,4 +1,4 @@
-// Shapes returned by solar-web, generated from openapi.json (server/solar_server/schema.py).
+// Use API types generated from server/solar_server/schema.py via openapi.json.
 import type { components, paths } from "./schema";
 
 type Schemas = components["schemas"];

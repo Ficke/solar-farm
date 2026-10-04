@@ -13,7 +13,7 @@ from planner.jackery import Reading
 from planner.plan import PACIFIC
 
 FIELDS = ["time", "battery_pct", "solar_w", "ac_input_w", "output_w", "raw"]
-CAPACITY_WH = 3072  # Explorer 3000 v2
+CAPACITY_WH = 3072  # Use the Explorer 3000 v2 nominal capacity.
 
 
 def append(path: Path, r: Reading) -> None:
@@ -64,7 +64,7 @@ def daily_solar_wh(samples: list[tuple[datetime, float]], min_samples: int = 36)
 
 
 def recommend_reserve(daily_wh: dict, days: int = 14, capacity_wh: int = CAPACITY_WH) -> dict:
-    """Reserve that leaves room for a good solar day (80th percentile)."""
+    """Recommend headroom for the 80th-percentile solar day in the recent sample."""
     recent = [daily_wh[d] for d in sorted(daily_wh)[-days:]]
     if not recent:
         return {"reserve_pct": None, "days": 0}

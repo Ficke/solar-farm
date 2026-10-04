@@ -372,7 +372,7 @@
           "avoided_lb"
         ],
         "title": "Co2Period",
-        "description": "One day, week (starting Monday) or month (\"2026-10\")."
+        "description": "Summarize a Pacific day, Monday-based week or month."
       },
       "Daily": {
         "properties": {
@@ -602,7 +602,7 @@
           "t"
         ],
         "title": "MixRow",
-        "description": "CAISO generation by fuel, MW. Batteries are negative while charging."
+        "description": "Record CAISO generation in MW; batteries are negative while charging."
       },
       "Now": {
         "properties": {
@@ -925,7 +925,7 @@
           "t"
         ],
         "title": "Sample",
-        "description": "Every minute from the Jackery; WattTime when it has a new reading."
+        "description": "Record available Jackery telemetry and new WattTime readings."
       },
       "StoredPlugReport": {
         "properties": {

@@ -1,6 +1,5 @@
-# One image, two services. solar-web is the private dashboard behind IAP.
-# solar-edge is reachable from the internet but only answers the plug (with
-# its key) and Cloud Scheduler (with a Google-signed token).
+# One image serves the IAP-protected dashboard and public edge routes.
+# The edge authenticates plug and task calls; /health is public.
 
 locals {
   jackery_enabled = nonsensitive(var.jackery_email != "")
@@ -60,7 +59,7 @@ resource "google_cloud_run_v2_service" "edge" {
   name                 = "solar-edge"
   location             = var.region
   ingress              = "INGRESS_TRAFFIC_ALL"
-  invoker_iam_disabled = true # the plug can't sign in; the server checks X-Plug-Key itself
+  invoker_iam_disabled = true # The plug cannot use IAM; routes authenticate callers.
   deletion_protection  = false
 
   template {

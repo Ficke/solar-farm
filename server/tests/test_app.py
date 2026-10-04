@@ -8,7 +8,7 @@ from solar_server.app import create_app
 from solar_server.config import Settings
 from solar_server.store import FORECASTS, MIX, PLANS, PLUG, SAMPLES, MemoryStore
 
-NOW = 1791158400  # Sat 4 Oct 2026, 17:00 Pacific
+NOW = 1791158400  # This is Sunday, October 4, 2026, at 17:00 Pacific.
 SCHED = "solar-scheduler@p.iam.gserviceaccount.com"
 
 
@@ -159,7 +159,7 @@ def test_plan_task_feeds_the_plug_without_the_forecast():
     assert plan["strategy"] == "fallback"
     assert plan["windows"] == [[NOW + 18 * 3600, NOW + 19 * 3600]]
 
-    # Every plan and its forecast are kept, not just the latest.
+    # This explicit plan request archives both the plan and forecast.
     assert store.day(PLANS, "2026-10-04") == [
         {
             "t": NOW,
@@ -215,7 +215,6 @@ def test_empty_forecast_keeps_previous_plan():
 def test_accuracy_compares_the_forecast_made_hours_earlier():
     store = MemoryStore()
     start = NOW - 12 * 3600
-    # Two forecasts: one 12 h ago saying 500, one 2 h ago saying 100.
     for made, value in ((start, 500), (NOW - 2 * 3600, 100)):
         store.append(FORECASTS, {"t": made, "start": made, "step": 300, "values": [value] * 288})
     for t in (NOW - 3600, NOW):
@@ -276,13 +275,12 @@ def test_plug_report_can_return_the_plan():
     c, store = make("edge")
     report = {"t": NOW, "on": False, "reason": "plan"}
     key = {"X-Plug-Key": "k3y"}
-    # No plan yet: still just stored.
     assert c.post("/plug/report?plan=1", json=report, headers=key).status_code == 204
     store.put_state("plan", {"generated_at": NOW, "windows": [[NOW, NOW + 600]], "forecast": []})
     r = c.post("/plug/report?plan=1", json=report, headers=key)
     assert r.status_code == 200
     assert r.json() == {"generated_at": NOW, "windows": [[NOW, NOW + 600]]}
-    # Plugs running the older script don't ask and get the old reply.
+    # Preserve the empty response for clients that do not request a plan.
     assert c.post("/plug/report", json=report, headers=key).status_code == 204
 
 
@@ -296,7 +294,6 @@ def test_roles_only_expose_their_own_routes():
 
 def test_dashboard_api_summarizes_the_day():
     store = MemoryStore()
-    # 17:00 Pacific; samples every 5 min from 12:00 with 100 W of sun, plug at 400 W for an hour
     for i in range(61):
         t = NOW - 5 * 3600 + i * 300
         tasks.record_sample(

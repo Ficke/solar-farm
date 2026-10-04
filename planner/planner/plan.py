@@ -17,13 +17,11 @@ def build_plan(
     peak_hours: tuple[int, int] = (16, 21),
     region: str = "CAISO_NORTH",
 ) -> dict:
-    """Return the plan the Shelly script follows.
+    """Select a fixed charging budget from the cleanest forecast blocks.
 
-    Forecast points are averaged into fixed blocks so the relay never flips
-    more often than once per block. Blocks that start inside the PG&E peak
-    (local time) or have already ended are dropped; the cleanest remaining
-    blocks are taken until they cover ``budget_hours`` and merged into
-    windows of unix timestamps.
+    Exclude ended blocks and those starting in the Pacific peak. Round the
+    budget to a block count; clip the current block to ``now``. Return merged
+    half-open windows in Unix seconds. Available blocks may undersupply the budget.
     """
     block = timedelta(minutes=block_minutes)
     sums: dict[datetime, list[float]] = defaultdict(list)

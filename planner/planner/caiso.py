@@ -1,7 +1,6 @@
-"""CAISO's grid mix: megawatts by fuel, every 5 minutes, for all of CAISO.
+"""Read CAISO-wide generation in MW from daily Pacific five-minute CSVs.
 
-CAISO publishes one CSV per Pacific day, no key needed. Imports aren't split
-by fuel; batteries are negative while charging.
+Imports are not split by fuel; batteries are negative while charging.
 """
 
 from __future__ import annotations
@@ -16,7 +15,6 @@ from planner.plan import PACIFIC
 
 URL = "https://www.caiso.com/outlook"
 
-# CSV header -> stored key
 COLUMNS = {
     "Solar": "solar",
     "Wind": "wind",
@@ -43,7 +41,7 @@ def fetch(day: date, today: date, session: requests.Session | None = None) -> st
 
 
 def parse(text: str, day: date) -> list[dict]:
-    """Rows as {t, solar, wind, ...} in MW; t is Unix seconds."""
+    """Parse fuel rows in MW with ``t`` in Unix seconds."""
     rows = []
     for row in csv.DictReader(io.StringIO(text.lstrip("﻿"))):
         try:

@@ -1,4 +1,3 @@
-# What the server runs as: reads its secrets, reads and writes Firestore.
 resource "google_service_account" "server" {
   account_id   = "solar-server"
   display_name = "Solar Farm server (Cloud Run)"
@@ -17,15 +16,13 @@ resource "google_secret_manager_secret_iam_member" "server" {
   member    = "serviceAccount:${google_service_account.server.email}"
 }
 
-# Cloud Scheduler signs its calls to /tasks/* as this account; the server
-# rejects task calls signed by anyone else.
+# The server verifies this identity on /tasks/* calls.
 resource "google_service_account" "scheduler" {
   account_id   = "solar-scheduler"
   display_name = "Solar Farm scheduled tasks"
 }
 
-# GitHub Actions builds the image and rolls it out to both services as this
-# account (see deploy.yml). It can't change anything else.
+# Deploy grants image-push and service-update access, including server impersonation.
 resource "google_service_account" "deploy" {
   account_id   = "github-deploy"
   display_name = "GitHub Actions: build and deploy"
@@ -57,10 +54,7 @@ resource "google_service_account_iam_member" "deploy_wif" {
   member             = "principalSet://iam.googleapis.com/projects/${local.project_number}/locations/global/workloadIdentityPools/github/attribute.repository/${var.github_repo}"
 }
 
-# Claude cloud sessions read production Firestore as this account. Its only
-# role is read-only; the JSON key is created by hand and stored as a "GCP
-# access token" API credential on the cloud environment, so it never lands in
-# state or in a session.
+# Manage the reader key outside OpenTofu; see README.md for credential storage.
 resource "google_service_account" "claude_reader" {
   account_id   = "claude-reader"
   display_name = "Claude sessions: read-only Firestore"

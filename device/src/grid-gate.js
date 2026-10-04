@@ -1,31 +1,25 @@
-// grid-gate: runs on the Shelly Plug US Gen4 between the wall and the Jackery.
-//
-// Turns grid power on only when California's grid is clean, never during the
-// PG&E E-TOU-C peak (4pm to 9pm local), with fallbacks if the plan or the
-// internet goes away. The server sizes top-ups from battery and solar telemetry;
-// the plug controls grid access without relying on Jackery charging modes.
-//
-// Written in ES5 style: Shelly scripts have no promises, async, classes or
-// let/const guarantees, and deep nesting of anonymous functions can crash the
-// device, so callbacks are named top-level functions.
+// Control AC access to the Jackery, blocking peak hours before applying plans
+// or safety, live-index and daytime fallbacks. See README.md for rule order.
+// Keep ES5 syntax and named top-level callbacks for Shelly runtime compatibility.
 
+// Peak and fallback bounds use local minutes after midnight; durations use seconds.
 var CFG = {
   planUrl: "",
-  plugKey: "", // X-Plug-Key for the solar-edge service, written by tools/deploy.py
-  reportUrl: "", // where to POST what the plug decided each minute (optional)
-  wtAuth: "", // base64 of "user:password", written by tools/deploy.py
+  plugKey: "",
+  reportUrl: "",
+  wtAuth: "", // Deploy stores base64-encoded "user:password" for WattTime login.
   region: "CAISO_NORTH",
-  threshold: 25, // WattTime signal-index percentile at or below which grid is on
-  hysteresis: 5, // stay on until the index rises this far above the threshold
-  peakStart: 960, // 16:00 local, minutes after midnight
-  peakEnd: 1260, // 21:00 local
-  fallbackStart: 600, // 10:00 local
-  fallbackEnd: 900, // 15:00 local
-  planMaxAge: 10800, // seconds a plan stays trusted
-  indexMaxAge: 900, // seconds a live index reading stays trusted
-  safetyOffMax: 108000, // 30 h off (a whole missed day) forces the grid on
-  safetyHold: 7200, // how long a safety charge lasts
-  bridge: 180 // stay on through a gap this short between windows, in seconds
+  threshold: 25, // Turn on at or below this WattTime percentile.
+  hysteresis: 5, // Stay on until the index exceeds threshold plus hysteresis.
+  peakStart: 960,
+  peakEnd: 1260,
+  fallbackStart: 600,
+  fallbackEnd: 900,
+  planMaxAge: 10800,
+  indexMaxAge: 900,
+  safetyOffMax: 108000,
+  safetyHold: 7200,
+  bridge: 180
 };
 
 var S = {
@@ -46,9 +40,6 @@ var S = {
   lastSavedOnAt: 0
 };
 
-// ---------------------------------------------------------------------------
-// Pure decision logic (unit tested in device/test).
-
 function inWindows(windows, now) {
   if (!windows) return false;
   for (var i = 0; i < windows.length; i++) {
@@ -57,9 +48,7 @@ function inWindows(windows, now) {
   return false;
 }
 
-// On inside a window. Once on, a window starting within cfg.bridge keeps it
-// on, so a replan that moves a boundary by a minute or two doesn't flick the
-// relay off and back on.
+// Bridge short gaps only while on to avoid relay cycling during replans.
 function planOn(s, now, cfg) {
   var w = s.plan.windows;
   return inWindows(w, now) || (s.on === true && inWindows(w, now + cfg.bridge));
@@ -112,9 +101,6 @@ function validPlan(p) {
   }
   return true;
 }
-
-// ---------------------------------------------------------------------------
-// Device side effects.
 
 function nowUnix() {
   var sys = Shelly.getComponentStatus("sys");
@@ -171,8 +157,6 @@ function applyDecision(d, now) {
   }
 }
 
-// --- plan fetch -------------------------------------------------------------
-
 function acceptPlan(body) {
   var p = null;
   try {
@@ -213,8 +197,6 @@ function fetchPlan(now) {
   );
 }
 
-// --- report to the dashboard -------------------------------------------------
-
 function reportBody(now) {
   var sw = Shelly.getComponentStatus("switch:0");
   return JSON.stringify({
@@ -228,8 +210,7 @@ function reportBody(now) {
   });
 }
 
-// The server answers a report with the current plan (200), or 204 before
-// there is one, so each replan reaches the plug within a minute.
+// Reports return the current plan (200), or no content (204) before one exists.
 function onReport(res, errCode) {
   if (errCode !== 0 || !res || (res.code !== 200 && res.code !== 204)) {
     print("grid-gate: report failed " + errCode);
@@ -252,8 +233,6 @@ function sendReport(now) {
     onReport
   );
 }
-
-// --- WattTime live index (fallback when the plan is stale) -------------------
 
 function onIndex(res, errCode) {
   if (errCode !== 0 || !res) return;
@@ -315,8 +294,6 @@ function fetchIndex(now) {
   );
 }
 
-// --- main loop --------------------------------------------------------------
-
 function planIsFresh(now) {
   return S.plan !== null && now - S.plan.generated_at < CFG.planMaxAge;
 }
@@ -326,10 +303,9 @@ function tick() {
   if (now > 0) {
     // Reports bring the plan back every minute; fetch it only when they don't.
     if (S.ticks % 10 === 0 && now - S.planAt >= 300) fetchPlan(now);
-    // A report uses one of Shelly's two concurrent call slots, so never start
-    // both remote reads on the same tick.
+    // Reserve one of Shelly's two concurrent call slots for the report.
     else if (S.ticks % 5 === 0 && !planIsFresh(now)) fetchIndex(now);
-    if (S.lastOnAt === 0) S.lastOnAt = now; // first boot: start the safety clock
+    if (S.lastOnAt === 0) S.lastOnAt = now; // Start the safety clock on first boot.
   }
   S.ticks++;
   var sw = Shelly.getComponentStatus("switch:0");

@@ -3,7 +3,7 @@ import json
 from solar_server import health
 from solar_server.store import PLUG, SAMPLES, MemoryStore
 
-NOW = 1791158400  # Sat 4 Oct 2026, 17:00 Pacific
+NOW = 1791158400  # This is Sunday, October 4, 2026, at 17:00 Pacific.
 
 
 def healthy() -> MemoryStore:
@@ -51,7 +51,6 @@ def test_grid_on_but_battery_not_charging():
         t = NOW - 540 + i * 60
         store.append(PLUG, {"t": t, "on": True, "reason": "plan", "w": 3.0, "received": t})
     assert "grid_not_charging" in health.problems(store, NOW)
-    # Charging normally, or nearly full and tapering, is fine.
     store.append(PLUG, {"t": NOW, "on": True, "reason": "plan", "w": 900.0, "received": NOW})
     assert "grid_not_charging" not in health.problems(store, NOW)
     store.put_state("sample", {"sample": {"t": NOW, "battery_pct": 97.0}})

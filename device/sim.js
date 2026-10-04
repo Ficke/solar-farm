@@ -1,6 +1,5 @@
 #!/usr/bin/env node
-// Dry run of the plug: what grid-gate.js would do over the next 24 hours
-// with the published plan, minute by minute, without any hardware.
+// Simulate 24 hours with fixed plan windows and no live index or hardware.
 //
 //   bun device/sim.js                          # fetches the live plan (PLUG_KEY, or your gcloud login)
 //   bun device/sim.js path/to/plan.json        # or a local file
@@ -60,7 +59,7 @@ async function main() {
   let prev = null;
   let onMinutes = 0;
   for (let t = start; t < start + 24 * 3600; t += 60) {
-    // Plans go stale after 3 h; the real planner refreshes every 30 min, so keep it fresh here.
+    // Treat fixed windows as fresh; this does not simulate the server's minute replans.
     if (s.plan) s.plan = Object.assign({}, plan, { generated_at: t - 60 });
     const d = context.decide(s, t, localMinutes(t), context.CFG);
     if (d.reason === "safety" && !(s.safetyUntil > t)) s.safetyUntil = t + context.CFG.safetyHold;
