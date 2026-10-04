@@ -25,7 +25,6 @@
   let co2 = $state<Co2>();
   let by = $state<Period>("day");
   let error = $state("");
-  let loadedAt = $state(0);
   let clock = $state(Date.now() / 1000);
 
   // The lead and period toggles fetch their own data. A response only lands
@@ -44,7 +43,7 @@
     try {
       await Promise.all(jobs);
       error = "";
-      loadedAt = Date.now() / 1000;
+      tick();
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     }
@@ -68,6 +67,8 @@
     run([fetchCo2(p)]);
   }
 
+  const tick = () => (clock = Date.now() / 1000);
+
   onMount(() => {
     load("all");
     // One 30 s beat drives every refresh, so no request is ever sent twice
@@ -80,9 +81,10 @@
         beat++;
         load(beat % 30 === 0 ? "all" : beat % 2 === 0 ? "charts" : "now");
       }, 30_000),
-      setInterval(() => (clock = Date.now() / 1000), 5_000),
+      setInterval(tick, 1_000),
     ];
     const wake = () => {
+      tick();
       if (!visible()) return;
       beat = 0;
       load("all");
@@ -152,13 +154,11 @@
 <main>
   <header>
     <h1>Solar Farm</h1>
-    <p class="sub">
-      {#if stale.length}
+    {#if stale.length}
+      <p class="sub">
         <span class="dot bad"></span>No data from {stale.map((h) => h.name.toLowerCase()).join(", ")}
-      {:else if loadedAt}
-        <span class="dot ok"></span>Updated {ago(clock - loadedAt)}
-      {/if}
-    </p>
+      </p>
+    {/if}
   </header>
 
   {#if error}
@@ -344,9 +344,6 @@
     width: 8px;
     height: 8px;
     border-radius: 50%;
-  }
-  .dot.ok {
-    background: var(--good);
   }
   .dot.bad {
     background: var(--bad);
