@@ -33,7 +33,7 @@ def test_every_series_round_trips_through_the_tasks(store):
     assert edge.post("/tasks/collect", headers=AUTH).status_code == 200
     plan = edge.get("/plug/plan", headers=KEY).json()
     assert plan["strategy"] == "adaptive"
-    assert plan["target_pct"] == 83.7
+    assert plan["target_pct"] == 100
     assert plan["windows"] and plan["windows"] != fallback["windows"]
     report = {"t": NOW, "on": True, "reason": "plan", "w": 410.2, "wh": 1200}
     assert edge.post("/plug/report", json=report, headers=KEY).status_code == 204

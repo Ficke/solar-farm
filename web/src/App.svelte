@@ -188,13 +188,11 @@
     <h2 id="plan-h">Plan</h2>
     {#if now?.plan?.strategy === "adaptive"}
       <p class="n">
-        {now.plan.grid_wh} Wh of grid top-ups · target {now.plan.target_pct}% · floor {now.plan.floor_pct}%.
-        Solar estimate {now.plan.solar_day_wh} Wh/day
-        ({now.plan.solar_days ? `${now.plan.solar_days} observed days` : "initial estimate"});
-        load {now.plan.load_w} W, charging {now.plan.charge_w} W.
+        {now.plan.grid_wh} Wh from the grid · full by 4 pm · solar {now.plan.solar_day_wh} Wh/day
+        ({now.plan.solar_days ? `${now.plan.solar_days}-day average` : "estimate"})
       </p>
       {#if now.plan.shortfall_wh}
-        <p class="n">The available charging windows leave a projected {now.plan.shortfall_wh} Wh shortfall.</p>
+        <p class="n">{now.plan.shortfall_wh} Wh short of full by 4 pm</p>
       {/if}
     {:else if now?.plan?.strategy === "fallback"}
       <p class="n">Battery telemetry unavailable or stale. Using a fixed-duration grid fallback.</p>
@@ -321,51 +319,36 @@
     <Co2Bars periods={co2?.by === by ? co2.periods : []} {by} />
   </section>
 
-  <div class="row">
-    <section class="card" aria-labelledby="week-h">
-      <div class="head">
-        <h2 id="week-h">Last 7 days</h2>
-        <button class="link" onclick={() => (weekTable = !weekTable)}>
-          {weekTable ? "Chart" : "Table"}
-        </button>
-      </div>
-      {#if weekTable}
-        <table>
-          <thead><tr><th>Day</th><th>Solar</th><th>Grid</th><th>Load</th><th>Battery peak</th></tr></thead>
-          <tbody>
-            {#each (daily?.days ?? []).slice(-7) as d (d.day)}
-              <tr>
-                <td>{d.day}</td>
-                <td>{d.solar_wh} Wh</td>
-                <td>{d.grid_wh} Wh</td>
-                <td>{d.load_wh} Wh</td>
-                <td>{d.battery_peak_pct ?? "–"}%</td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      {:else}
-        <p class="key">
-          <span><i class="sw solar"></i>Solar</span>
-          <span><i class="sw grid"></i>Grid</span>
-        </p>
-        <WeekBars days={daily?.days ?? []} />
-      {/if}
-    </section>
-    <section class="card" aria-labelledby="res-h">
-      <h2 id="res-h">Solar headroom</h2>
-      <dl class="pair">
-        <div><dt>Grid target</dt><dd>{now?.plan?.target_pct != null ? `${now.plan.target_pct}%` : "–"}</dd></div>
-        <div>
-          <dt>From solar history</dt>
-          <dd>{daily?.reserve.reserve_pct != null ? `${daily.reserve.reserve_pct}%` : "–"}</dd>
-        </div>
-      </dl>
-      {#if daily?.reserve.reserve_pct != null}
-        <p class="n">Room for a {daily.reserve.good_day_wh} Wh solar day</p>
-      {/if}
-    </section>
-  </div>
+  <section class="card" aria-labelledby="week-h">
+    <div class="head">
+      <h2 id="week-h">Last 7 days</h2>
+      <button class="link" onclick={() => (weekTable = !weekTable)}>
+        {weekTable ? "Chart" : "Table"}
+      </button>
+    </div>
+    {#if weekTable}
+      <table>
+        <thead><tr><th>Day</th><th>Solar</th><th>Grid</th><th>Load</th><th>Battery peak</th></tr></thead>
+        <tbody>
+          {#each (daily?.days ?? []).slice(-7) as d (d.day)}
+            <tr>
+              <td>{d.day}</td>
+              <td>{d.solar_wh} Wh</td>
+              <td>{d.grid_wh} Wh</td>
+              <td>{d.load_wh} Wh</td>
+              <td>{d.battery_peak_pct ?? "–"}%</td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    {:else}
+      <p class="key">
+        <span><i class="sw solar"></i>Solar</span>
+        <span><i class="sw grid"></i>Grid</span>
+      </p>
+      <WeekBars days={daily?.days ?? []} />
+    {/if}
+  </section>
 
   <footer>
     {#each health as h (h.name)}
@@ -595,17 +578,7 @@
   .sw.grid {
     background: var(--grid);
   }
-  .row {
-    display: grid;
-    grid-template-columns: 2fr 1fr;
-    gap: 16px;
-  }
-  @media (max-width: 720px) {
-    .row {
-      grid-template-columns: 1fr;
-    }
-  }
-    table {
+  table {
     width: 100%;
     border-collapse: collapse;
     font-size: 14px;

@@ -16,7 +16,7 @@ def test_fresh_battery_enables_adaptive_plan_and_stale_battery_uses_fallback():
     store.append(SAMPLES, {"t": T, "battery_pct": 80})
     plan = tasks.charging_plan(store, POINTS, Settings(load_w=10), NOW)
     assert plan["strategy"] == "adaptive"
-    assert plan["target_pct"] == 83.7
+    assert plan["target_pct"] == 100
     plan = tasks.charging_plan(store, POINTS, Settings(), NOW + timedelta(minutes=16))
     assert plan["strategy"] == "fallback"
 
@@ -29,7 +29,7 @@ def test_cached_forecast_replans_after_new_battery_reading_and_retains_forecast_
     initial.update(forecast=[[int(t.timestamp()), v] for t, v in POINTS], forecast_at=T)
     store.put_state("plan", initial)
     assert initial["windows"]
-    store.append(SAMPLES, {"t": T + 300, "battery_pct": 90})
+    store.append(SAMPLES, {"t": T + 300, "battery_pct": 100})
     tasks.refresh_charging_plan(store, settings, NOW + timedelta(minutes=5))
     new = store.get_state("plan")
     assert new is not None
