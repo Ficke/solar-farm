@@ -7,11 +7,16 @@
   import { FUTURE, PAST } from "./lib/layout";
   import { GROUPS, stackMix } from "./lib/mix";
   import PlanView from "./lib/PlanView.svelte";
+  import Segmented from "./lib/Segmented.svelte";
   import { explain } from "./lib/status";
   import TimeChart from "./lib/TimeChart.svelte";
   import { ago, fmtWhen, hours } from "./lib/time";
 
-  const LEADS = [1, 3, 6, 12];
+  const LEADS = [1, 3, 6, 12].map((h) => ({ value: h, label: `${h} h` }));
+  const PERIODS = (Object.keys(COUNTS) as Period[]).map((p) => ({
+    value: p,
+    label: p[0].toUpperCase() + p.slice(1),
+  }));
 
   let now = $state<Now>();
   let tl = $state<Timeline>();
@@ -23,14 +28,20 @@
   let loadedAt = $state(0);
   let clock = $state(Date.now() / 1000);
 
-  async function load(what: "now" | "charts" | "all") {
+  // The lead and period toggles fetch their own data. A response only lands
+  // if its toggle still shows the value it was asked for, so a slow answer
+  // can't overwrite a newer pick.
+  const fetchAccuracy = (h: number) =>
+    api.accuracy(h).then((v) => {
+      if (lead === h) acc = v;
+    });
+  const fetchCo2 = (p: Period) =>
+    api.co2(p, COUNTS[p]).then((v) => {
+      if (by === p) co2 = v;
+    });
+
+  async function run(jobs: Promise<unknown>[]) {
     try {
-      const jobs: Promise<unknown>[] = [api.now().then((v) => (now = v))];
-      if (what !== "now") jobs.push(api.timeline(24).then((v) => (tl = v)));
-      if (what === "all") {
-        jobs.push(api.accuracy(lead).then((v) => (acc = v)));
-        jobs.push(api.co2(by, COUNTS[by]).then((v) => (co2 = v)));
-      }
       await Promise.all(jobs);
       error = "";
       loadedAt = Date.now() / 1000;
@@ -39,29 +50,43 @@
     }
   }
 
-  async function pickLead(h: number) {
-    lead = h;
-    acc = await api.accuracy(h);
+  /** Readings every 30 s, the timeline every minute, everything else every 15 minutes. */
+  function load(what: "now" | "charts" | "all") {
+    const jobs: Promise<unknown>[] = [api.now().then((v) => (now = v))];
+    if (what !== "now") jobs.push(api.timeline(24).then((v) => (tl = v)));
+    if (what === "all") jobs.push(fetchAccuracy(lead), fetchCo2(by));
+    return run(jobs);
   }
 
-  async function pickPeriod(p: Period) {
+  function pickLead(h: number) {
+    lead = h;
+    run([fetchAccuracy(h)]);
+  }
+
+  function pickPeriod(p: Period) {
     by = p;
-    co2 = await api.co2(p, COUNTS[p]);
+    run([fetchCo2(p)]);
   }
 
   onMount(() => {
     load("all");
-    // Hidden tabs don't poll; they catch up when shown again.
+    // One 30 s beat drives every refresh, so no request is ever sent twice
+    // at once. Hidden tabs skip beats and catch up when shown again.
+    let beat = 0;
     const visible = () => document.visibilityState === "visible";
     const timers = [
-      setInterval(() => visible() && load("now"), 30_000),
-      // Readings arrive every minute. CO2 and energy totals change slowly and
-      // read many documents, so they refresh less often.
-      setInterval(() => visible() && load("charts"), 60_000),
-      setInterval(() => visible() && load("all"), 15 * 60_000),
+      setInterval(() => {
+        if (!visible()) return;
+        beat++;
+        load(beat % 30 === 0 ? "all" : beat % 2 === 0 ? "charts" : "now");
+      }, 30_000),
       setInterval(() => (clock = Date.now() / 1000), 5_000),
     ];
-    const wake = () => visible() && load("all");
+    const wake = () => {
+      if (!visible()) return;
+      beat = 0;
+      load("all");
+    };
     document.addEventListener("visibilitychange", wake);
     return () => {
       timers.forEach(clearInterval);
@@ -195,11 +220,7 @@
       <h3>CO₂, lb/MWh</h3>
       <div class="ctl">
         <span class="stat">Forecast error</span>
-        <div class="seg" role="group" aria-label="Hours ahead">
-          {#each LEADS as h (h)}
-            <button aria-pressed={lead === h} onclick={() => pickLead(h)}>{h} h</button>
-          {/each}
-        </div>
+        <Segmented label="Hours ahead" options={LEADS} value={lead} onpick={pickLead} />
         <span class="stat"><b>{acc?.error ?? "–"}</b> lb/MWh</span>
       </div>
     </div>
@@ -277,13 +298,7 @@
   <section class="card" aria-labelledby="hist-h">
     <div class="head">
       <h2 id="hist-h">Last {COUNTS[by]} {by}s</h2>
-      <div class="seg" role="group" aria-label="Period">
-        {#each Object.keys(COUNTS) as Period[] as p (p)}
-          <button aria-pressed={by === p} onclick={() => pickPeriod(p)}
-            >{p[0].toUpperCase() + p.slice(1)}</button
-          >
-        {/each}
-      </div>
+      <Segmented label="Period" options={PERIODS} value={by} onpick={pickPeriod} />
     </div>
     <History co2={co2?.by === by ? co2 : undefined} now={tnow} />
   </section>
@@ -439,30 +454,7 @@
     font-size: 13px;
     color: var(--ink-2);
   }
-  .seg {
-    display: inline-flex;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    overflow: hidden;
-  }
-  .seg button {
-    font: inherit;
-    font-size: 12px;
-    padding: 4px 10px;
-    border: 0;
-    background: transparent;
-    color: var(--ink-2);
-    cursor: pointer;
-  }
-  .seg button + button {
-    border-left: 1px solid var(--line);
-  }
-  .seg button[aria-pressed="true"] {
-    background: var(--panel-2);
-    color: var(--ink);
-    font-weight: 600;
-  }
-    .key {
+  .key {
     display: flex;
     flex-wrap: wrap;
     gap: 4px 14px;
