@@ -13,10 +13,11 @@
   // zooms back out. "overview" is the small whole-range chart under it.
   import { untrack } from "svelte";
   import uPlot from "uplot";
+  import { bucket, stepFor } from "./align";
   import type { Window } from "./api";
   import ChartDialog from "./ChartDialog.svelte";
   import { hover } from "./hover.svelte";
-  import { AXIS_W, hourTicks, MIN_SPAN, PAD_R, timeTicks } from "./layout";
+  import { AXIS_W, hourTicks, LINE, LINE_THIN, MIN_SPAN, PAD_R, timeTicks } from "./layout";
   import Tooltip, { type TipRow } from "./Tooltip.svelte";
   import { theme } from "./theme.svelte";
   import { fmtClock, fmtDayClock, fmtWeekday, localMinutes, peakWindows } from "./time";
@@ -85,6 +86,11 @@
   // Expanded, the chart fills whatever height its box is given.
   let boxH = $state(0);
   const plotH = $derived(mode === "expanded" ? Math.max(160, boxH) : height);
+  // Dense readings are averaged to about one point per 3 px of the visible
+  // span, so zooming in brings back every reading.
+  const step = $derived(stepFor(hi - lo, width - AXIS_W - PAD_R));
+  const shown = $derived(bucket(data, step));
+  const tipShown = $derived(tipData && bucket(tipData, step));
   let tip = $state<{ x: number; y: number; t: number; values: (number | null)[] } | null>(null);
   let hovering = false;
 
@@ -133,7 +139,7 @@
     const x = Math.round(u.valToPos(now, "x", true));
     if (x >= u.bbox.left && x <= u.bbox.left + u.bbox.width) {
       ctx.strokeStyle = css("--ink-3");
-      ctx.lineWidth = dpr;
+      ctx.lineWidth = LINE_THIN * dpr;
       ctx.beginPath();
       ctx.moveTo(x, u.bbox.top);
       ctx.lineTo(x, u.bbox.top + u.bbox.height);
@@ -149,7 +155,7 @@
     if (yRule && mode !== "overview") {
       const y = Math.round(u.valToPos(yRule.value, "y", true));
       ctx.strokeStyle = css("--ink-3");
-      ctx.lineWidth = dpr;
+      ctx.lineWidth = LINE_THIN * dpr;
       ctx.setLineDash([2 * dpr, 3 * dpr]);
       ctx.beginPath();
       ctx.moveTo(u.bbox.left, y);
@@ -191,7 +197,7 @@
       t,
       values: series.map((_, k) => {
         // Show the nearest real value, since series are sampled at different rates.
-        const ys = (tipData ?? u.data)[k + 1];
+        const ys = (tipShown ?? u.data)[k + 1];
         for (let d = 0; d < 30; d++) {
           for (const j of [i - d, i + d]) {
             const v = ys[j];
@@ -290,7 +296,7 @@
           stroke: s.ramp ? rampStroke(s.ramp) : css(s.color),
           fill: s.fill ? css(s.fill) : undefined,
           dash: s.dash,
-          width: mini ? 1 : (s.width ?? (s.area ? 1 : 2)),
+          width: mini ? LINE_THIN : (s.width ?? (s.area ? LINE_THIN : LINE)),
           spanGaps: false,
           points: { show: false },
         })),
@@ -311,7 +317,7 @@
   $effect(() => {
     shape;
     const u = untrack(
-      () => new uPlot(opts(width, plotH), data as unknown as uPlot.AlignedData, el),
+      () => new uPlot(opts(width, plotH), shown as unknown as uPlot.AlignedData, el),
     );
     u.over.addEventListener("dblclick", () => onview?.([from, to]));
     u.over.addEventListener("mouseenter", () => (hovering = true));
@@ -329,7 +335,7 @@
 
   // New readings, a moved time axis or a new zoom: same plot, new data and scales.
   $effect(() => {
-    const d = data as unknown as uPlot.AlignedData;
+    const d = shown as unknown as uPlot.AlignedData;
     lo;
     hi;
     untrack(() => plot?.setData(d));
@@ -394,7 +400,7 @@
                 y1="4"
                 y2="4"
                 stroke="var({s.color})"
-                stroke-width={s.width ?? 2}
+                stroke-width={s.width ?? LINE}
                 stroke-dasharray={s.dash?.join(" ")}
               /></svg
             >

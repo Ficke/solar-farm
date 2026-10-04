@@ -2,7 +2,7 @@
   // The plan: a strip on the same time axis as the charts, then the windows.
   import type { Window } from "./api";
   import { hover } from "./hover.svelte";
-  import { AXIS_W, hourTicks, PAD_R } from "./layout";
+  import { AXIS_W, hourTicks, LINE_THIN, PAD_R } from "./layout";
   import Tooltip from "./Tooltip.svelte";
   import {
     fmtClock,
@@ -108,9 +108,9 @@
         >
       {/if}
     {/each}
-    <line x1={x(now)} x2={x(now)} y1="4" y2="32" stroke="var(--ink)" stroke-width="1.5" />
+    <line x1={x(now)} x2={x(now)} y1="4" y2="32" stroke="var(--ink)" stroke-width={LINE_THIN} />
     {#if hover.t != null}
-      <line x1={x(hover.t)} x2={x(hover.t)} y1="4" y2="32" stroke="var(--ink-2)" stroke-width="1" stroke-dasharray="3 3" />
+      <line x1={x(hover.t)} x2={x(hover.t)} y1="4" y2="32" stroke="var(--ink-2)" stroke-width={LINE_THIN} stroke-dasharray="3 3" />
     {/if}
     {#each hourTicks(from, to, width) as t (t)}
       <text x={x(t)} y={H - 4} text-anchor="middle" class="tick"

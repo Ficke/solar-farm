@@ -34,3 +34,7 @@ export function timeTicks(from: number, to: number, width: number, gap = 72): nu
 
 /** The narrowest span a chart zooms to, in seconds. */
 export const MIN_SPAN = 15 * 60;
+
+/** Line weights, in CSS px, for every chart: data lines, then secondary ones (forecasts, load, rules). */
+export const LINE = 1.5;
+export const LINE_THIN = 1;

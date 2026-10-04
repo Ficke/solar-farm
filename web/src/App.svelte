@@ -4,7 +4,7 @@
   import { type Accuracy, api, type Co2, type Now, type Period, type Timeline } from "./lib/api";
   import { COUNTS } from "./lib/co2";
   import History from "./lib/History.svelte";
-  import { FUTURE, PAST } from "./lib/layout";
+  import { FUTURE, LINE_THIN, PAST } from "./lib/layout";
   import { GROUPS, stackMix } from "./lib/mix";
   import PlanView from "./lib/PlanView.svelte";
   import Segmented from "./lib/Segmented.svelte";
@@ -14,7 +14,7 @@
   import { ago, fmtWhen, hours } from "./lib/time";
 
   const MODES: { value: Mode; label: string }[] = [
-    { value: "system", label: "Auto" },
+    { value: "system", label: "System" },
     { value: "light", label: "Light" },
     { value: "dark", label: "Dark" },
   ];
@@ -258,7 +258,7 @@
           color: "--co2-mid",
           ramp: CO2_RAMP,
           dash: [4, 4],
-          width: 1.5,
+          width: LINE_THIN,
           unit: "lb/MWh",
         },
       ]}
@@ -279,7 +279,7 @@
         color: g.color,
         fill: g.color,
         area: true,
-        width: 1,
+        width: LINE_THIN,
         unit: "GW",
         digits: 1,
       }))}
@@ -315,7 +315,7 @@
       series={[
         { label: "Solar", color: "--solar", fill: "--solar-fill", unit: "W" },
         { label: "Grid", color: "--grid", fill: "--grid-fill", unit: "W" },
-        { label: "Load", color: "--ink-3", width: 1.5, unit: "W" },
+        { label: "Load", color: "--ink-3", width: LINE_THIN, unit: "W" },
       ]}
     />
     <p class="key">
