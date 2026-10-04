@@ -791,6 +791,41 @@
               }
             ],
             "title": "Shortfall Wh"
+          },
+          "forecast_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Forecast At"
+          },
+          "forecast_until": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Forecast Until"
+          },
+          "missing": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "battery",
+                "forecast",
+                "forecast_horizon"
+              ]
+            },
+            "type": "array",
+            "title": "Missing",
+            "default": []
           }
         },
         "type": "object",

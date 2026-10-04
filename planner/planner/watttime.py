@@ -32,7 +32,7 @@ def forecast(
         timeout=30,
     )
     r.raise_for_status()
-    return drop_padding(parse_forecast(r.json()))
+    return parse_forecast(r.json())
 
 
 def historical(
@@ -94,17 +94,3 @@ def parse_forecast(body: dict) -> list[tuple[datetime, float]]:
         t = datetime.fromisoformat(p["point_time"].replace("Z", "+00:00"))
         points.append((t, float(p["value"])))
     return points
-
-
-def drop_padding(points: list[tuple[datetime, float]]) -> list[tuple[datetime, float]]:
-    """Drop the run of exact zeros that ends a forecast.
-
-    WattTime fills the last hours of a forecast with 0 rather than leaving
-    them out. A real 0 (curtailment) comes and goes; a run that reaches the
-    end of the horizon is missing data and must never look like the cleanest
-    hours of the day.
-    """
-    end = len(points)
-    while end and points[end - 1][1] == 0:
-        end -= 1
-    return points[:end]

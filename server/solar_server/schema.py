@@ -80,6 +80,9 @@ class PlanSummary(BaseModel):
     charge_w: float | None = None
     grid_wh: int | None = None
     shortfall_wh: int | None = None
+    forecast_at: int | None = None
+    forecast_until: int | None = None
+    missing: list[Literal["battery", "forecast", "forecast_horizon"]] = []
 
 
 class Now(BaseModel):

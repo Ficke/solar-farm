@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from solar_server import tasks
 from solar_server.config import Settings
-from solar_server.store import PLANS, SAMPLES, MemoryStore
+from solar_server.store import FORECASTS, PLANS, SAMPLES, MemoryStore
 
 NOW = datetime(2026, 10, 3, 14, tzinfo=UTC)
 T = int(NOW.timestamp())
@@ -36,8 +36,39 @@ def test_cached_forecast_replans_after_new_battery_reading_and_retains_forecast_
     assert new["windows"] == []
     assert new["generated_at"] == T + 300
     assert new["forecast_at"] == T
+    assert new["missing"] == []
+    store.append(SAMPLES, {"t": T + 1200, "battery_pct": 100})
+    tasks.refresh_charging_plan(store, settings, NOW + timedelta(minutes=20))
+    new = store.get_state("plan")
+    assert new["missing"] == ["forecast"]  # the minute refresh has been failing
     tasks.refresh_charging_plan(store, settings, NOW + timedelta(hours=3))
     assert store.get_state("plan") == new
+
+
+def test_forecast_is_cleaned_once_and_gaps_stay_unknown():
+    t = [NOW + timedelta(minutes=i * 5) for i in range(5)]
+    raw = [(t[2], 300.0), (t[0], 400.0), (t[1], float("nan")), (t[3], 0.0), (t[2], 250.0)]
+    raw.append((t[4], -5.0))
+    # Sorted, latest copy of a time wins, unusable values left out, a real 0 kept.
+    assert tasks.clean_forecast(raw) == [(t[0], 400.0), (t[2], 250.0), (t[3], 0.0)]
+
+
+def test_archived_forecast_keeps_a_gap_as_null(monkeypatch):
+    class GappyForecast:
+        def forecast(self, hours, signal="co2_moer"):
+            return [p for i, p in enumerate(POINTS) if i != 3]
+
+        def signal_index(self):
+            return 50.0
+
+    monkeypatch.setattr(tasks, "store_mix", lambda *a, **k: None)
+    store = MemoryStore()
+    tasks.plan(store, GappyForecast(), Settings(), NOW)
+    p = store.get_state("plan")
+    assert len(p["forecast"]) == 287
+    assert p["forecast_until"] == T + 288 * 300
+    (snap,) = store.day(FORECASTS, "2026-10-03")
+    assert len(snap["values"]) == 288 and snap["values"][3] is None and snap["values"][4] == 100
 
 
 @pytest.mark.parametrize(

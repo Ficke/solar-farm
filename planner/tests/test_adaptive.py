@@ -5,7 +5,6 @@ import pytest
 from planner.adaptive import build_adaptive_plan, estimates
 from planner.plan import PACIFIC
 from planner.telemetry import CAPACITY_WH
-from planner.watttime import drop_padding
 
 NOW = datetime(2026, 10, 3, 14, tzinfo=UTC)  # 7am Pacific
 
@@ -241,23 +240,12 @@ def test_slow_charging_still_fills_by_4pm():
     assert all(g <= 180 or g >= 15 * 60 for g in gaps), gaps
 
 
-def test_zero_padded_forecast_tail_is_never_scheduled():
-    # WattTime pads the last hours of a forecast with 0. Planning at 5 pm, the
-    # padding lands at 1:30-4 pm tomorrow, which must not read as the cleanest grid.
-    now = datetime(2026, 10, 4, 17, tzinfo=PACIFIC)
-    tail = now + timedelta(hours=20, minutes=30)
-    points = [
-        (t, 0.0 if t >= tail else 300 if t.astimezone(PACIFIC).hour == 11 else 900)
-        for t in (now + timedelta(minutes=i * 5) for i in range(24 * 12))
-    ]
-    plan = build_adaptive_plan(points, now, 50, inputs(load=20, solar=0))
-    assert plan["shortfall_wh"] == 0
-    assert plan["windows"][0][0] == int(now.replace(day=5, hour=11).timestamp())
-    assert all(e <= tail.timestamp() for _, e in plan["windows"])
-
-
-def test_drop_padding_keeps_real_zeros():
-    t = [NOW + timedelta(minutes=i * 5) for i in range(5)]
-    points = list(zip(t, [400.0, 0.0, 300.0, 0.0, 0.0], strict=True))
-    assert drop_padding(points) == points[:3]
-    assert drop_padding([(t[0], 0.0)]) == []
+def test_blocks_without_forecast_are_never_scheduled():
+    # Missing forecast points mean unknown, not 0 lb/MWh: the clean hour is
+    # used, the gap before it is not, even though the rest of the day is dirty.
+    gap = range(4 * 12, 5 * 12)  # 11 am-noon Pacific
+    points = [p for i, p in enumerate(forecast(clean=12)) if i not in gap]
+    plan = build_adaptive_plan(points, NOW, 40, inputs(load=20, solar=0))
+    assert plan["windows"]
+    for s, _ in plan["windows"]:
+        assert datetime.fromtimestamp(s, PACIFIC).hour != 11

@@ -49,6 +49,9 @@ def now_view(store: Store, now: int) -> dict:
                 "charge_w",
                 "grid_wh",
                 "shortfall_wh",
+                "forecast_at",
+                "forecast_until",
+                "missing",
             )
         }
         if plan

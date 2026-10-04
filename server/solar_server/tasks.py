@@ -148,12 +148,11 @@ def plan(
     The latest forecast lives in ``state/plan``. With ``archive``, the forecast
     is also kept in ``forecasts`` and the last day's grid mix is filled in.
     """
-    points = sources.forecast(24)
-    if not any(now <= t < now + timedelta(hours=24) for t, _ in points) or not all(
-        math.isfinite(v) for _, v in points
-    ):
+    points = clean_forecast(sources.forecast(24))
+    if not any(now <= t < now + timedelta(hours=24) for t, _ in points):
         raise ValueError("unusable emissions forecast; keeping the previous plan")
     p = charging_plan(store, points, settings, now)
+    note_inputs(p, points, int(now.timestamp()))
     # collect stores the percentile with each new WattTime reading.
     p["index_now"] = ((store.get_state("sample") or {}).get("sample") or {}).get("index")
     if p["index_now"] is None:
@@ -162,7 +161,6 @@ def plan(
         except Exception as e:
             log.warning("signal-index skipped: %s", e)
     p["forecast"] = [[int(t.timestamp()), round(v, 1)] for t, v in points]
-    p["forecast_at"] = int(now.timestamp())
     if archive:
         # Fill any gaps in the last day's grid mix.
         store_mix(store, sources, now, since=int(now.timestamp()) - 86400)
@@ -172,16 +170,42 @@ def plan(
     # Keep a forecast every 30 minutes, so the dashboard can check it against
     # what happened and later features can look back.
     if archive and points:
+        # Values sit on a 5-minute grid from the first point; a gap stays null.
+        start = int(points[0][0].timestamp())
+        values: list[int | None] = [None] * ((int(points[-1][0].timestamp()) - start) // 300 + 1)
+        for t, v in points:
+            values[(int(t.timestamp()) - start) // 300] = round(v)
         store.append(
-            FORECASTS,
-            {
-                "t": p["generated_at"],
-                "start": int(points[0][0].timestamp()),
-                "step": 300,
-                "values": [round(v) for _, v in points],
-            },
+            FORECASTS, {"t": p["generated_at"], "start": start, "step": 300, "values": values}
         )
     return p
+
+
+def clean_forecast(points: list[tuple[datetime, float]]) -> list[tuple[datetime, float]]:
+    """The one place a forecast enters planning: sorted, one value per time,
+    and anything that is not a usable rate left out. A left-out point is
+    unknown, and the planners never schedule a block they have no rate for.
+    A real 0 is kept: WattTime sends 0 when it forecasts renewable curtailment.
+    """
+    by_time = {t: v for t, v in points if math.isfinite(v) and v >= 0}
+    return sorted(by_time.items())
+
+
+FORECAST_STALE = 600  # the minute refresh failed for 10 minutes running
+
+
+def note_inputs(p: dict, points: list[tuple[datetime, float]], forecast_at: int) -> None:
+    """Record what the plan was built from and which inputs were missing or stale."""
+    p["forecast_at"] = forecast_at
+    p["forecast_until"] = int(points[-1][0].timestamp()) + 300
+    missing = []
+    if p.get("strategy") == "fallback":
+        missing.append("battery")
+    if p["generated_at"] - forecast_at > FORECAST_STALE:
+        missing.append("forecast")
+    if p["forecast_until"] < p.get("deadline", 0):
+        missing.append("forecast_horizon")
+    p["missing"] = missing
 
 
 def charging_plan(
@@ -245,11 +269,12 @@ def refresh_charging_plan(store: Store, settings: Settings, now: datetime) -> No
     forecast = old.get("forecast", [])
     if not forecast or int(now.timestamp()) - old.get("forecast_at", old["generated_at"]) > 7200:
         return
-    points = [(datetime.fromtimestamp(t, now.tzinfo), v) for t, v in forecast]
+    points = clean_forecast([(datetime.fromtimestamp(t, now.tzinfo), v) for t, v in forecast])
     if not any(t >= now for t, _ in points):
         return
     p = charging_plan(store, points, settings, now)
-    p.update(forecast=forecast, forecast_at=old.get("forecast_at", old["generated_at"]))
+    note_inputs(p, points, old.get("forecast_at", old["generated_at"]))
+    p["forecast"] = forecast
     p["index_now"] = old.get("index_now")
     store.put_state("plan", p)
     keep_plan(store, old, p)
@@ -274,6 +299,9 @@ PLAN_HISTORY_KEYS = (
     "solar_days",
     "load_w",
     "charge_w",
+    "forecast_at",
+    "forecast_until",
+    "missing",
 )
 
 
