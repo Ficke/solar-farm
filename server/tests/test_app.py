@@ -165,6 +165,10 @@ def test_plan_task_feeds_the_plug_without_the_forecast():
             "t": NOW,
             "windows": [{"s": NOW + 18 * 3600, "e": NOW + 19 * 3600}],
             "strategy": "fallback",
+            "forecast_at": NOW,
+            "forecast_until": NOW + 24 * 3600,
+            "missing": ["battery"],
+            "zeros_doubted_since": None,
         }
     ]
     (snap,) = store.day(FORECASTS, "2026-10-04")
