@@ -72,3 +72,8 @@ def test_running_totals_carry_across_requests(store):
     assert state["today"] == {"day": "2026-10-04", "wh": 60.0, "last": [NOW, 60.0]}
     assert store.get_state("missing") is None
     assert store.day(PLUG, "1999-01-01") == []
+
+
+def test_day_totals_round_trip(store):
+    store.put_total("2026-10-04", {"day": "2026-10-04", "load_lb": 0.4})
+    assert store.totals(["2026-10-03", "2026-10-04"]) == [{"day": "2026-10-04", "load_lb": 0.4}]

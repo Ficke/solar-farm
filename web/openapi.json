@@ -180,6 +180,63 @@
           }
         }
       }
+    },
+    "/api/co2": {
+      "get": {
+        "summary": "Api Co2",
+        "operationId": "api_co2_api_co2_get",
+        "parameters": [
+          {
+            "name": "by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "day",
+                "week",
+                "month"
+              ],
+              "type": "string",
+              "default": "day",
+              "title": "By"
+            }
+          },
+          {
+            "name": "count",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 60,
+              "minimum": 1,
+              "default": 14,
+              "title": "Count"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Co2"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -242,6 +299,76 @@
         ],
         "title": "Accuracy"
       },
+      "Co2": {
+        "properties": {
+          "by": {
+            "type": "string",
+            "enum": [
+              "day",
+              "week",
+              "month"
+            ],
+            "title": "By"
+          },
+          "periods": {
+            "items": {
+              "$ref": "#/components/schemas/Co2Period"
+            },
+            "type": "array",
+            "title": "Periods"
+          }
+        },
+        "type": "object",
+        "required": [
+          "by",
+          "periods"
+        ],
+        "title": "Co2"
+      },
+      "Co2Period": {
+        "properties": {
+          "start": {
+            "type": "string",
+            "title": "Start"
+          },
+          "load_wh": {
+            "type": "integer",
+            "title": "Load Wh"
+          },
+          "grid_wh": {
+            "type": "integer",
+            "title": "Grid Wh"
+          },
+          "solar_wh": {
+            "type": "integer",
+            "title": "Solar Wh"
+          },
+          "load_lb": {
+            "type": "number",
+            "title": "Load Lb"
+          },
+          "grid_lb": {
+            "type": "number",
+            "title": "Grid Lb"
+          },
+          "avoided_lb": {
+            "type": "number",
+            "title": "Avoided Lb"
+          }
+        },
+        "type": "object",
+        "required": [
+          "start",
+          "load_wh",
+          "grid_wh",
+          "solar_wh",
+          "load_lb",
+          "grid_lb",
+          "avoided_lb"
+        ],
+        "title": "Co2Period",
+        "description": "One day, week (starting Monday) or month (\"2026-10\")."
+      },
       "Daily": {
         "properties": {
           "days": {
@@ -276,6 +403,10 @@
             "type": "integer",
             "title": "Grid Wh"
           },
+          "load_wh": {
+            "type": "integer",
+            "title": "Load Wh"
+          },
           "battery_peak_pct": {
             "anyOf": [
               {
@@ -293,6 +424,7 @@
           "day",
           "solar_wh",
           "grid_wh",
+          "load_wh",
           "battery_peak_pct"
         ],
         "title": "Day"

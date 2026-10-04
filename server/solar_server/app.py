@@ -8,7 +8,7 @@ import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.staticfiles import StaticFiles
@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from solar_server import health, tasks, views
 from solar_server.auth import TokenVerifier, check_plug_key, check_scheduler, google_verifier
 from solar_server.config import Settings
-from solar_server.schema import Accuracy, Daily, Now, PlugReport, Timeline
+from solar_server.schema import Accuracy, Co2, Daily, Now, PlugReport, Timeline
 from solar_server.sources import LiveSources, Sources
 from solar_server.store import FirestoreStore, Store
 
@@ -113,6 +113,13 @@ def _web_routes(app, store, clock) -> None:
     @route("/api/daily", Daily)
     def api_daily(days: Annotated[int, Query(ge=1, le=60)] = 14) -> dict:
         return views.daily_view(store, int(clock()), days)
+
+    @route("/api/co2", Co2)
+    def api_co2(
+        by: Literal["day", "week", "month"] = "day",
+        count: Annotated[int, Query(ge=1, le=60)] = 14,
+    ) -> dict:
+        return views.co2_view(store, int(clock()), by, count)
 
     if WEB_DIST.is_dir():
         app.mount("/", StaticFiles(directory=WEB_DIST, html=True), name="web")

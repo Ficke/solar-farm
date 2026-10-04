@@ -1,7 +1,17 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { align } from "./lib/align";
-  import { type Accuracy, api, type Daily, type Now, type Timeline } from "./lib/api";
+  import {
+    type Accuracy,
+    api,
+    type Co2,
+    type Daily,
+    type Now,
+    type Period,
+    type Timeline,
+  } from "./lib/api";
+  import Co2Bars from "./lib/Co2Bars.svelte";
+  import { COUNTS, fmtLb, periodName } from "./lib/co2";
   import { FUTURE, PAST } from "./lib/layout";
   import { GROUPS, stackMix } from "./lib/mix";
   import PlanView from "./lib/PlanView.svelte";
@@ -18,6 +28,8 @@
   let daily = $state<Daily>();
   let acc = $state<Accuracy>();
   let lead = $state(6);
+  let co2 = $state<Co2>();
+  let by = $state<Period>("day");
   let error = $state("");
   let loadedAt = $state(0);
   let clock = $state(Date.now() / 1000);
@@ -30,6 +42,7 @@
         jobs.push(api.timeline(24).then((v) => (tl = v)));
         jobs.push(api.daily(14).then((v) => (daily = v)));
         jobs.push(api.accuracy(lead).then((v) => (acc = v)));
+        jobs.push(api.co2(by, COUNTS[by]).then((v) => (co2 = v)));
       }
       await Promise.all(jobs);
       error = "";
@@ -42,6 +55,11 @@
   async function pickLead(h: number) {
     lead = h;
     acc = await api.accuracy(h);
+  }
+
+  async function pickPeriod(p: Period) {
+    by = p;
+    co2 = await api.co2(p, COUNTS[p]);
   }
 
   onMount(() => {
@@ -104,8 +122,11 @@
     align([
       (tl?.samples ?? []).map((p) => [p.t, p.solar_w]),
       (tl?.plug ?? []).map((p) => [p.t, p.w ?? (p.on ? null : 0)]),
+      (tl?.samples ?? []).map((p) => [p.t, p.output_w]),
     ]),
   );
+  const co2Now = $derived(co2?.by === by ? co2.periods.at(-1) : undefined);
+  const co2Sum = $derived((co2?.periods ?? []).reduce((a, p) => a + p.avoided_lb, 0));
 
   const health = $derived([
     { name: "Battery", t: s?.t, limit: 900 },
@@ -235,9 +256,9 @@
       yRule={{ value: RESERVE, label: `Reserve ${RESERVE}%` }}
       series={[{ label: "Battery", color: "--accent", unit: "%" }]}
     />
-    <h3>Power in, W</h3>
+    <h3>Power, W</h3>
     <TimeChart
-      label="Solar and grid power into the battery, past 24 hours"
+      label="Solar and grid power in and load out, past 24 hours"
       data={powerData}
       {from}
       {to}
@@ -247,12 +268,45 @@
       series={[
         { label: "Solar", color: "--solar", fill: "--solar-fill", unit: "W" },
         { label: "Grid", color: "--grid", fill: "--grid-fill", unit: "W" },
+        { label: "Load", color: "--ink-2", width: 1.5, unit: "W" },
       ]}
     />
     <p class="key">
       <span><i class="sw plan"></i>Planned grid charging</span>
       <span><i class="sw peak"></i>Peak, 4–9 PM</span>
     </p>
+  </section>
+
+  <section class="card" aria-labelledby="co2-h">
+    <div class="head">
+      <h2 id="co2-h">CO₂ avoided</h2>
+      <div class="seg" role="group" aria-label="Period">
+        {#each Object.keys(COUNTS) as Period[] as p (p)}
+          <button aria-pressed={by === p} onclick={() => pickPeriod(p)}
+            >{p[0].toUpperCase() + p.slice(1)}</button
+          >
+        {/each}
+      </div>
+    </div>
+    <dl class="pair">
+      <div>
+        <dt>{co2Now ? periodName(co2Now.start, by) : "–"}</dt>
+        <dd>{co2Now ? fmtLb(co2Now.avoided_lb) : "–"}<small>lb</small></dd>
+      </div>
+      <div>
+        <dt>Without battery</dt>
+        <dd>{co2Now ? fmtLb(co2Now.load_lb) : "–"}<small>lb</small></dd>
+      </div>
+      <div>
+        <dt>From the plug</dt>
+        <dd>{co2Now ? fmtLb(co2Now.grid_lb) : "–"}<small>lb</small></dd>
+      </div>
+      <div>
+        <dt>Last {COUNTS[by]} {by}s</dt>
+        <dd>{co2 ? fmtLb(co2Sum) : "–"}<small>lb</small></dd>
+      </div>
+    </dl>
+    <Co2Bars periods={co2?.by === by ? co2.periods : []} {by} />
   </section>
 
   <div class="row">
@@ -265,13 +319,14 @@
       </div>
       {#if weekTable}
         <table>
-          <thead><tr><th>Day</th><th>Solar</th><th>Grid</th><th>Battery peak</th></tr></thead>
+          <thead><tr><th>Day</th><th>Solar</th><th>Grid</th><th>Load</th><th>Battery peak</th></tr></thead>
           <tbody>
             {#each (daily?.days ?? []).slice(-7) as d (d.day)}
               <tr>
                 <td>{d.day}</td>
                 <td>{d.solar_wh} Wh</td>
                 <td>{d.grid_wh} Wh</td>
+                <td>{d.load_wh} Wh</td>
                 <td>{d.battery_peak_pct ?? "–"}%</td>
               </tr>
             {/each}
@@ -400,7 +455,8 @@
   }
   .pair {
     display: flex;
-    gap: 28px;
+    flex-wrap: wrap;
+    gap: 8px 28px;
     margin: 0 0 6px;
   }
   .pair dd {

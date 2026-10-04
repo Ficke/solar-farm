@@ -45,7 +45,7 @@ It also protects the plug:
 
 ## Dashboard
 
-The private dashboard is at https://solar-web-v5whpbqqpq-uw.a.run.app (Google sign-in; only the accounts in the `DASHBOARD_USERS` variable get in). It leads with whether the grid is on, why, and when it next changes, then the plan in one place (a 24-hour strip and a list of windows), WattTime's actual and forecast emissions, CAISO's generation by source, a check of how far off the forecast was 1 to 12 hours ahead, the battery and power history, the last week's energy, and the suggested reserve. Hover a chart for exact times and values. It refreshes itself every 30 seconds.
+The private dashboard is at https://solar-web-v5whpbqqpq-uw.a.run.app (Google sign-in; only the accounts in the `DASHBOARD_USERS` variable get in). It leads with whether the grid is on, why, and when it next changes, then the plan in one place (a 24-hour strip and a list of windows), WattTime's actual and forecast emissions, CAISO's generation by source, a check of how far off the forecast was 1 to 12 hours ahead, the battery and power history (solar and grid in, load out), CO₂ avoided by day, week or month, the last week's energy, and the suggested reserve. Hover a chart for exact times and values. It refreshes itself every 30 seconds.
 
 Every reading, grid mix row, plug report, plan and forecast is kept in Firestore, with a weekly backup kept for 14 weeks.
 

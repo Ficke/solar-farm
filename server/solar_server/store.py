@@ -4,7 +4,8 @@ Firestore holds one document per Pacific day per series, with the day's
 points in an `items` array, so a 48-hour view is a handful of document reads
 (well inside the free tier). `state/*` documents hold the latest plan, sample
 and plug report, with today's running totals, so the dashboard's live view
-reads three small documents instead of whole days.
+reads three small documents instead of whole days. `totals/<day>` holds
+each day's energy and CO2, so longer ranges sum small documents.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ PLUG = "plug"  # every minute: relay state, reason, grid watts
 PLANS = "plans"  # every 30 min: the windows each plan picked
 FORECASTS = "forecasts"  # every 30 min: the 24-hour forecast each plan used
 MIX = "mix"  # every 5 min: CAISO's generation by fuel, MW: {t, solar, wind, gas, ...}
+TOTALS = "totals"  # one document per day: energy and CO2 totals (see totals.py)
 
 
 def _state_document(data: dict[str, Any]) -> dict[str, str]:
@@ -56,6 +58,8 @@ class Store(Protocol):
     def day(self, series: str, day: str) -> list[dict[str, Any]]: ...
     def put_state(self, name: str, data: dict[str, Any]) -> None: ...
     def get_state(self, name: str) -> dict[str, Any] | None: ...
+    def put_total(self, day: str, data: dict[str, Any]) -> None: ...
+    def totals(self, days: list[str]) -> list[dict[str, Any]]: ...
 
 
 def window(store: Store, series: str, since: int, until: int) -> list[dict[str, Any]]:
@@ -69,6 +73,7 @@ class MemoryStore:
     def __init__(self) -> None:
         self.series: dict[tuple[str, str], list[dict]] = defaultdict(list)
         self.state: dict[str, dict] = {}
+        self.days: dict[str, dict] = {}
 
     def append(self, series: str, item: dict[str, Any]) -> None:
         self.series[(series, day_key(item["t"]))].append(dict(item))
@@ -88,6 +93,12 @@ class MemoryStore:
 
     def get_state(self, name: str) -> dict[str, Any] | None:
         return self.state.get(name)
+
+    def put_total(self, day: str, data: dict[str, Any]) -> None:
+        self.days[day] = dict(data)
+
+    def totals(self, days: list[str]) -> list[dict[str, Any]]:
+        return [dict(self.days[d]) for d in days if d in self.days]
 
 
 class FirestoreStore:
@@ -120,3 +131,12 @@ class FirestoreStore:
     def get_state(self, name: str) -> dict[str, Any] | None:
         snap = self.db.collection("state").document(name).get()
         return _state_data(snap.to_dict() or {}) if snap.exists else None
+
+    def put_total(self, day: str, data: dict[str, Any]) -> None:
+        self.db.collection(TOTALS).document(day).set(data)
+
+    def totals(self, days: list[str]) -> list[dict[str, Any]]:
+        # One batched read; a year of days is 365 small documents.
+        refs = [self.db.collection(TOTALS).document(d) for d in days]
+        snaps = {s.id: s for s in self.db.get_all(refs) if s.exists}
+        return [snaps[d].to_dict() or {} for d in days if d in snaps]
