@@ -1,9 +1,11 @@
 import json
 from datetime import UTC, datetime, timedelta
+from typing import cast
 
 import pytest
 from solar_server import tasks
 from solar_server.config import Settings
+from solar_server.sources import Sources
 from solar_server.store import FORECASTS, PLANS, SAMPLES, MemoryStore
 
 NOW = datetime(2026, 10, 3, 14, tzinfo=UTC)
@@ -39,7 +41,7 @@ def test_cached_forecast_replans_after_new_battery_reading_and_retains_forecast_
     assert new["missing"] == []
     store.append(SAMPLES, {"t": T + 1200, "battery_pct": 100})
     tasks.refresh_charging_plan(store, settings, NOW + timedelta(minutes=20))
-    new = store.get_state("plan")
+    new = store.get_state("plan") or {}
     assert new["missing"] == ["forecast"]  # the minute refresh has been failing
     tasks.refresh_charging_plan(store, settings, NOW + timedelta(hours=3))
     assert store.get_state("plan") == new
@@ -63,8 +65,8 @@ def test_archived_forecast_keeps_a_gap_as_null(monkeypatch):
 
     monkeypatch.setattr(tasks, "store_mix", lambda *a, **k: None)
     store = MemoryStore()
-    tasks.plan(store, GappyForecast(), Settings(), NOW)
-    p = store.get_state("plan")
+    tasks.plan(store, cast(Sources, GappyForecast()), Settings(), NOW)
+    p = store.get_state("plan") or {}
     assert len(p["forecast"]) == 287
     assert p["forecast_until"] == T + 288 * 300
     (snap,) = store.day(FORECASTS, "2026-10-03")

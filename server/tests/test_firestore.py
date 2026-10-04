@@ -42,7 +42,11 @@ def test_every_series_round_trips_through_the_tasks(store):
     (sample,) = store.day(SAMPLES, day)
     assert sample["solar_w"] == 120.0 and sample["moer_t"] == NOW - 300
     assert store.day(PLUG, day)[0]["w"] == 410.2
-    assert store.day(PLANS, day) == [tasks.plan_record(p) for p in (fallback, plan)]
+    # The plug's copy leaves out the forecast fields.
+    kept = [
+        {k: v for k, v in r.items() if not k.startswith("forecast")} for r in store.day(PLANS, day)
+    ]
+    assert kept == [tasks.plan_record(p) for p in (fallback, plan)]
     assert store.day(PLANS, day)[1]["grid_wh"] == plan["grid_wh"]
     (forecast,) = store.day(FORECASTS, day)
     assert len(forecast["values"]) == 288
