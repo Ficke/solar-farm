@@ -34,11 +34,11 @@
   let clock = $state(Date.now() / 1000);
   let weekTable = $state(false);
 
-  async function load(what: "now" | "all") {
+  async function load(what: "now" | "charts" | "all") {
     try {
       const jobs: Promise<unknown>[] = [api.now().then((v) => (now = v))];
+      if (what !== "now") jobs.push(api.timeline(24).then((v) => (tl = v)));
       if (what === "all") {
-        jobs.push(api.timeline(24).then((v) => (tl = v)));
         jobs.push(api.daily(14).then((v) => (daily = v)));
         jobs.push(api.accuracy(lead).then((v) => (acc = v)));
         jobs.push(api.co2(by, COUNTS[by]).then((v) => (co2 = v)));
@@ -67,7 +67,10 @@
     const visible = () => document.visibilityState === "visible";
     const timers = [
       setInterval(() => visible() && load("now"), 30_000),
-      setInterval(() => visible() && load("all"), 5 * 60_000),
+      // Readings arrive every minute. Daily and CO2 totals change slowly and
+      // read many documents, so they refresh less often.
+      setInterval(() => visible() && load("charts"), 60_000),
+      setInterval(() => visible() && load("all"), 15 * 60_000),
       setInterval(() => (clock = Date.now() / 1000), 5_000),
     ];
     const wake = () => visible() && load("all");

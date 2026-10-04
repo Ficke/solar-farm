@@ -1,4 +1,4 @@
-"""What Cloud Scheduler triggers: a reading every 5 minutes, a plan every 30."""
+"""What Cloud Scheduler triggers: a reading every minute, a plan every 30."""
 
 from __future__ import annotations
 
@@ -23,25 +23,29 @@ def _num(v: float | None) -> float | None:
 
 
 def collect(store: Store, sources: Sources, now: datetime) -> dict:
-    """One sample: WattTime's latest marginal rate and percentile, plus the Jackery.
+    """One sample a minute from the Jackery.
 
-    Also stores CAISO's grid mix for the last hour and updates today's totals.
+    WattTime and CAISO only publish every 5 minutes, so on 5-minute marks the
+    sample also gets WattTime's latest marginal rate and percentile, and CAISO's
+    grid mix for the last hour and today's totals are updated.
 
     Each source is optional; a sample is stored with whatever arrived.
     """
     t = int(now.timestamp())
     sample: dict = {"t": t}
-    try:
-        point = sources.actual("co2_moer", now)
-        if point:
-            sample["moer"] = _num(point[1])
-            sample["moer_t"] = int(point[0].timestamp())
-    except Exception as e:
-        log.warning("watttime co2_moer failed: %s", e)
-    try:
-        sample["index"] = _num(sources.signal_index())
-    except Exception as e:
-        log.warning("watttime signal-index failed: %s", e)
+    five = now.minute % 5 == 0
+    if five:
+        try:
+            point = sources.actual("co2_moer", now)
+            if point:
+                sample["moer"] = _num(point[1])
+                sample["moer_t"] = int(point[0].timestamp())
+        except Exception as e:
+            log.warning("watttime co2_moer failed: %s", e)
+        try:
+            sample["index"] = _num(sources.signal_index())
+        except Exception as e:
+            log.warning("watttime signal-index failed: %s", e)
     try:
         r = sources.jackery(now)
         if r is not None:
@@ -55,19 +59,32 @@ def collect(store: Store, sources: Sources, now: datetime) -> dict:
         log.warning("jackery failed: %s", e)
     if len(sample) > 1:
         record_sample(store, sample)
-    store_mix(store, sources, now, since=t - 3600)
-    try:
-        totals.update(store, t)
-    except Exception as e:
-        log.warning("daily totals failed: %s", e)
+    if five:
+        store_mix(store, sources, now, since=t - 3600)
+        try:
+            totals.update(store, t)
+        except Exception as e:
+            log.warning("daily totals failed: %s", e)
     return sample
 
 
+WATTTIME_KEYS = ("moer", "moer_t", "index")
+WATTTIME_KEEP = 1800  # show WattTime's last reading for up to half an hour
+
+
 def record_sample(store: Store, sample: dict) -> None:
-    """Keep the sample, and the latest one with today's solar total for /api/now."""
-    today = _today(store, SAMPLES, "solar_w", store.get_state("sample"), sample)
+    """Keep the sample, and the latest one with today's solar total for /api/now.
+
+    The latest one keeps WattTime's last reading between its 5-minute updates.
+    """
+    state = store.get_state("sample")
+    today = _today(store, SAMPLES, "solar_w", state, sample)
     store.append(SAMPLES, sample)
-    store.put_state("sample", {"sample": sample, "today": today})
+    latest = dict(sample)
+    last = (state or {}).get("sample") or {}
+    if "moer" not in sample and 0 <= sample["t"] - last.get("moer_t", 0) <= WATTTIME_KEEP:
+        latest.update({k: last[k] for k in WATTTIME_KEYS if k in last})
+    store.put_state("sample", {"sample": latest, "today": today})
 
 
 def record_plug(store: Store, report: dict) -> None:
@@ -200,7 +217,7 @@ def charging_estimates(store: Store, settings: Settings, now: int) -> dict:
 
 
 def refresh_charging_plan(store: Store, settings: Settings, now: datetime) -> None:
-    """Replan after each 5-minute reading using the cached emissions forecast."""
+    """Replan after each reading using the cached emissions forecast."""
     old = store.get_state("plan") or {}
     forecast = old.get("forecast", [])
     if not forecast or int(now.timestamp()) - old.get("forecast_at", old["generated_at"]) > 7200:
@@ -212,9 +229,11 @@ def refresh_charging_plan(store: Store, settings: Settings, now: datetime) -> No
     p.update(forecast=forecast, forecast_at=old.get("forecast_at", old["generated_at"]))
     p["index_now"] = old.get("index_now")
     store.put_state("plan", p)
-    store.append(
-        PLANS, {"t": p["generated_at"], "windows": [{"s": s, "e": e} for s, e in p["windows"]]}
-    )
+    # Replans run every minute; only keep the ones that changed the windows.
+    if [list(w) for w in p["windows"]] != [list(w) for w in old.get("windows", [])]:
+        store.append(
+            PLANS, {"t": p["generated_at"], "windows": [{"s": s, "e": e} for s, e in p["windows"]]}
+        )
 
 
 def plug_plan(store: Store) -> dict | None:

@@ -58,6 +58,11 @@ def rate_lookup(samples: list[dict]) -> Rate:
     return rate
 
 
+def covered_h(points: list[tuple[int, float]]) -> float:
+    """Hours between readings, not counting outages longer than ``MAX_GAP``."""
+    return sum(min(t1 - t0, MAX_GAP) for (t0, _), (t1, _) in pairwise(points)) / 3600
+
+
 def integrate_wh(points: list[tuple[int, float]]) -> float:
     return energy(points, lambda _t: None)[0]
 
@@ -92,6 +97,7 @@ def day_totals(store: Store, day: str) -> dict | None:
         "day": day,
         "solar_wh": round(integrate_wh(solar), 1),
         "solar_n": len(solar),
+        "solar_h": round(covered_h(solar), 2),
         "load_wh": round(load_wh, 1),
         "grid_wh": round(grid_wh, 1),
         "load_lb": round(load_lb, 4),

@@ -86,9 +86,14 @@ def daily_view(store: Store, now: int, days: int = 14) -> dict:
         }
         for d in stored
     ]
-    # Same rule as the weekly GitHub issue; only full days count.
+    # Only days with at least 3 hours of solar readings count. Days stored
+    # before solar_h existed had a reading every 5 minutes.
     today = day_key(now)
-    full = {d["day"]: d["solar_wh"] for d in stored if d["solar_n"] >= 36 and d["day"] != today}
+    full = {
+        d["day"]: d["solar_wh"]
+        for d in stored
+        if d.get("solar_h", d["solar_n"] / 12) >= 3 and d["day"] != today
+    }
     return {"days": rows, "reserve": telemetry.recommend_reserve(full)}
 
 

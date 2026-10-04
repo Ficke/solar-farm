@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from solar_server import tasks
 from solar_server.config import Settings
-from solar_server.store import SAMPLES, MemoryStore
+from solar_server.store import PLANS, SAMPLES, MemoryStore
 
 NOW = datetime(2026, 10, 3, 14, tzinfo=UTC)
 T = int(NOW.timestamp())
@@ -87,3 +87,19 @@ def test_unexpected_battery_drop_moves_the_plan_to_earlier_charging():
     tasks.record_sample(store, {"t": T + 300, "battery_pct": 22})
     revised = tasks.charging_plan(store, dirty_then_clean, settings, NOW + timedelta(minutes=5))
     assert revised["windows"][0][0] < T + 3600
+
+
+def test_replans_that_keep_the_same_windows_are_not_stored_again():
+    store = MemoryStore()
+    settings = Settings(load_w=20)
+    store.append(SAMPLES, {"t": T, "battery_pct": 60})
+    first = tasks.charging_plan(store, POINTS, settings, NOW)
+    first.update(forecast=[[int(t.timestamp()), v] for t, v in POINTS], forecast_at=T)
+    store.put_state("plan", json.loads(json.dumps(first)))
+    store.append(SAMPLES, {"t": T + 60, "battery_pct": 60})
+    tasks.refresh_charging_plan(store, settings, NOW + timedelta(minutes=1))
+    assert (store.get_state("plan") or {})["generated_at"] == T + 60
+    assert store.day(PLANS, "2026-10-03") == []
+    store.append(SAMPLES, {"t": T + 120, "battery_pct": 100})
+    tasks.refresh_charging_plan(store, settings, NOW + timedelta(minutes=2))
+    assert store.day(PLANS, "2026-10-03") == [{"t": T + 120, "windows": []}]
