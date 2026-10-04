@@ -86,7 +86,7 @@
   function tipRows({ p }: Slot): TipRow[] {
     if (!p) return [{ name: "No readings" }];
     return [
-      { color: "--solar", value: span(fmtWh(p.solar_wh)), name: "Solar" },
+      { color: "--solar-area", value: span(fmtWh(p.solar_wh)), name: "Solar" },
       { color: "--grid", value: span(fmtWh(p.grid_wh)), name: "Grid" },
       { color: "--load", value: span(fmtWh(p.load_wh)), name: "Load" },
       {
@@ -100,7 +100,7 @@
 
 <dl class="tiles">
   <div>
-    <dt><i class="sw" style:background="var(--solar)"></i>Solar</dt>
+    <dt><i class="sw" style:background="var(--solar-area)"></i>Solar</dt>
     <dd><b>{co2 ? totals.solar[0] : "–"}</b><small>{totals.solar[1]}</small></dd>
   </div>
   <div>
@@ -141,7 +141,7 @@
         {@const x = cx(i) - bw / 2}
         {@const s = p.solar_wh / 1000}
         {@const g = p.grid_wh / 1000}
-        <path d={bar(x, ey(0), ey(s), g === 0)} fill="var(--solar)" />
+        <path d={bar(x, ey(0), ey(s), g === 0)} fill="var(--solar-area)" />
         <path d={bar(x, s > 0 ? ey(s) - 2 : ey(s), ey(s + g), true)} fill="var(--grid)" />
         <path d={bar(x, ey(0) + 1, ey(-p.load_wh / 1000), true)} fill="var(--load)" />
       {/if}
