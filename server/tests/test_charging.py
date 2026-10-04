@@ -89,7 +89,7 @@ def test_unexpected_battery_drop_moves_the_plan_to_earlier_charging():
     assert revised["windows"][0][0] < T + 3600
 
 
-def test_replans_that_keep_the_same_windows_are_not_stored_again():
+def test_replans_between_5_minute_marks_are_kept_only_if_the_windows_change():
     store = MemoryStore()
     settings = Settings(load_w=20)
     store.append(SAMPLES, {"t": T, "battery_pct": 60})
@@ -102,4 +102,5 @@ def test_replans_that_keep_the_same_windows_are_not_stored_again():
     assert store.day(PLANS, "2026-10-03") == []
     store.append(SAMPLES, {"t": T + 120, "battery_pct": 100})
     tasks.refresh_charging_plan(store, settings, NOW + timedelta(minutes=2))
-    assert store.day(PLANS, "2026-10-03") == [{"t": T + 120, "windows": []}]
+    (kept,) = store.day(PLANS, "2026-10-03")
+    assert kept["t"] == T + 120 and kept["windows"] == []

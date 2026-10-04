@@ -247,12 +247,34 @@ def refresh_charging_plan(store: Store, settings: Settings, now: datetime) -> No
 
 
 def keep_plan(store: Store, old: dict, new: dict) -> None:
-    """Plans are made every minute; keep the ones that changed the windows."""
-    if [list(w) for w in new["windows"]] != [list(w) for w in old.get("windows", [])]:
-        store.append(
-            PLANS,
-            {"t": new["generated_at"], "windows": [{"s": s, "e": e} for s, e in new["windows"]]},
-        )
+    """Plans are made every minute. Keep one every 5 minutes, and any that
+    changed the windows, so a day's history stays well under Firestore's 1 MB."""
+    changed = [list(w) for w in new["windows"]] != [list(w) for w in old.get("windows", [])]
+    if changed or new["generated_at"] % 300 < 60:
+        store.append(PLANS, plan_record(new))
+
+
+# Numbers kept with each stored plan, so its choices can be checked later.
+PLAN_HISTORY_KEYS = (
+    "strategy",
+    "battery_pct",
+    "deadline",
+    "grid_wh",
+    "shortfall_wh",
+    "solar_day_wh",
+    "solar_days",
+    "load_w",
+    "charge_w",
+)
+
+
+def plan_record(p: dict) -> dict:
+    """The stored history row for a plan: its windows and the numbers behind them."""
+    return {
+        "t": p["generated_at"],
+        "windows": [{"s": s, "e": e} for s, e in p["windows"]],
+        **{k: p[k] for k in PLAN_HISTORY_KEYS if k in p},
+    }
 
 
 def plug_plan(store: Store) -> dict | None:
