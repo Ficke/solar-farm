@@ -41,6 +41,7 @@ def now_view(store: Store, now: int) -> dict:
                 "index_now",
                 "strategy",
                 "target_pct",
+                "deadline",
                 "floor_pct",
                 "solar_day_wh",
                 "solar_days",

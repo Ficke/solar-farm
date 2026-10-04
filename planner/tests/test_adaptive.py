@@ -3,7 +3,6 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from planner.adaptive import build_adaptive_plan, estimates
 from planner.plan import PACIFIC
-from planner.telemetry import CAPACITY_WH
 
 NOW = datetime(2026, 10, 3, 14, tzinfo=UTC)  # 7am Pacific
 
@@ -22,15 +21,19 @@ def forecast(hours=24, clean=12):
     ]
 
 
-def test_small_topup_uses_clean_hour_and_leaves_solar_room():
+def duration(p):
+    return sum(e - s for s, e in p["windows"])
+
+
+def test_fills_to_full_in_the_clean_hour():
     plan = build_adaptive_plan(forecast(), NOW, 60, inputs(load=20))
-    assert plan["target_pct"] == pytest.approx(83.7)
+    assert plan["target_pct"] == 100
     assert plan["shortfall_wh"] == 0
-    assert plan["grid_wh"] < 150
+    assert 1000 < plan["grid_wh"] < 1400  # 40% of the battery, less morning solar
     assert plan["windows"]
     for s, e in plan["windows"]:
         assert datetime.fromtimestamp(s, PACIFIC).hour == 12
-        assert e - s < 15 * 60
+        assert datetime.fromtimestamp(e - 1, PACIFIC).hour == 12
 
 
 def test_charging_follows_emissions_forecast_when_cleanest_window_moves():
@@ -43,15 +46,10 @@ def test_charging_follows_emissions_forecast_when_cleanest_window_moves():
         )
 
 
-def test_solar_can_cover_the_load_without_any_grid():
-    plan = build_adaptive_plan(forecast(), NOW, 85, inputs(load=10))
+def test_full_battery_needs_no_grid():
+    plan = build_adaptive_plan(forecast(), NOW, 100, inputs(load=10))
     assert plan["windows"] == []
     assert plan["grid_wh"] == 0
-
-
-def test_low_battery_does_not_trigger_a_needless_fill_when_solar_covers_load():
-    plan = build_adaptive_plan(forecast(), NOW, 25, inputs(load=10))
-    assert plan["windows"] == []
 
 
 def test_low_battery_cannot_wait_for_cleanest_hour():
@@ -63,9 +61,6 @@ def test_low_battery_cannot_wait_for_cleanest_hour():
 def test_faster_charging_needs_less_grid_time():
     slow = build_adaptive_plan(forecast(), NOW, 60, inputs(charge=600))
     fast = build_adaptive_plan(forecast(), NOW, 60, inputs(charge=1200))
-
-    def duration(p):
-        return sum(e - s for s, e in p["windows"])
 
     assert duration(fast) < duration(slow)
     assert fast["grid_wh"] == pytest.approx(slow["grid_wh"], abs=30)
@@ -112,9 +107,37 @@ def test_history_learns_solar_and_load_without_extrapolating_gaps():
     assert sparse["load_w"] == 100
 
 
-def test_larger_solar_days_lower_grid_target():
-    plan = build_adaptive_plan(forecast(), NOW, 80, inputs(solar=1000))
-    assert plan["target_pct"] == pytest.approx(round((1 - 1000 / CAPACITY_WH) * 100, 1))
+def test_equal_forecasts_charge_as_late_as_possible():
+    flat = [(NOW + timedelta(minutes=i * 5), 900.0 + i % 3) for i in range(24 * 12)]
+    plan = build_adaptive_plan(flat, NOW, 80, inputs(load=20))
+    assert plan["windows"][-1][1] <= plan["deadline"]
+    assert datetime.fromtimestamp(plan["windows"][-1][0], PACIFIC).hour == 15
+    assert datetime.fromtimestamp(plan["deadline"], PACIFIC).hour == 16
+
+
+def test_room_is_kept_only_for_material_later_solar():
+    early = forecast(clean=10)
+    none = build_adaptive_plan(early, NOW, 60, inputs(load=5, solar=0))
+    small = build_adaptive_plan(early, NOW, 60, inputs(load=5, solar=200))
+    big = build_adaptive_plan(early, NOW, 60, inputs(load=5, solar=2000))
+    # 200 Wh/day leaves too little after 10am to wait for: fill up at 10.
+    assert none["grid_wh"] - small["grid_wh"] < 100
+    # 2,000 Wh/day: keep room for half of what usually comes after 10.
+    assert none["grid_wh"] - big["grid_wh"] > 600
+    assert big["shortfall_wh"] == 0
+
+
+def test_after_peak_the_plan_aims_for_tomorrow_afternoon():
+    evening = datetime(2026, 10, 4, 4, 30, tzinfo=UTC)  # 9:30pm Pacific
+    points = [
+        (evening + timedelta(minutes=i * 5), 900.0 if i < 12 * 14 else 100.0)
+        for i in range(48 * 12)
+    ]
+    plan = build_adaptive_plan(points, evening, 40, inputs(load=20))
+    assert datetime.fromtimestamp(plan["deadline"], PACIFIC).day == 4
+    assert plan["windows"]
+    assert all(s >= int((evening + timedelta(hours=14)).timestamp()) for s, _ in plan["windows"])
+    assert plan["shortfall_wh"] == 0
 
 
 def test_solar_estimate_follows_recent_days_and_ignores_older_history():
@@ -134,7 +157,6 @@ def test_solar_estimate_follows_recent_days_and_ignores_older_history():
     plan = build_adaptive_plan(forecast(), NOW, 60, estimate)
     sunnier = build_adaptive_plan(forecast(), NOW, 60, inputs(load=100, solar=750))
     assert plan["grid_wh"] > sunnier["grid_wh"]
-    assert plan["target_pct"] > sunnier["target_pct"]
 
 
 def test_a_day_with_missing_midday_data_is_not_treated_as_low_solar():

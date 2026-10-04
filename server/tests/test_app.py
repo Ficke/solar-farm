@@ -168,7 +168,7 @@ def test_collect_then_plan_exposes_adaptive_policy_to_dashboard_and_plug():
     assert c.post("/tasks/plan", headers=AUTH).status_code == 200
     plan = c.get("/plug/plan", headers={"X-Plug-Key": "k3y"}).json()
     assert plan["strategy"] == "adaptive"
-    assert plan["target_pct"] == 83.7
+    assert plan["target_pct"] == 100
     web, _ = make("web", store=store)
     assert web.get("/api/now").json()["plan"]["grid_wh"] == plan["grid_wh"]
 

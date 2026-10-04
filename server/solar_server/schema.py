@@ -72,6 +72,7 @@ class PlanSummary(BaseModel):
     index_now: float | None = None
     strategy: Literal["adaptive", "fallback"] | None = None
     target_pct: float | None = None
+    deadline: int | None = None
     floor_pct: float | None = None
     solar_day_wh: int | None = None
     solar_days: int | None = None

@@ -699,6 +699,17 @@
             ],
             "title": "Target Pct"
           },
+          "deadline": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline"
+          },
           "floor_pct": {
             "anyOf": [
               {
