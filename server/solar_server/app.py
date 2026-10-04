@@ -12,11 +12,11 @@ from typing import Annotated, Any
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
 
 from solar_server import tasks, views
 from solar_server.auth import TokenVerifier, check_plug_key, check_scheduler, google_verifier
 from solar_server.config import Settings
+from solar_server.schema import Accuracy, Daily, Now, PlugReport, Timeline
 from solar_server.sources import LiveSources, Sources
 from solar_server.store import FirestoreStore, Store
 
@@ -27,16 +27,6 @@ WEB_DIST = Path(
 )
 
 
-class PlugReport(BaseModel):
-    t: int
-    on: bool
-    reason: str
-    w: float | None = None
-    wh: float | None = None
-    index: float | None = None
-    plan_at: int | None = None
-
-
 def create_app(
     settings: Settings,
     store: Store,
@@ -44,7 +34,13 @@ def create_app(
     verify: TokenVerifier = google_verifier,
     clock: Callable[[], float] = time.time,
 ) -> FastAPI:
-    app = FastAPI(title="Solar Farm", docs_url=None, redoc_url=None)
+    app = FastAPI(
+        title="Solar Farm",
+        docs_url=None,
+        redoc_url=None,
+        # One schema per model, so the generated TypeScript names match.
+        separate_input_output_schemas=False,
+    )
 
     @app.get("/healthz")
     def healthz() -> dict:
@@ -92,22 +88,27 @@ def _edge_routes(app, settings, store, sources, verify, clock) -> None:
 
 
 def _web_routes(app, store, clock) -> None:
-    @app.get("/api/now")
+    # Responses are checked against the models in schema.py; keys a view
+    # leaves out stay out rather than coming back as null.
+    def route(path: str, model: type):
+        return app.get(path, response_model=model, response_model_exclude_unset=True)
+
+    @route("/api/now", Now)
     def api_now() -> dict:
         return views.now_view(store, int(clock()))
 
-    @app.get("/api/timeline")
+    @route("/api/timeline", Timeline)
     def api_timeline(past_hours: Annotated[int, Query(ge=1, le=168)] = 24) -> dict:
         return views.timeline_view(store, int(clock()), past_hours)
 
-    @app.get("/api/accuracy")
+    @route("/api/accuracy", Accuracy)
     def api_accuracy(
         lead_hours: Annotated[int, Query(ge=1, le=23)] = 6,
         past_hours: Annotated[int, Query(ge=1, le=168)] = 24,
     ) -> dict:
         return views.accuracy_view(store, int(clock()), lead_hours, past_hours)
 
-    @app.get("/api/daily")
+    @route("/api/daily", Daily)
     def api_daily(days: Annotated[int, Query(ge=1, le=60)] = 14) -> dict:
         return views.daily_view(store, int(clock()), days)
 
@@ -115,7 +116,7 @@ def _web_routes(app, store, clock) -> None:
         app.mount("/", StaticFiles(directory=WEB_DIST, html=True), name="web")
     else:
 
-        @app.get("/")
+        @app.get("/", include_in_schema=False)
         def placeholder() -> dict:
             return {"message": "Dashboard not built yet; the API is at /api/now."}
 

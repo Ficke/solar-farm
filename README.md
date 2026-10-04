@@ -66,13 +66,14 @@ Tools: [uv](https://docs.astral.sh/uv/) for Python (it installs Python 3.14 itse
 
 ```sh
 uv sync                                  # Python 3.14 + all dependencies into .venv
-uv run pytest                            # planner tests
+uv run pytest                            # planner and server tests
+just test-firestore                      # server store against the Firestore emulator (Java 21+)
 uv run ruff check . && uv run ty check   # lint and type check
 cd device && bun install && bun test     # script logic under a fake Shelly runtime
 cd web && bun install && bun run check   # dashboard type check and lint
 ```
 
-To work on the dashboard with made-up readings, run `uv run uvicorn solar_server.dev:app --port 8000` from `server/` and `bun run dev` in `web/`. The dashboard is Svelte 5 with Vite and uPlot.
+To work on the dashboard with made-up readings, run `uv run uvicorn solar_server.dev:app --port 8000` from `server/` and `bun run dev` in `web/`. The dashboard is Svelte 5 with Vite and uPlot. Its API types come from the server: after changing `server/solar_server/schema.py`, run `just api` to update `web/openapi.json`, and the dashboard's check and build regenerate the TypeScript types from it.
 
 Or `just check` to run everything CI runs. The repo is a uv workspace: the root `pyproject.toml` holds the shared Ruff, ty and pytest settings and one `uv.lock`; `planner/` and `server/` are member packages.
 
