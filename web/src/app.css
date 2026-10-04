@@ -16,6 +16,13 @@
   --plan-band: rgba(42, 120, 214, 0.1);
   --peak-band: rgba(208, 59, 59, 0.09);
   --peak-ink: #b33232;
+  --mix-gas: #c8553d;
+  --mix-imports: #b3a589;
+  --mix-batteries: #3a9a48;
+  --mix-wind: #7cb6e0;
+  --mix-hydro: #2b8a99;
+  --mix-other: #9aa3ae;
+  --mix-nuclear: #8a68ba;
   --good: #0a7d0a;
   --good-bg: rgba(12, 163, 12, 0.12);
   --bad: #c03030;
@@ -41,6 +48,13 @@
     --plan-band: rgba(57, 135, 229, 0.14);
     --peak-band: rgba(230, 103, 103, 0.12);
     --peak-ink: #f08a8a;
+    --mix-gas: #c9573f;
+    --mix-imports: #857b66;
+    --mix-batteries: #43a851;
+    --mix-wind: #5d9ccc;
+    --mix-hydro: #2f9aab;
+    --mix-other: #66707c;
+    --mix-nuclear: #9776c6;
     --good: #4cc94c;
     --good-bg: rgba(12, 163, 12, 0.2);
     --bad: #f08a8a;

@@ -19,10 +19,7 @@ SAMPLES = "samples"  # every 5 min: battery, solar, emissions
 PLUG = "plug"  # every minute: relay state, reason, grid watts
 PLANS = "plans"  # every 30 min: the windows each plan picked
 FORECASTS = "forecasts"  # every 30 min: the 24-hour forecast each plan used
-# WattTime publishes these late (health damage within hours, average CO2
-# hourly within days), so each plan run refetches recent history.
-AOER = "aoer"  # average CO2 across all plants, lb/MWh: {t, v}
-HEALTH = "health"  # health damage, $/MWh: {t, v}
+MIX = "mix"  # every 5 min: CAISO's generation by fuel, MW: {t, solar, wind, gas, ...}
 
 
 def _state_document(data: dict[str, Any]) -> dict[str, str]:

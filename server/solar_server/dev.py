@@ -14,7 +14,7 @@ from planner.plan import PACIFIC, build_plan
 
 from solar_server.app import create_app
 from solar_server.config import Settings
-from solar_server.store import AOER, FORECASTS, HEALTH, PLANS, PLUG, SAMPLES, MemoryStore
+from solar_server.store import FORECASTS, MIX, PLANS, PLUG, SAMPLES, MemoryStore
 
 STEP = 300
 
@@ -31,9 +31,32 @@ def _moer(t: int) -> float:
     return 0.0 if 10.5 <= h < 14 else 950 + 40 * math.sin(t / 5000)
 
 
-def _aoer(t: int) -> float:
+def _mix(t: int) -> dict:
+    # Roughly CAISO in October: solar to ~15 GW at noon, batteries charging
+    # midday and discharging into the evening peak, gas filling the rest.
     h = _hour(t)
-    return 430 - 200 * max(0.0, math.sin(math.pi * (h - 7) / 12)) if 7 <= h < 19 else 430
+    sun = max(0.0, math.sin(math.pi * (h - 7) / 12)) if 7 <= h < 19 else 0.0
+    batteries = -4000 * sun if sun else (6000 if 17 <= h < 22 else 800)
+    demand = 24000 + 6000 * math.exp(-(((h - 19) / 3) ** 2))
+    fixed = 2228 + 780 + 600 + 2500 + 900 + 5000
+    solar = 15000 * sun
+    gas = max(2500.0, demand - fixed - solar - max(0.0, batteries))
+    return {
+        "t": t,
+        "solar": round(solar - 50),
+        "wind": 900,
+        "geothermal": 780,
+        "biomass": 190,
+        "biogas": 155,
+        "small_hydro": 230,
+        "coal": 3,
+        "nuclear": 2228,
+        "gas": round(gas),
+        "large_hydro": 2500,
+        "batteries": round(batteries),
+        "imports": 5000,
+        "other": 0,
+    }
 
 
 def sample_store(now: int) -> MemoryStore:
@@ -59,11 +82,7 @@ def sample_store(now: int) -> MemoryStore:
                 "index": 5 if on else 70,
             },
         )
-        # Average CO2 arrives hourly and late; health damage a couple of hours late.
-        if t % 3600 == 0 and t < now - 6 * 3600:
-            store.append(AOER, {"t": t, "v": round(_aoer(t), 1)})
-        if t < now - 2 * 3600:
-            store.append(HEALTH, {"t": t, "v": round(_moer(t) / 40 + 2, 2)})
+        store.append(MIX, _mix(t))
         if t % 1800 == 0:
             # Forecasts get the curtailment stretch roughly right, with its
             # edges off by up to an hour the further out they look.
@@ -93,7 +112,6 @@ def sample_store(now: int) -> MemoryStore:
             "generated_at": last,
             "windows": windows,
             "forecast": points,
-            "forecast_health": [[t, round(v / 40 + 2, 2)] for t, v in points],
             "index_now": 70,
         },
     )
@@ -116,7 +134,7 @@ class NoSources:
     def actual(self, signal: str, now: datetime) -> None:
         return None
 
-    def history(self, signal: str, start: datetime, end: datetime) -> list:
+    def mix(self, day: object, now: datetime) -> list:
         return []
 
     def jackery(self, now: object) -> None:

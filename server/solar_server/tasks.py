@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 
-from planner.plan import build_plan
+from planner.plan import PACIFIC, build_plan
 
 from solar_server.config import Settings
 from solar_server.sources import Sources
-from solar_server.store import AOER, FORECASTS, HEALTH, PLANS, SAMPLES, Store
+from solar_server.store import FORECASTS, MIX, PLANS, SAMPLES, Store
 
 log = logging.getLogger(__name__)
 
@@ -18,12 +18,10 @@ def _num(v: float | None) -> float | None:
     return None if v is None else round(float(v), 1)
 
 
-# WattTime's other signals, published late: (series, signal, hours to refetch).
-LATE_SIGNALS = ((AOER, "co2_aoer", 72), (HEALTH, "health_damage", 24))
-
-
 def collect(store: Store, sources: Sources, now: datetime) -> dict:
     """One sample: WattTime's latest marginal rate and percentile, plus the Jackery.
+
+    Also stores CAISO's grid mix for the last hour.
 
     Each source is optional; a sample is stored with whatever arrived.
     """
@@ -53,7 +51,22 @@ def collect(store: Store, sources: Sources, now: datetime) -> dict:
         log.warning("jackery failed: %s", e)
     if len(sample) > 1:
         store.append(SAMPLES, sample)
+    store_mix(store, sources, now, since=t - 3600)
     return sample
+
+
+def store_mix(store: Store, sources: Sources, now: datetime, since: int) -> None:
+    """CAISO's grid mix from ``since`` to now; rows already stored are skipped."""
+    t = int(now.timestamp())
+    today = now.astimezone(PACIFIC).date()
+    days = sorted({datetime.fromtimestamp(since, PACIFIC).date(), today})
+    for day in days:
+        try:
+            rows = sources.mix(day, now)
+        except Exception as e:
+            log.warning("caiso mix %s failed: %s", day, e)
+            continue
+        store.extend(MIX, [r for r in rows if since <= r["t"] <= t])
 
 
 def plan(store: Store, sources: Sources, settings: Settings, now: datetime) -> dict:
@@ -65,13 +78,8 @@ def plan(store: Store, sources: Sources, settings: Settings, now: datetime) -> d
     except Exception as e:
         log.warning("signal-index skipped: %s", e)
     p["forecast"] = [[int(t.timestamp()), round(v, 1)] for t, v in points]
-    # Health damage, for the dashboard only; the plan follows the marginal rate.
-    try:
-        health = sources.forecast(24, "health_damage")
-        p["forecast_health"] = [[int(t.timestamp()), round(v, 2)] for t, v in health]
-    except Exception as e:
-        log.warning("watttime health_damage forecast failed: %s", e)
-    backfill(store, sources, now)
+    # Fill any gaps in the last day's grid mix.
+    store_mix(store, sources, now, since=int(now.timestamp()) - 86400)
     store.put_state("plan", p)
     # Keep every plan and forecast, so the dashboard can check the forecast
     # against what happened and later features can look back.
@@ -90,17 +98,6 @@ def plan(store: Store, sources: Sources, settings: Settings, now: datetime) -> d
             },
         )
     return p
-
-
-def backfill(store: Store, sources: Sources, now: datetime) -> None:
-    """Store the late-published signals for the last few days; repeats are skipped."""
-    for series, signal, hours in LATE_SIGNALS:
-        try:
-            points = sources.history(signal, now - timedelta(hours=hours), now)
-        except Exception as e:
-            log.warning("watttime %s history failed: %s", signal, e)
-            continue
-        store.extend(series, [{"t": int(t.timestamp()), "v": round(v, 2)} for t, v in points])
 
 
 def plug_plan(store: Store) -> dict | None:

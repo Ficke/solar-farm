@@ -36,10 +36,26 @@ export interface Timeline {
   samples: Sample[];
   plug: PlugReport[];
   forecast: [number, number][];
-  forecast_health: [number, number][];
-  aoer: [number, number][]; // average CO2 across all plants, lb/MWh (hourly, published late)
-  health: [number, number][]; // health damage, $/MWh (published a few hours late)
+  mix: MixRow[];
   windows: Window[];
+}
+
+/** CAISO generation by fuel, MW. Batteries are negative while charging. */
+export interface MixRow {
+  t: number;
+  solar: number | null;
+  wind: number | null;
+  geothermal: number | null;
+  biomass: number | null;
+  biogas: number | null;
+  small_hydro: number | null;
+  coal: number | null;
+  nuclear: number | null;
+  gas: number | null;
+  large_hydro: number | null;
+  batteries: number | null;
+  imports: number | null;
+  other: number | null;
 }
 
 export interface Accuracy {

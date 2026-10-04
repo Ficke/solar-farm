@@ -3,6 +3,7 @@
   import { align } from "./lib/align";
   import { type Accuracy, api, type Daily, type Now, type Timeline } from "./lib/api";
   import { FUTURE, PAST } from "./lib/layout";
+  import { GROUPS, stackMix } from "./lib/mix";
   import PlanView from "./lib/PlanView.svelte";
   import { explain } from "./lib/status";
   import TimeChart from "./lib/TimeChart.svelte";
@@ -87,19 +88,15 @@
   });
 
   const emissionsData = $derived(
-    align(
+    align([
+      (tl?.samples ?? []).map((p) => [p.moer_t ?? p.t, p.moer]),
       [
-        (tl?.samples ?? []).map((p) => [p.moer_t ?? p.t, p.moer]),
-        [
-          ...(acc?.points ?? []).map(([t, , f]) => [t, f] as [number, number | null]),
-          ...forecast.map(([t, v]) => [t, v] as [number, number]),
-        ],
-        tl?.aoer ?? [],
+        ...(acc?.points ?? []).map(([t, , f]) => [t, f] as [number, number | null]),
+        ...forecast.map(([t, v]) => [t, v] as [number, number]),
       ],
-      [15 * 60, 15 * 60, 2 * 3600], // average CO2 is hourly
-    ),
+    ]),
   );
-  const healthData = $derived(align([tl?.health ?? [], tl?.forecast_health ?? []]));
+  const mix = $derived(stackMix(tl?.mix ?? []));
   const batteryData = $derived(align([(tl?.samples ?? []).map((p) => [p.t, p.battery_pct])]));
   const powerData = $derived(
     align([
@@ -187,7 +184,7 @@
       </div>
     </div>
     <TimeChart
-      label="Marginal and average CO2, past 24 hours and forecast"
+      label="Marginal CO2, past 24 hours and forecast"
       data={emissionsData}
       {from}
       {to}
@@ -197,22 +194,27 @@
       series={[
         { label: "Marginal", color: "--ink", unit: "lb/MWh" },
         { label: "Forecast", color: "--accent", dash: [5, 4], unit: "lb/MWh" },
-        { label: "Average", color: "--ink-3", width: 1.5, unit: "lb/MWh" },
       ]}
     />
-    <h3>Health damage, $/MWh</h3>
+    <h3>Generation by source, GW</h3>
     <TimeChart
-      label="Health damage, past 24 hours and forecast"
-      data={healthData}
+      label="CAISO generation by source, past 24 hours"
+      data={mix.stacked}
+      tipData={mix.raw}
+      shade={false}
       {from}
       {to}
       now={tnow}
-      {windows}
-      height={100}
-      series={[
-        { label: "Actual", color: "--ink", unit: "$/MWh", digits: 1 },
-        { label: "Forecast", color: "--accent", dash: [5, 4], unit: "$/MWh", digits: 1 },
-      ]}
+      height={160}
+      series={GROUPS.map((g) => ({
+        label: g.label,
+        color: g.color,
+        fill: g.color,
+        area: true,
+        width: 1,
+        unit: "GW",
+        digits: 1,
+      }))}
     />
   </section>
 

@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from planner.jackery import Reading
 from solar_server.app import create_app
 from solar_server.config import Settings
-from solar_server.store import AOER, FORECASTS, HEALTH, PLANS, PLUG, SAMPLES, MemoryStore
+from solar_server.store import FORECASTS, MIX, PLANS, PLUG, SAMPLES, MemoryStore
 
 NOW = 1791158400  # Sat 4 Oct 2026, 17:00 Pacific
 SCHED = "solar-scheduler@p.iam.gserviceaccount.com"
@@ -18,8 +18,6 @@ class FakeSources:
         self.actuals = actuals
 
     def forecast(self, hours, signal="co2_moer"):
-        if signal != "co2_moer":
-            return [(datetime.fromtimestamp(NOW, UTC), 1.0)]
         start = NOW - NOW % 300
         # dirty now, clean from +18h onwards
         return [
@@ -37,9 +35,8 @@ class FakeSources:
             raise RuntimeError("watttime down")
         return (datetime.fromtimestamp(NOW - 300, UTC), 880.0)
 
-    def history(self, signal, start, end):
-        value = {"co2_aoer": 410.0, "health_damage": 12.5}[signal]
-        return [(datetime.fromtimestamp(NOW - 3600, UTC), value)]
+    def mix(self, day, now):
+        return [{"t": t, "solar": 0, "gas": 15000} for t in (NOW - 7200, NOW - 600, NOW + 300)]
 
     def jackery(self, now):
         if not self.with_jackery:
@@ -119,7 +116,6 @@ def test_plan_task_feeds_the_plug_without_the_forecast():
 
     plan = c.get("/plug/plan", headers={"X-Plug-Key": "k3y"}).json()
     assert not any(k.startswith("forecast") for k in plan)
-    assert store.get_state("plan")["forecast_health"] == [[NOW, 1.0]]
     assert plan["generated_at"] == NOW
     assert plan["index_now"] == 82.0
     # 4 clean hours, all in the cheap stretch 18 h out
@@ -133,18 +129,21 @@ def test_plan_task_feeds_the_plug_without_the_forecast():
     assert snap["t"] == NOW and snap["step"] == 300 and len(snap["values"]) == 288
 
 
-def test_plan_task_backfills_late_signals_once():
+def test_grid_mix_is_stored_once_per_row():
     c, store = make("edge")
+    c.post("/tasks/collect", headers=AUTH)
+    # A reading keeps the last hour; a plan fills in the last day.
+    assert [r["t"] for r in store.day(MIX, "2026-10-04")] == [NOW - 600]
     c.post("/tasks/plan", headers=AUTH)
-    c.post("/tasks/plan", headers=AUTH)
-    assert store.day(AOER, "2026-10-04") == [{"t": NOW - 3600, "v": 410.0}]
-    assert store.day(HEALTH, "2026-10-04") == [{"t": NOW - 3600, "v": 12.5}]
+    c.post("/tasks/collect", headers=AUTH)
+    assert [r["t"] for r in store.day(MIX, "2026-10-04")] == [NOW - 600, NOW - 7200]
 
     web, _ = make("web", store=store)
     tl = web.get("/api/timeline").json()
-    assert tl["aoer"] == [[NOW - 3600, 410.0]]
-    assert tl["health"] == [[NOW - 3600, 12.5]]
-    assert tl["forecast_health"] == [[NOW, 1.0]]
+    assert tl["mix"] == [
+        {"t": NOW - 7200, "solar": 0, "gas": 15000},
+        {"t": NOW - 600, "solar": 0, "gas": 15000},
+    ]
 
 
 def test_accuracy_compares_the_forecast_made_hours_earlier():
