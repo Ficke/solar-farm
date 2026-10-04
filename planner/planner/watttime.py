@@ -1,4 +1,4 @@
-"""Minimal WattTime v3 client: login, forecasts and historical actuals."""
+"""Fetch WattTime v3 forecasts, actuals and signal indices."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ def forecast(
     session: requests.Session | None = None,
     signal_type: str = "co2_moer",
 ) -> list[tuple[datetime, float]]:
-    """Return (point_time UTC, value) pairs, 5 minutes apart. MOER is lbs/MWh."""
+    """Return five-minute (UTC time, value) pairs; MOER is measured in lb/MWh."""
     s = session or requests.Session()
     r = s.get(
         f"{API}/v3/forecast",
@@ -43,7 +43,7 @@ def historical(
     signal_type: str = "co2_moer",
     session: requests.Session | None = None,
 ) -> list[tuple[datetime, float]]:
-    """What the grid actually did: (point_time UTC, value) pairs, 5 minutes apart."""
+    """Return historical five-minute (UTC time, value) pairs."""
     s = session or requests.Session()
     r = s.get(
         f"{API}/v3/historical",
@@ -63,7 +63,7 @@ def historical(
 def latest(
     token: str, now: datetime, region: str = "CAISO_NORTH", signal_type: str = "co2_moer"
 ) -> tuple[datetime, float] | None:
-    """The most recent actual value, from the last 30 minutes of history."""
+    """Return the latest actual from the last 30 minutes, or None if unavailable."""
     points = historical(token, now - timedelta(minutes=30), now, region, signal_type)
     return max(points) if points else None
 
@@ -71,7 +71,7 @@ def latest(
 def signal_index(
     token: str, region: str = "CAISO_NORTH", session: requests.Session | None = None
 ) -> float:
-    """Current 0-100 percentile, the same call the Shelly script makes as a fallback."""
+    """Return the current 0-100 cleanliness percentile used by the plug fallback."""
     s = session or requests.Session()
     r = s.get(
         f"{API}/v3/signal-index",
@@ -84,7 +84,6 @@ def signal_index(
 
 
 def parse_signal_index(body: dict) -> float:
-    # Same shape the device parses: data[0].value
     return float(body["data"][0]["value"])
 
 

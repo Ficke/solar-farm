@@ -1,109 +1,111 @@
 # solar-farm
 
-Grid-aware charging for a Jackery Explorer 3000 v2 with a 250 W panel in a San Francisco apartment. A Shelly Plug US Gen4 sits between the wall and the Jackery and only lets grid power through when California's grid is clean, and never during the PG&E E-TOU-C peak (4pm to 9pm).
+Grid-aware charging for a Jackery Explorer 3000 v2 with a 250 W solar panel in San Francisco. A Shelly Plug US Gen4 controls AC access, favoring clean grid energy and blocking the PG&E E-TOU-C peak, 4–9 pm Pacific. Solar stays connected.
 
 ## How it works
 
-- **Jackery:** no mode schedule or reserve slider is used to control charging. The server decides how much grid energy is needed and the Shelly controls AC access. Solar stays connected. The Jackery must accept AC charging while the plug is on and keep powering the load when it is off; select settings that allow that in the app. The scheduler measures the AC charge rate from telemetry, starting from 1,700 W.
-- **Shelly plug** (`device/src/grid-gate.js`): a script on the plug decides every minute whether the grid is on, in this order:
-  1. 4pm to 9pm Pacific: always off.
-  2. A feasible battery-aware plan less than 15 minutes old: follow its windows, including no grid at all when solar covers demand.
-  3. Otherwise, grid off for 30 hours (a whole missed day): on for 2 hours, so the battery can't run flat. Then follow any plan less than 3 hours old.
-  4. Otherwise WattTime's live index for `CAISO_NORTH`: on at or below the 25th percentile.
-  5. No internet: on from 10am to 3pm.
-- **Server** (`server/` and `planner/`, on Google Cloud Run): every minute it reads WattTime's 24-hour marginal-emissions forecast, which WattTime updates every 5 minutes. With fresh battery telemetry, it plans enough grid time in the cleanest 15-minute blocks before 4 pm to leave the battery full, shortening the final block to whole minutes. It reads the Jackery every minute and replans after each reading; if the forecast can't be fetched, it replans with the last one for up to two hours. The plug reads `/plug/plan` and reports its state every minute.
-- **Dashboard** (`web/`): shows windows, planned grid Wh, the solar estimate, and any projected shortfall from full. It labels the fixed-duration fallback when battery telemetry is unavailable.
+- **Server** (`server/`, `planner/`): reads Jackery telemetry and WattTime's 24-hour marginal-emissions forecast every minute, then replans charging toward a full battery by the next 4 pm.
+- **Plug** (`device/src/grid-gate.js`): decides every minute whether to allow grid power. Reports normally return the current plan; separate plan requests recover from missing reports.
+- **Dashboard** (`web/`): shows grid state, charging windows, battery and power history, emissions, CAISO generation, forecast accuracy, hub prices, and energy and CO₂ totals.
+
+The plug applies these rules in order:
+
+1. Unknown local time or 4–9 pm Pacific: off.
+2. A battery-aware plan less than 15 minutes old with no reported shortfall: follow its windows, even if no grid charging is needed.
+3. More than 30 hours without grid power: start a two-hour safety charge, subject to rules 1–2.
+4. Any plan less than three hours old: follow its windows.
+5. A live WattTime index less than 15 minutes old: turn on at or below the 25th percentile; stay on until it exceeds 30.
+6. Otherwise: on from 10 am to 3 pm.
+
+While on, the plug bridges gaps of up to three minutes between planned windows to avoid relay cycling during replans.
 
 ## Charging policy
 
-The goal each day is a **full battery by 4 pm**, when the peak starts, with the grid energy bought when the grid is cleanest and solar used where it matters.
+The planner targets **100% (3,072 Wh) by the next 4 pm Pacific**, with a **20% floor**. It selects the cleanest available 15-minute forecast blocks outside peak hours. Emissions are grouped by rounding to the nearest **50 lb/MWh**; within a group, later blocks win to allow solar to arrive first.
 
-1. **Deadline and target:** the next 4 pm Pacific; full (3,072 Wh).
-2. **Cleanest first:** forecast 15-minute blocks before 4 pm, outside 4–9 pm, are ranked by marginal CO₂. A block with no forecast is never used. The current block takes WattTime's live rate, and if the live rate is 300 lb/MWh or more while the forecast says 0 (curtailment), the rest of today's zeros take that rate until the live rate drops below 100. Blocks within **50 lb/MWh** of each other count as equally clean and the later one wins, so solar gets in first.
-3. **Fill to full:** grid tops the battery up to full in those blocks, cleanest first, stopping at the first block that reaches full. Solar before a block is already counted in the projected level.
-4. **Room for solar, only when it matters:** a block leaves room for solar still expected after it, counted at half the usual output, and only when that is at least **150 Wh** (about 5%). A little afternoon solar is not worth missing a clean window for.
-5. **Backstops:** projected charge never drops below **20%**, and if load or a short window leaves the battery more than 30 Wh short at 4 pm, the next cleanest block covers it. A shortfall is reported if that is impossible.
+The current block uses a live marginal rate when it is no more than 15 minutes old. When a live rate of at least **300 lb/MWh** contradicts a zero forecast, the remaining zeros that Pacific day use the recorded rate until a live rate falls below **100 lb/MWh**. Blocks without usable forecast rates are skipped.
 
-Solar starts at **500 Wh/day** spread over 9am–5pm and is learned as an average time-of-day profile from the last seven completed days with at least six hours of telemetry between 9am and 5pm; gaps over 15 minutes are excluded.
+Grid charging fills the battery, leaving room for half the estimated later solar only when that allowance reaches **150 Wh**. Additional blocks cover projected floor or deadline deficits above **30 Wh**. Partial windows round up to whole minutes; infeasible plans report a shortfall.
 
-Load is the time-weighted average of the last 24 hours, with a 100 W fallback until there are six hours of valid readings. The charge rate is the median grid power into the battery (AC in less load) over the last week's readings of at least 200 W, once there are three; until then it is the configured **1,700 W**. The energy model assumes 90% efficiency for input and output. Solar/load summaries are cached for 30 minutes, so the one-minute replans normally read just the latest battery state and the cached estimates. Forecast blocks are ranked once per plan. No additional controller or optimization service is needed.
+Estimates use recent telemetry:
 
-Fresh state of charge corrects the plan every minute: more solar than expected shortens the windows; less solar or unexpected drain lengthens them or brings charging forward. A failed replan is logged without discarding a successful telemetry collection. Neither the one-minute telemetry loop nor the plug's one-minute relay loop is an exact hardware charge limit: allow for overshoot, especially if charging speed changes. This is a greedy scheduler, not a guarantee of globally minimum emissions. Learned solar is captured generation, not a weather forecast or a measurement of curtailed potential.
+- **Solar:** the average quarter-hour profile from qualifying days among the last seven completed days. Each needs six hours of coverage between 9 am and 5 pm. The fallback is **500 Wh/day** across those hours.
+- **Load:** a time-weighted average over the last 24 hours, requiring six hours of coverage; otherwise **100 W**. Solar and load exclude gaps over 15 minutes.
+- **Charging:** the median AC input minus load from the latest 30 qualifying readings in the past week. Each must reach **200 W**; at least three are required, otherwise **1,700 W**.
 
-Battery readings older than 15 minutes trigger a labelled **one-hour** clean-grid fallback. Cached emissions forecasts are only reused for two hours. Internet and telemetry failures retain the plug's live-index, daytime and emergency fallbacks; without battery data they cannot size the charge. Jackery's own battery protection remains active.
+The energy model assumes 90% input and output efficiency. Estimates are cached for 30 minutes, or five minutes while AC input minus load reaches 200 W. Fresh battery readings adjust the plan every minute. If forecast retrieval fails, the server can replan with a cached forecast for up to two hours.
 
-## One-time setup
+Battery data older than 15 minutes triggers a labelled **one-hour** fixed-duration fallback. Without battery data, the plug's fallbacks cannot size the charge or guarantee remaining capacity. The greedy plan does not guarantee minimum emissions; learned solar measures captured generation, not weather or curtailed potential. Minute-based control can overshoot, especially when charging speed changes. Jackery's battery protection remains active.
 
-1. **WattTime:** create a free account at [watttime.org](https://watttime.org). The free plan includes full `CAISO_NORTH` data.
-2. **Jackery cloud (optional, for telemetry):** create a second Jackery account and share the power station to it from the app. Jackery allows one login at a time, so the planner must not use the account on your phone. The access is unofficial (via [socketry](https://github.com/jlopez/socketry)) and read-only; if it breaks, the plan keeps working.
-3. **Repository secrets** (Settings > Secrets and variables > Actions): `WATTTIME_USERNAME`, `WATTTIME_PASSWORD`, and optionally `JACKERY_EMAIL`, `JACKERY_PASSWORD`, `JACKERY_SN`. The Infra workflow copies them into Google Secret Manager.
-4. **Google Cloud:** follow [`infra/README.md`](infra/README.md).
-5. **Jackery app:** disable its charging schedule and reserve-based charging limit so AC charging follows the plug. Keep the charging speed within the plug's 15 A rating. Verify that turning the plug off preserves load output and solar charging; exact setting names depend on firmware. The integration is read-only and does not change app settings.
-6. **Plug:** keep it in Wi-Fi mode, reserve its IP address in the router's DHCP settings and note that address.
+## Setup
 
-## Deploying to the plug
+1. Create a WattTime account with `CAISO_NORTH` forecast, historical and signal-index access.
+2. For optional Jackery telemetry, share the power station with a second account. Jackery permits one login per account, so using the phone app's account can log it out. The integration uses unofficial, read-only [socketry](https://github.com/jlopez/socketry) access; failures trigger fallback planning.
+3. Set GitHub Actions secrets `WATTTIME_USERNAME`, `WATTTIME_PASSWORD`, and optionally `JACKERY_EMAIL`, `JACKERY_PASSWORD`, `JACKERY_SN`. The Infra workflow copies credentials into Secret Manager and passes the serial number to Cloud Run.
+4. Follow [infra/README.md](infra/README.md) for Google Cloud setup.
+5. In the Jackery app, disable schedules and reserve limits that prevent AC charging when the plug is on. Keep charging within the plug's 15 A rating. Verify that switching the plug off preserves load output and solar charging. Setting names depend on firmware; the integration does not change them.
+6. Keep the plug in Wi-Fi mode and reserve its IP address in the router.
 
-From a computer on your home Wi-Fi:
+## Deploy to the plug
+
+Run on the plug's Wi-Fi network:
 
 ```sh
 cp config/device.example.toml config/device.toml   # set host
-gcloud auth login                                   # deploy.py reads secrets from Secret Manager
+gcloud auth login
 uv run tools/deploy.py
 uv run tools/status.py
 ```
 
-Both tools are [uv scripts](https://docs.astral.sh/uv/guides/scripts/): uv installs their dependencies on first run.
+These uv scripts install dependencies on first run. Deployment reads the plug key and WattTime credentials from Secret Manager; `.env` can override them locally. It sets the timezone, stores settings on the plug, uploads the ES5 script, enables boot startup, and verifies it is running.
 
-`deploy.py` sets the plug's timezone, writes settings into the plug's key-value store (secrets never go in the repo), uploads the script in 1 KB chunks, enables it on boot and starts it. It reads the plug key and WattTime credentials from Google Secret Manager, where the Infra workflow copied the repository secrets. A local `.env` is only needed to override those values during development.
+The first deploy enables local authentication as `admin` and saves a generated password in git-ignored `config/device.toml`. It protects credentials and relay control on Wi-Fi; cloud control is unaffected. If the password is lost, disable authentication in the Shelly app and redeploy.
 
-It also protects the plug:
+Firmware schedules force the relay off at second 59 of each peak minute and start the script every ten minutes if it has stopped. With the default peak hours, these appear as two “Advanced time” schedules. Custom partial-hour peaks may need more. Disable the watchdog schedule before intentionally stopping the script. Each deploy replaces all single-call relay-off schedules for switch 0 and start schedules for grid-gate, including manually created ones; other schedules remain.
 
-- **Local password.** On the first run it turns on the plug's password (user `admin`) and saves it as `password` in `config/device.toml`, which is git-ignored. Without one, anyone on the Wi-Fi could read the plug key and WattTime login from the plug. The Shelly app asks for it when you open the plug on your home network; cloud control is unaffected. If you lose it, turn off authentication in the Shelly app and deploy again.
-- **Firmware backstops** that work even if the script stops, shown in the Shelly app as two "Advanced time" schedules. One switches the relay off at the end of every minute from 4pm to 9pm (late in the minute, so the script's own 4pm switch-off comes first); it follows `peakStart`/`peakEnd` in `[tuning]`. The other restarts the script every 10 minutes; the app labels it "Call may not work as expected" because it doesn't recognize script calls, but it works. To pause the script on purpose, disable that schedule first. Each deploy deletes any relay-off or script-restart schedule before adding its two; other schedules you make in the app stay.
+## Dashboard and hosting
 
-## Dashboard
+The [private dashboard](https://solar-web-v5whpbqqpq-uw.a.run.app) requires Google sign-in by an account in `DASHBOARD_USERS`. Hover charts for values; expand them to zoom. Readings refresh every 30 seconds, the timeline every minute, and forecast accuracy and totals every 15 minutes. Hidden tabs pause polling.
 
-The private dashboard is at https://solar-web-v5whpbqqpq-uw.a.run.app (Google sign-in; only the accounts in the `DASHBOARD_USERS` variable get in). It leads with whether the grid is on, why, and when it next changes, then the plan in one place (a 24-hour strip and a list of windows), WattTime's actual and forecast emissions, CAISO's generation by source, a check of how far off the forecast was 1 to 12 hours ahead, the battery and power history (solar and grid in, load out), CO₂ avoided by day, week or month, and the last week's energy. Hover a chart for exact times and values. It refreshes itself every 30 seconds.
+One container image serves two Cloud Run services:
 
-Every reading, grid mix row, plug report, plan and forecast is kept in Firestore, with a weekly backup kept for 14 weeks.
+- **solar-edge** is public. `/plug/plan` and `/plug/report` require `X-Plug-Key`. Cloud Scheduler calls `/tasks/collect` every minute with a verified Google ID token; it collects readings, fetches the forecast and replans. CAISO mix, hub prices and daily totals update every five minutes; forecasts are archived every 30 minutes. `/tasks/plan` refreshes the plan on demand.
+- **solar-web** is behind IAP and serves the dashboard and `/api/now`, `/api/timeline`, `/api/accuracy`, `/api/daily`, and `/api/co2`.
 
-## Dry run without the plug
+Firestore retains collected readings, mix rows, hub prices and plug reports. Plan history keeps window changes and five-minute snapshots; forecast history keeps half-hour snapshots. Weekly backups are retained for 14 weeks, with seven days of point-in-time recovery.
 
-```sh
-bun device/sim.js            # what the plug would do over the next 24 h with the live plan (uses your gcloud login for the plug key)
-bun device/sim.js --stale    # same, if the plan stopped updating (fallback rules)
-```
-
-## Google Cloud
-
-The dashboard and the plug's server run on Google Cloud Run. All of it is defined in OpenTofu under [`infra/`](infra/README.md), which also has the one-time setup steps. The server in `server/` runs as two Cloud Run services from one image:
-
-- **solar-edge** (public) serves the plug, which reads `/plug/plan` and posts `/plug/report` each minute with its `X-Plug-Key`. It also serves Cloud Scheduler: `/tasks/collect` every minute records the Jackery and any new WattTime reading in Firestore, fetches the forecast and updates the plan. Every 5 minutes it records CAISO's mix; every 30 minutes it keeps a copy of the forecast. `/tasks/plan` refreshes the forecast and plan on demand.
-- **solar-web** (behind Google sign-in) serves the dashboard from `web/` and its API: `/api/now`, `/api/timeline`, `/api/accuracy` and `/api/daily`.
-
-The Deploy workflow runs CI, builds the image and rolls it out on every merge to `main`. If solar-edge's `/health` doesn't answer afterwards, both services go back to the revisions they were serving before. [Renovate](https://docs.renovatebot.com) opens one grouped update PR a week (`renovate.json`), with GitHub Actions pinned to commit SHAs.
+On relevant pushes to `main`, Deploy runs CI, builds the image and updates both services. A failed rollout or solar-edge `/health` check restores previously recorded serving revisions. OpenTofu manages infrastructure; [infra/README.md](infra/README.md) covers changes. Renovate opens grouped weekly dependency updates; GitHub Actions are pinned to commit SHAs.
 
 ## Development
 
-Tools: [uv](https://docs.astral.sh/uv/) for Python (it installs Python 3.14 itself), [Bun](https://bun.sh) for the plug script's tests, and optionally [just](https://just.systems) for the shortcuts in `justfile`.
+Use [uv](https://docs.astral.sh/uv/) for Python 3.14 and [Bun](https://bun.sh) for JavaScript. [just](https://just.systems) provides optional shortcuts.
 
 ```sh
-uv sync                                  # Python 3.14 + all dependencies into .venv
-uv run pytest                            # planner and server tests
-just test-firestore                      # server store against the Firestore emulator (Java 21+)
-uv run ruff check . && uv run ty check   # lint and type check
-cd device && bun install && bun test     # script logic under a fake Shelly runtime
-cd web && bun install && bun run check   # dashboard type check and lint
+uv sync
+uv run pytest
+just test-firestore                      # requires Java 21+ and Node
+uv run ruff check .
+uv run ruff format --check .
+uv run ty check
+(cd device && bun install && bun test)
+(cd web && bun install && bun run check && bun run build)
 ```
 
-To work on the dashboard with made-up readings, run `uv run uvicorn solar_server.dev:app --port 8000` from `server/` and `bun run dev` in `web/`. The dashboard is Svelte 5 with Vite and uPlot. Its API types come from the server: after changing `server/solar_server/schema.py`, run `just api` to update `web/openapi.json`, and the dashboard's check and build regenerate the TypeScript types from it.
+`just check` runs Python lint, format, type and test checks, plug tests, and dashboard checks. CI additionally builds the dashboard and container, tests the Firestore emulator, and validates infrastructure.
 
-Or `just check` to run everything CI runs. The repo is a uv workspace: the root `pyproject.toml` holds the shared Ruff, ty and pytest settings and one `uv.lock`; `planner/` and `server/` are member packages.
+For the dashboard with synthetic data, run `uv run uvicorn solar_server.dev:app --port 8000` from `server/` and `bun run dev` from `web/`. It uses Svelte 5, Vite and uPlot. After changing API models in `server/solar_server/schema.py`, run `just api`; dashboard checks and builds regenerate TypeScript types from `web/openapi.json`.
 
-The script must stay ES5: the test suite parses it with `ecmaVersion: 5`.
+The uv workspace shares root Ruff, ty and pytest settings and `uv.lock`. The plug script must remain ES5; tests enforce this with `ecmaVersion: 5`.
+
+To simulate the next 24 hours without hardware:
+
+```sh
+bun device/sim.js            # live windows held fixed and treated as fresh; uses gcloud for the plug key
+bun device/sim.js --stale    # ignores the plan and live index; uses the daytime fallback
+```
 
 ## Tuning
 
-- **Solar and battery:** the planner learns the solar profile automatically. Initial server settings are `SOLAR_DAY_WH=500`, `LOAD_W=100`, `CHARGE_W=1700`, and `BATTERY_FLOOR_PCT=20`. Override these on solar-edge in `infra/run.tf` if needed. Solar, load and charging fallbacks yield to recent measurements.
-- **Script settings:** `[tuning]` in `config/device.toml` overrides the script defaults (threshold, peak hours, fallback window); rerun `deploy.py`.
-- **Telemetry fallback:** `BUDGET_HOURS` (default 1) controls fixed-duration charging only when battery telemetry is unavailable; it is not the adaptive plan's daily quota.
+- **Server:** set `SOLAR_DAY_WH`, `LOAD_W`, `CHARGE_W`, or `BATTERY_FLOOR_PCT` environment variables on solar-edge in `infra/run.tf`. Recent measurements replace solar, load and charge-rate defaults.
+- **Plug:** override defaults in `[tuning]` in `config/device.toml`, then redeploy.
+- **Telemetry fallback:** `BUDGET_HOURS` defaults to one hour and only controls fixed-duration planning without battery data.

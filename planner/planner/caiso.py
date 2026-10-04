@@ -1,11 +1,7 @@
-"""CAISO's grid mix and real-time prices, every 5 minutes. No key needed.
+"""Read CAISO-wide generation in MW and NP15/SP15 hub prices in $/MWh.
 
-The mix is megawatts by fuel for all of CAISO, one CSV per Pacific day.
-Imports aren't split by fuel and are negative when CAISO exports; batteries
-are negative while charging.
-
-Prices are real-time LMPs, $/MWh, at the north (NP15) and south (SP15)
-trading hubs, from OASIS. They differ when the lines between the two are full.
+Both use five-minute intervals. Imports are negative during exports;
+batteries are negative while charging. Prices come from OASIS.
 """
 
 from __future__ import annotations
@@ -21,7 +17,6 @@ from planner.plan import PACIFIC
 
 URL = "https://www.caiso.com/outlook"
 
-# CSV header -> stored key
 COLUMNS = {
     "Solar": "solar",
     "Wind": "wind",
@@ -48,7 +43,7 @@ def fetch(day: date, today: date, session: requests.Session | None = None) -> st
 
 
 def parse(text: str, day: date) -> list[dict]:
-    """Rows as {t, solar, wind, ...} in MW; t is Unix seconds."""
+    """Parse fuel rows in MW with ``t`` in Unix seconds."""
     rows = []
     for row in csv.DictReader(io.StringIO(text.lstrip("﻿"))):
         try:
@@ -70,7 +65,6 @@ def mix(day: date, now: datetime, session: requests.Session | None = None) -> li
 
 
 OASIS = "https://oasis.caiso.com/oasisapi/SingleZip"
-# Trading hub node -> stored key
 HUBS = {"TH_NP15_GEN-APND": "np15", "TH_SP15_GEN-APND": "sp15"}
 
 
@@ -100,7 +94,7 @@ def fetch_prices(start: datetime, end: datetime, session: requests.Session | Non
 
 
 def parse_prices(text: str) -> list[dict]:
-    """Rows as {t, np15, sp15} in $/MWh; t is Unix seconds, the interval start."""
+    """Parse NP15/SP15 prices in $/MWh with Unix-second interval starts."""
     by_t: dict[int, dict] = {}
     for row in csv.DictReader(io.StringIO(text.lstrip("\N{ZERO WIDTH NO-BREAK SPACE}"))):
         key = HUBS.get(row.get("NODE", ""))

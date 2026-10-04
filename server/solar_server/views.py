@@ -1,4 +1,4 @@
-"""Shapes the dashboard reads. Pure functions over stored points."""
+"""Build dashboard responses from stored data."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from solar_server.store import FORECASTS, MIX, PLUG, PRICES, SAMPLES, Store, day
 
 
 def now_view(store: Store, now: int) -> dict:
-    """The latest readings and today's totals, from three small state documents."""
+    """Read live data and today's totals from three state documents."""
     sample = store.get_state("sample") or {}
     plug = store.get_state("plug") or {}
     today = day_key(now)
@@ -91,8 +91,7 @@ def daily_view(store: Store, now: int, days: int = 14) -> dict:
         }
         for d in stored
     ]
-    # Only days with at least 3 hours of solar readings count. Days stored
-    # before solar_h existed had a reading every 5 minutes.
+    # Legacy totals lack solar_h; infer coverage from their five-minute samples.
     today = day_key(now)
     full = {
         d["day"]: d["solar_wh"]
@@ -103,7 +102,7 @@ def daily_view(store: Store, now: int, days: int = 14) -> dict:
 
 
 def co2_view(store: Store, now: int, by: str = "day", count: int = 14) -> dict:
-    """CO2 avoided per day, week (from Monday) or month, oldest first, the current one last."""
+    """Group avoided CO2 by Pacific day, Monday-based week or month, oldest first."""
     today = datetime.fromtimestamp(now, PACIFIC).date()
     if by == "day":
         first = today - timedelta(days=count - 1)
@@ -146,10 +145,9 @@ def _co2_row(p: dict) -> dict:
 
 
 def accuracy_view(store: Store, now: int, lead_hours: int = 6, past_hours: int = 24) -> dict:
-    """WattTime's forecast made ``lead_hours`` ahead next to what actually happened.
+    """Compare actuals with the latest forecast at least ``lead_hours`` earlier.
 
-    For each actual reading, the forecast is the latest one made at least
-    ``lead_hours`` before it. ``error`` is the mean absolute difference.
+    Return mean absolute error across matched readings.
     """
     since = now - past_hours * 3600
     lead = lead_hours * 3600

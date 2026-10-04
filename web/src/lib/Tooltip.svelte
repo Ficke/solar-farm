@@ -3,15 +3,12 @@
     value?: string;
     name?: string;
     color?: string;
-    /** A square key for areas and bars, a short line for lines. */
     shape?: "square" | "line";
   }
 </script>
 
 <script lang="ts">
-  // The hover box every chart shares: a heading and one row per value.
-  // Placed at (x, y) inside a positioned parent, beside the pointer, or to
-  // its left with `flip` when there's no room on the right.
+  // Position inside the parent; flip left when the right side lacks space.
   let {
     x,
     y,

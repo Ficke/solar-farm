@@ -1,9 +1,6 @@
 name: Infra
 
-# Applies infra/ (everything in the Google Cloud project except the one-time
-# bootstrap) on every push to main that touches it. Authenticates with
-# Workload Identity Federation, so no Google key is stored in GitHub. CI runs
-# first on the same commit.
+# Apply application infrastructure after CI, using keyless Workload Identity Federation.
 on:
   push:
     branches: [main]

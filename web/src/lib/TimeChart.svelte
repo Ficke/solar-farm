@@ -1,16 +1,6 @@
 <script lang="ts">
-  // One uPlot chart on the shared clock. Plan windows and the PG&E peak are
-  // painted behind the series and a line marks now. Hovering shows a tooltip
-  // with the time and every series; the cursor is synced across charts.
-  //
-  // The plot is built once and updated in place: new data, a new time range
-  // or a new size never recreate it, so hovering survives a refresh. Only a
-  // change of series or theme rebuilds it.
-  //
-  // With a `title` the chart gets an expand button that opens it full screen
-  // (ChartDialog), where `mode` is "expanded": dragging across it with a mouse
-  // zooms to that span (`view`, reported through `onview`), and a double click
-  // zooms back out. "overview" is the small whole-range chart under it.
+  // Update data, scales and size in place to preserve hover state.
+  // Series, yMax, mode or theme changes rebuild the plot.
   import { untrack } from "svelte";
   import uPlot from "uplot";
   import { bucket, stepFor } from "./align";
@@ -26,10 +16,10 @@
     label: string;
     color: string;
     fill?: string;
-    /** Solid area: a square key instead of a line. */
+    /** Use a square legend key for area series. */
     area?: boolean;
     dash?: number[];
-    /** Color the line by its value: [value, color token] stops, low to high. */
+    /** Color the line with [value, CSS token] stops ordered low to high. */
     ramp?: [number, string][];
     width?: number;
     unit: string;
@@ -64,14 +54,14 @@
     yMax?: number;
     yRule?: { value: number; label: string };
     label: string;
-    /** Values for the tooltip when the drawn ones differ, e.g. a stacked chart. */
+    /** Supply tooltip values separately from drawn values, such as stacked totals. */
     tipData?: (number | null | undefined)[][];
     /** Paint the peak and plan bands behind the series. */
     shade?: boolean;
-    /** Heading in full screen; charts without one have no expand button. */
+    /** Set the expanded heading and enable the expand button. */
     title?: string;
     mode?: "inline" | "expanded" | "overview";
-    /** The visible time span when zoomed in; [from, to] otherwise. */
+    /** Override the visible [from, to] span when zoomed in. */
     view?: [number, number];
     onview?: (span: [number, number]) => void;
   } = $props();
@@ -83,11 +73,9 @@
 
   let el: HTMLDivElement;
   let width = $state(600);
-  // Expanded, the chart fills whatever height its box is given.
   let boxH = $state(0);
   const plotH = $derived(mode === "expanded" ? Math.max(160, boxH) : height);
-  // Dense readings are averaged to about one point per 3 px of the visible
-  // span, so zooming in brings back every reading.
+  // Reduce visual noise by averaging dense readings; zoom restores detail.
   const step = $derived(stepFor(hi - lo, width - AXIS_W - PAD_R));
   const shown = $derived(bucket(data, step));
   const tipShown = $derived(tipData && bucket(tipData, step));
@@ -97,8 +85,7 @@
   const css = (name: string) =>
     getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
-  // Diagonal hatching for the peak, so it reads apart from plan windows
-  // without relying on hue.
+  // Distinguish peak hours from plan windows without relying on color.
   function hatch(ctx: CanvasRenderingContext2D, color: string) {
     const n = Math.round(6 * devicePixelRatio);
     const tile = document.createElement("canvas");
@@ -165,8 +152,6 @@
       ctx.fillStyle = css("--ink-2");
       ctx.font = `${11 * dpr}px ${css("--f-sans")}`;
       ctx.textAlign = "left";
-      // At the right end, over the future where no readings are drawn, and
-      // below the rule when there's no room above it.
       const below = y - u.bbox.top < 16 * dpr;
       ctx.textAlign = "right";
       ctx.textBaseline = below ? "top" : "bottom";
@@ -209,7 +194,6 @@
     };
   }
 
-  // A vertical gradient whose stops sit at the ramp's values on the y scale.
   function rampStroke(ramp: [number, string][]) {
     return (u: uPlot) => {
       const lo = ramp[0][0];
@@ -223,8 +207,7 @@
     };
   }
 
-  // A mouse drag across the expanded chart zooms to it; the selection box
-  // is cleared at once since the zoom itself shows the result.
+  // Clear the selection box after zooming because the new span shows the result.
   function select(u: uPlot) {
     const { left, width: w } = u.select;
     if (w > 4) {
@@ -254,8 +237,7 @@
             // Only the dashboard's own charts follow each other.
             sync: mode === "inline" ? { key: "timeline" } : undefined,
             y: false,
-            // Stacked areas carry their values in the tooltip; dots on each
-            // layer edge would only clutter the stack.
+            // Hide cursor dots on stacked areas to avoid clutter.
             points: { show: !series.some((s) => s.area), size: 8, width: 2, fill: css("--panel") },
             drag: { x: mode === "expanded", y: false, setScale: false },
             bind: { dblclick: () => () => null },
@@ -264,10 +246,7 @@
       padding: [6, PAD_R, 0, 0],
       scales: {
         x: { time: true, range: () => [lo, hi] },
-        // A fixed floor and a fallback ceiling keep the y-axis, and with it
-        // the time axis, in place when a chart has no data yet.
-        // Zoomed in, line charts fit the visible values; areas keep their zero.
-        // Zero stays on the axis unless the values go below it.
+        // Keep zero on the axis, allowing negative supply; fit zoomed lines.
         y: {
           range: (_u, min, max) => {
             const floor = Math.min(0, min ?? 0);
@@ -314,7 +293,6 @@
   }
 
   let plot: uPlot | undefined;
-  // Everything that shapes the plot itself; when this changes it is rebuilt.
   const shape = $derived(JSON.stringify([series, yMax, mode, theme.version]));
 
   $effect(() => {
@@ -336,7 +314,6 @@
     };
   });
 
-  // New readings, a moved time axis or a new zoom: same plot, new data and scales.
   $effect(() => {
     const d = shown as unknown as uPlot.AlignedData;
     lo;

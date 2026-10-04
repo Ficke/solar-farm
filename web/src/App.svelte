@@ -19,7 +19,6 @@
     { value: "dark", label: "Dark" },
   ];
   const LEADS = [1, 3, 6, 12].map((h) => ({ value: h, label: `${h} h` }));
-  // Marginal CO2 is colored by its value, so clean hours read at a glance.
   const CO2_RAMP: [number, string][] = [
     [250, "--co2-clean"],
     [550, "--co2-mid"],
@@ -39,9 +38,7 @@
   let error = $state("");
   let clock = $state(Date.now() / 1000);
 
-  // The lead and period toggles fetch their own data. A response only lands
-  // if its toggle still shows the value it was asked for, so a slow answer
-  // can't overwrite a newer pick.
+  // Ignore responses for selections that are no longer active.
   const fetchAccuracy = (h: number) =>
     api.accuracy(h).then((v) => {
       if (lead === h) acc = v;
@@ -61,7 +58,6 @@
     }
   }
 
-  /** Readings every 30 s, the timeline every minute, everything else every 15 minutes. */
   function load(what: "now" | "charts" | "all") {
     const jobs: Promise<unknown>[] = [api.now().then((v) => (now = v))];
     if (what !== "now") jobs.push(api.timeline(24).then((v) => (tl = v)));
@@ -83,8 +79,7 @@
 
   onMount(() => {
     load("all");
-    // One 30 s beat drives every refresh, so no request is ever sent twice
-    // at once. Hidden tabs skip beats and catch up when shown again.
+    // Stagger polling on one timer; hidden tabs resume on visibility change.
     let beat = 0;
     const visible = () => document.visibilityState === "visible";
     const timers = [
@@ -113,7 +108,7 @@
   const windows = $derived(now?.plan?.windows ?? tl?.windows ?? []);
   const forecast = $derived(tl?.forecast ?? []);
   const tnow = $derived(now?.now ?? clock);
-  // One time axis for every chart and the plan strip.
+  // Keep charts and the plan strip on a shared time axis.
   const base = $derived(tl?.now ?? clock);
   const from = $derived(base - PAST);
   const to = $derived(base + FUTURE);

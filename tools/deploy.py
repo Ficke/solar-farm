@@ -3,19 +3,14 @@
 # requires-python = ">=3.14"
 # dependencies = ["requests>=2.32"]
 # ///
-"""Push grid-gate.js and its settings to the Shelly plug over your home Wi-Fi.
+"""Deploy grid-gate to a Shelly plug on the local Wi-Fi network.
 
-    uv run tools/deploy.py            # uses config/device.toml and gcloud
-    uv run tools/deploy.py --dry-run  # show what would be sent
+    uv run tools/deploy.py
+    uv run tools/deploy.py --dry-run
 
-Talks to the plug's local JSON-RPC API (http://<host>/rpc). Run it from a
-machine on the same network as the plug. Secrets come from Google Secret
-Manager by default; .env can override them for local development.
-
-Besides the script, it turns on the plug's local password (generated on the
-first run and kept in the git-ignored config/device.toml) and installs two
-firmware schedules that work even if the script stops: the relay is forced
-off every minute of the peak, and the script is restarted every 10 minutes.
+Read config/device.toml and Secret Manager credentials, with .env overrides.
+Enable local authentication, peak relay-off schedules and a ten-minute watchdog
+that starts a stopped script. Dry runs read device state but do not write it.
 """
 
 from __future__ import annotations
@@ -154,11 +149,7 @@ def save_password(cfg_path: Path, password: str) -> None:
 
 
 def ensure_auth(dev: Shelly, info: dict, cfg: dict, cfg_path: Path) -> None:
-    """Use the plug's local password, turning it on first if the plug has none.
-
-    Without it anyone on the Wi-Fi can read the plug key and WattTime login
-    from the key-value store, or flip the relay during the peak.
-    """
+    """Enable authentication to protect stored credentials and relay control."""
     password = shelly_password(cfg)
     if info.get("auth_en"):
         if not password:
@@ -183,11 +174,10 @@ def ensure_auth(dev: Shelly, info: dict, cfg: dict, cfg_path: Path) -> None:
 
 
 def peak_timespecs(start: int, end: int) -> list[str]:
-    """Cron specs firing at second 59 of every minute in [start, end), local minutes.
+    """Return second-59 cron specs for peak minutes in ``[start, end)``.
 
-    Firing late in each minute leaves the first switch-off to the script, which
-    ticks once a minute, so the backstop only acts if the script didn't. A peak
-    on whole hours (the default 16:00 to 21:00) needs a single spec.
+    Late-minute execution usually lets the script switch off first. Whole-hour
+    peaks need one spec; partial-hour boundaries may need up to three.
     """
     last = end - 1
     if start > last:
@@ -210,7 +200,7 @@ def peak_timespecs(start: int, end: int) -> list[str]:
 
 
 def is_ours(job: dict, script_id: int | None) -> bool:
-    """A schedule deploy makes: relay off, or restart grid-gate."""
+    """Match single-call switch-0 off or grid-gate start schedules."""
     calls = job.get("calls") or []
     if len(calls) != 1:
         return False
@@ -221,11 +211,7 @@ def is_ours(job: dict, script_id: int | None) -> bool:
 
 
 def remove_schedules(dev: Shelly, script_id: int | None) -> None:
-    """Delete schedules an earlier deploy made, matched by what they do.
-
-    Matching by content (not by saved ids) also clears copies left by an
-    interrupted deploy. Any other schedule you made in the app stays.
-    """
+    """Remove matching schedules, including manual jobs and interrupted-deploy copies."""
     for job in dev.call("Schedule.List").get("jobs", []):
         if is_ours(job, script_id):
             dev.call("Schedule.Delete", {"id": job["id"]})
@@ -288,8 +274,7 @@ def deploy(dev: Shelly, cfg: dict, cfg_path: Path) -> None:
     scripts = dev.call("Script.List").get("scripts", [])
     existing = next((s for s in scripts if s.get("name") == SCRIPT_NAME), None)
 
-    # The peak backstop is firmware, so it holds even if the script is broken.
-    # Old schedules go first so the watchdog can't start a half-uploaded script.
+    # Remove the old watchdog before uploading so it cannot start partial code.
     remove_schedules(dev, existing["id"] if existing else None)
     tuning = cfg.get("tuning", {})
     peak = (tuning.get("peakStart", DEFAULT_PEAK[0]), tuning.get("peakEnd", DEFAULT_PEAK[1]))

@@ -213,10 +213,7 @@ def test_current_block_stays_planned_between_forecast_points():
 
 
 def test_slow_charging_still_fills_by_4pm():
-    """Adam's 1:45 pm plan on 2026-10-04: 85% and one short window planned at
-    1,700 W, but the battery charges at half that. Replanning every minute
-    from live readings, as the server does, must still fill it by 4 pm. The
-    only gaps are planned ones or a minute or two the plug bridges."""
+    """Verify minute replans reach full by 4 pm when charging at half the estimate."""
     points = adams_forecast(datetime(2026, 10, 4, 18, tzinfo=UTC))
     now = datetime(2026, 10, 4, 13, 45, tzinfo=PACIFIC)
     first = build_adaptive_plan(points, now, 85, inputs(load=1))

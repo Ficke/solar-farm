@@ -1,4 +1,4 @@
-// Everything is shown on Pacific time, the clock PG&E's peak runs on.
+// Use Pacific time to match the PG&E peak schedule.
 export const TZ = "America/Los_Angeles";
 export const PEAK = { start: 16, end: 21 }; // E-TOU-C, every day
 
@@ -25,12 +25,12 @@ const dayKey = new Intl.DateTimeFormat("en-CA", { timeZone: TZ });
 
 export const fmtClock = (t: number) => clock.format(t * 1000).replace(":00", "");
 export const fmtWeekday = (t: number) => weekday.format(t * 1000);
-/** Clock time with the weekday only when it isn't today. */
+/** Include the weekday only for times outside today. */
 export const fmtWhen = (t: number, now: number) =>
   dayKey.format(t * 1000) === dayKey.format(now * 1000)
     ? fmtClock(t)
     : `${fmtWeekday(t)} ${fmtClock(t)}`;
-/** "3–4 PM", "11 AM–1 PM", "3:30–4 PM". */
+/** Elide the first AM/PM marker when both endpoints share it. */
 export function fmtRange(s: number, e: number): string {
   const a = fmtClock(s);
   const b = fmtClock(e);
@@ -39,7 +39,7 @@ export function fmtRange(s: number, e: number): string {
 }
 export const fmtDayClock = (t: number) => dayClock.format(t * 1000).replace(":00", "");
 
-/** Minutes after local midnight in Pacific time. */
+/** Return minutes after Pacific midnight from Unix seconds. */
 export function localMinutes(t: number): number {
   const p = parts.formatToParts(t * 1000);
   const h = Number(p.find((x) => x.type === "hour")?.value ?? 0);
@@ -47,10 +47,9 @@ export function localMinutes(t: number): number {
   return h * 60 + m;
 }
 
-/** Peak windows (unix seconds) that overlap [from, to]. */
+/** Return peak windows in Unix seconds that overlap the supplied range. */
 export function peakWindows(from: number, to: number): [number, number][] {
   const out: [number, number][] = [];
-  // Walk local midnights by stepping from `from` back to its local midnight.
   let midnight = from - localMinutes(from) * 60 - (from % 60);
   midnight -= 86400;
   while (midnight < to + 86400) {

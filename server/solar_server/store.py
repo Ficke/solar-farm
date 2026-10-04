@@ -1,11 +1,7 @@
-"""Where readings live.
+"""Store each series in daily Pacific documents with an ``items`` array.
 
-Firestore holds one document per Pacific day per series, with the day's
-points in an `items` array, so a 48-hour view is a handful of document reads
-(well inside the free tier). `state/*` documents hold the latest plan, sample
-and plug report, with today's running totals, so the dashboard's live view
-reads three small documents instead of whole days. `totals/<day>` holds
-each day's energy and CO2, so longer ranges sum small documents.
+Live views read ``state/*`` snapshots; longer summaries read ``totals/<day>``
+instead of raw history. State uses JSON to preserve nested arrays.
 """
 
 from __future__ import annotations
@@ -17,14 +13,14 @@ from typing import Any, Protocol
 
 from planner.plan import PACIFIC
 
-SAMPLES = "samples"  # every minute: battery, solar; emissions when WattTime has a new one
-PLUG = "plug"  # every minute: relay state, reason, grid watts
-PLANS = "plans"  # a plan every 5 min, plus any that changed the windows
-FORECASTS = "forecasts"  # every 30 min: the 24-hour forecast (plans fetch one every minute)
-MIX = "mix"  # every 5 min: CAISO's generation by fuel, MW: {t, solar, wind, gas, ...}
-PRICES = "prices"  # every 5 min: real-time price at the trading hubs, $/MWh: {t, np15, sp15}
-TOTALS = "totals"  # one document per day: energy and CO2 totals (see totals.py)
-LOCKS = "locks"  # leases, so only one collect runs at a time
+SAMPLES = "samples"
+PLUG = "plug"
+PLANS = "plans"
+FORECASTS = "forecasts"
+MIX = "mix"
+PRICES = "prices"
+TOTALS = "totals"
+LOCKS = "locks"
 
 
 def _state_document(data: dict[str, Any]) -> dict[str, str]:
@@ -72,7 +68,7 @@ def window(store: Store, series: str, since: int, until: int) -> list[dict[str, 
 
 
 class MemoryStore:
-    """For tests and running locally without Google credentials."""
+    """Store data in memory for tests and local development."""
 
     def __init__(self) -> None:
         self.series: dict[tuple[str, str], list[dict]] = defaultdict(list)
@@ -84,7 +80,7 @@ class MemoryStore:
         self.series[(series, day_key(item["t"]))].append(dict(item))
 
     def extend(self, series: str, items: list[dict[str, Any]]) -> None:
-        # Like Firestore's ArrayUnion: items already stored are skipped.
+        # Match Firestore ArrayUnion deduplication.
         for item in items:
             day = self.series[(series, day_key(item["t"]))]
             if item not in day:
@@ -150,13 +146,12 @@ class FirestoreStore:
         self.db.collection(TOTALS).document(day).set(data)
 
     def totals(self, days: list[str]) -> list[dict[str, Any]]:
-        # One batched read; a year of days is 365 small documents.
         refs = [self.db.collection(TOTALS).document(d) for d in days]
         snaps = {s.id: s for s in self.db.get_all(refs) if s.exists}
         return [snaps[d].to_dict() or {} for d in days if d in snaps]
 
     def claim(self, name: str, now: int, ttl: int) -> bool:
-        """Take the lease ``name`` for ``ttl`` seconds unless someone holds it."""
+        """Atomically claim an expired or missing lease for ``ttl`` seconds."""
         ref = self.db.collection(LOCKS).document(name)
 
         @self._fs.transactional

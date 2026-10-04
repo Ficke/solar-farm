@@ -117,7 +117,7 @@ def test_peak_timespecs_fire_late_in_each_peak_minute():
 
 
 class FakePlug(deploy.Shelly):
-    """Records calls and plays back a small device state."""
+    """Record calls and replay a small device state."""
 
     def __init__(self, auth_en=False, jobs=(), kvs=None):
         super().__init__("192.0.2.1", None)
@@ -196,7 +196,7 @@ def test_deploy_replaces_its_own_schedules_and_keeps_others(monkeypatch):
     off = [{"method": "Switch.Set", "params": {"id": 0, "on": False}}]
     restart = [{"method": "Script.Start", "params": {"id": 1}}]
     plug = FakePlug(auth_en=True)
-    # Two earlier deploys' worth, plus schedules someone made in the app.
+    # Include duplicate deploy schedules and unrelated manual schedules.
     plug.jobs = {
         1: {"id": 1, "calls": off},
         2: {"id": 2, "calls": restart},

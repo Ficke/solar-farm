@@ -1,6 +1,5 @@
-# One-time setup, run by hand from your machine with your own gcloud login. It gives
-# GitHub Actions a keyless way into the project so that everything in ../
-# (the main config) is applied by CI on every merge to main. See ../README.md.
+# Apply locally with your Google credentials; CI cannot bootstrap its own access.
+# See ../README.md for setup and later bootstrap changes.
 
 terraform {
   required_version = ">= 1.10"
@@ -35,14 +34,13 @@ resource "google_project_service" "bootstrap" {
   disable_on_destroy = false
 }
 
-# The state bucket has to exist before `tofu init`, so the README creates it
-# with one gcloud command and this block adopts it.
+# Adopt the state bucket created before init, as described in ../README.md.
 import {
   to = google_storage_bucket.state
   id = "solar-farm-510518-tofu-state"
 }
 
-# Versioning keeps every past state file, so a bad apply can be rolled back.
+# Retain recent state versions for recovery from a bad apply.
 resource "google_storage_bucket" "state" {
   name                        = "${var.project_id}-tofu-state"
   location                    = "US"
@@ -57,8 +55,6 @@ resource "google_storage_bucket" "state" {
     action { type = "Delete" }
   }
 }
-
-# --- GitHub Actions -> Google Cloud, without a stored key -------------------
 
 resource "google_iam_workload_identity_pool" "github" {
   workload_identity_pool_id = "github"
@@ -83,9 +79,7 @@ resource "google_iam_workload_identity_pool_provider" "github" {
   }
 }
 
-# Applies ../ from CI. It needs to create service accounts, grant roles and
-# manage every service in the project, so it is an owner of this project
-# (and nothing else). Only a push to main can act as it.
+# Main-config applies need project-owner access to create accounts and manage IAM.
 resource "google_service_account" "infra" {
   account_id   = "github-infra"
   display_name = "GitHub Actions: OpenTofu apply"
@@ -108,8 +102,6 @@ resource "google_service_account_iam_member" "infra_wif" {
   role               = "roles/iam.workloadIdentityUser"
   member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository/${var.github_repo}"
 }
-
-# --- Spending guard ----------------------------------------------------------
 
 resource "google_billing_budget" "monthly" {
   count           = var.billing_account == "" ? 0 : 1

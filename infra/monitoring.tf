@@ -1,11 +1,4 @@
-# Email alerts when the system goes quiet. All of them are log-match alert
-# policies, which Cloud Monitoring doesn't charge for (metric-based ones
-# would be, from 2027), and the log volume stays far inside Logging's free
-# 50 GiB a month.
-#
-# The server checks freshness on every collect (server/solar_server/health.py)
-# and logs one line per problem. If the server itself is down, its scheduled
-# calls fail instead, which the last policy catches.
+# Match health logs from each collect and Scheduler failures when collect cannot run.
 
 resource "google_project_service" "monitoring" {
   for_each           = toset(["logging.googleapis.com", "monitoring.googleapis.com"])
@@ -31,22 +24,22 @@ locals {
     plug_silent = {
       name   = "Plug has gone quiet"
       filter = "${local.edge_log}jsonPayload.alert=\"plug_silent\""
-      doc    = "No report from the Shelly plug in 10 minutes. It may be offline, unplugged or its script stopped. It still blocks 4 to 9 pm on its own if the script is running. Check it with `just status`."
+      doc    = "No plug report in 10 minutes. Check power, Wi-Fi and script status with `just status`. The deployed firmware peak schedule works even if the script stops."
     }
     samples_stale = {
       name   = "Readings have stopped"
       filter = "${local.edge_log}jsonPayload.alert=\"samples_stale\""
-      doc    = "No Jackery or WattTime reading stored in 30 minutes. Both sources are failing; see the solar-edge logs."
+      doc    = "No Jackery or WattTime reading stored in 30 minutes. Check solar-edge and Cloud Scheduler logs for collection or source failures."
     }
     plan_stale = {
       name   = "Grid plan is out of date"
       filter = "${local.edge_log}jsonPayload.alert=\"plan_stale\""
-      doc    = "The grid plan is more than 2 hours old, so the plug is using its own fallback. Usually WattTime's forecast is failing; see the solar-edge logs."
+      doc    = "The plan is over two hours old. The plug accepts ordinary plans for three hours, subject to its safety backstop. Check solar-edge logs for forecast or collection failures."
     }
     grid_not_charging = {
       name   = "Grid on but the battery isn't charging"
       filter = "${local.edge_log}jsonPayload.alert=\"grid_not_charging\""
-      doc    = "The plug has let grid power through for 10 minutes but drew under 100 W while the battery was below 95%. Usually the Jackery's Self-powered reserve or a charge limit is capping AC charging; check the working mode in the Jackery app."
+      doc    = "The plug has been on with draw below 100 W for 10 minutes, and the latest battery reading is below 95%. Check AC connections, Jackery charging limits and telemetry freshness."
     }
     task_failed = {
       name   = "Scheduled task failed"
@@ -55,7 +48,7 @@ locals {
         resource.labels.job_id=~"^solar-"
         severity>=ERROR
       EOT
-      doc    = "Cloud Scheduler couldn't run a solar-farm task (collect or plan). If this repeats, solar-edge may be down; see Cloud Run logs."
+      doc    = "A solar-farm scheduled task failed. Check Cloud Scheduler and solar-edge logs if failures repeat."
     }
   }
 }
@@ -72,8 +65,7 @@ resource "google_monitoring_alert_policy" "quiet" {
     }
   }
 
-  # A problem logs every 5 minutes while it lasts; email about it at most
-  # every 6 hours.
+  # Limit repeated notifications to one per policy every six hours.
   alert_strategy {
     notification_rate_limit {
       period = "21600s"

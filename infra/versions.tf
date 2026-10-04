@@ -10,9 +10,7 @@ terraform {
     prefix = "main"
   }
 
-  # State and plan files hold the secret values (Secret Manager versions need
-  # them), so OpenTofu encrypts both with a key derived from a passphrase
-  # kept in GitHub. A Cloud KMS key would also work but isn't free.
+  # Secret Manager versions put credentials in state and plans; encrypt both.
   encryption {
     key_provider "pbkdf2" "passphrase" {
       passphrase = var.state_passphrase

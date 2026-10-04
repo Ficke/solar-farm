@@ -1,6 +1,5 @@
-// Light, dark or follow the system. index.html applies the saved choice
-// before first paint; this keeps it in sync afterwards. Canvas charts read
-// their colors when built, so `version` bumps make them rebuild.
+// index.html sets the initial theme; keep it synchronized afterward.
+// Bump version to rebuild canvas charts with the new colors.
 export type Mode = "system" | "light" | "dark";
 
 const KEY = "theme";
@@ -29,7 +28,7 @@ export function setMode(mode: Mode) {
     if (mode === "system") localStorage.removeItem(KEY);
     else localStorage.setItem(KEY, mode);
   } catch {
-    // Storage blocked: the choice lasts until reload.
+    // If storage is blocked, retain the choice until reload.
   }
   apply();
 }

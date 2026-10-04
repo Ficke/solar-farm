@@ -9,7 +9,6 @@ const REASONS: Record<string, string> = {
   start: "Plug starting",
 };
 
-/** Why the plug is in its current state, in a few words. */
 export function explain(plug: PlugReport): string {
   if (plug.reason === "plan") return plug.on ? "Planned window" : "Outside planned windows";
   return REASONS[plug.reason] ?? plug.reason;

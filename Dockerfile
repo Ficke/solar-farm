@@ -1,5 +1,4 @@
-# Server image for both Cloud Run services (solar-web and solar-edge).
-# SOLAR_ROLE, set per service in infra/run.tf, picks which routes it serves.
+# SOLAR_ROLE selects dashboard or edge routes from this shared image.
 
 FROM mirror.gcr.io/oven/bun:1 AS web
 WORKDIR /web

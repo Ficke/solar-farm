@@ -1,8 +1,6 @@
-"""Who may call what.
+"""Authenticate plug and scheduler calls to the public edge service.
 
-The dashboard needs nothing here: IAP signs users in before a request ever
-reaches solar-web, and only IAP may invoke it. solar-edge is public, so it
-checks callers itself.
+IAP handles dashboard authentication before requests reach solar-web.
 """
 
 from __future__ import annotations

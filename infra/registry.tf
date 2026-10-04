@@ -3,7 +3,6 @@ resource "google_artifact_registry_repository" "images" {
   format        = "DOCKER"
   description   = "Server images built by CI"
 
-  # Stay inside the 0.5 GB free allowance.
   cleanup_policy_dry_run = false
   cleanup_policies {
     id     = "keep-recent"

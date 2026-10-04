@@ -1,11 +1,7 @@
-"""Read-only Jackery telemetry through Jackery's (unofficial) cloud API.
+"""Read Jackery telemetry through the unofficial socketry API.
 
-Uses the reverse-engineered `socketry` library. Jackery allows one login per
-account at a time, so use a second Jackery account that the power station is
-shared with; otherwise the phone app keeps getting logged out.
-
-This only ever reads properties. If Jackery changes its protocol this module
-fails, and the planner carries on without telemetry.
+Use a shared second account: Jackery permits one login per account, so using
+the phone app's account can log it out. The server tolerates telemetry failures.
 """
 
 from __future__ import annotations
@@ -26,7 +22,7 @@ class Reading:
 
     @property
     def solar_w(self) -> float | None:
-        """Total input minus AC and car input; what the panel is delivering."""
+        """Infer solar watts by subtracting AC and car input from total input."""
         if self.input_w is None:
             return None
         other = (self.ac_input_w or 0) + (self.car_input_w or 0)
@@ -55,11 +51,7 @@ def parse_properties(props: dict, now: datetime) -> Reading:
 
 
 class Account:
-    """Reads one power station, logging in once rather than for every reading.
-
-    socketry renews the token when it nears expiry. After any failure the next
-    read logs in again.
-    """
+    """Reuse a device session; retry login after a property-read failure."""
 
     def __init__(self, email: str, password: str, serial: str | None) -> None:
         self.email, self.password, self.serial = email, password, serial

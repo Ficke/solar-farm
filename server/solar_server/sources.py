@@ -1,4 +1,4 @@
-"""Fetch from WattTime, CAISO and Jackery. Kept thin so tests can swap in fakes."""
+"""Fetch live data behind an interface shared with test sources."""
 
 from __future__ import annotations
 
@@ -59,7 +59,6 @@ class LiveSources:
         s = self.settings
         if not s.jackery_email:
             return None
-        # Readings come every minute; keep the login while the instance is warm.
         if self._jackery is None:
             self._jackery = Account(s.jackery_email, s.jackery_password, s.jackery_sn or None)
         return asyncio.run(self._jackery.read(now))

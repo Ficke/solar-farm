@@ -1,10 +1,9 @@
 type Points = [number, number | null | undefined][];
 
 /**
- * Merge several [t, v] series onto one sorted x axis for uPlot. Where a
- * series simply has no point at another series' time the value is
- * `undefined`, which uPlot draws through; after a break longer than that
- * series' gap (15 minutes unless given) it is `null`, drawn as a gap.
+ * Align [Unix seconds, value] series on one sorted uPlot axis.
+ * Use undefined to connect missing timestamps and null to break the line
+ * across outages longer than the series' gap, defaulting to 15 minutes.
  */
 export function align(series: Points[], gaps: number[] = []): (number | null | undefined)[][] {
   const xs = [...new Set(series.flatMap((s) => s.map((p) => p[0])))].sort((a, b) => a - b);
@@ -28,17 +27,15 @@ export function align(series: Points[], gaps: number[] = []): (number | null | u
 
 const STEPS = [120, 300, 600, 900, 1800, 3600];
 
-/** The averaging step that leaves about `px` pixels per point, or 0 for none. */
+/** Choose an averaging step for roughly `px` pixels per point; zero keeps raw data. */
 export function stepFor(span: number, width: number, px = 3): number {
   const want = (span / Math.max(1, width)) * px;
   return want <= 60 ? 0 : (STEPS.find((s) => s >= want) ?? 3600);
 }
 
 /**
- * Average aligned series into `step`-second buckets, so a dense series
- * draws as a readable line rather than a band of noise. Each bucket sits at
- * the mean time of its points. A bucket with no values keeps a gap (null)
- * if it had one, and is otherwise left out of that series (undefined).
+ * Average aligned values in `step`-second buckets at their mean timestamp.
+ * Preserve null gaps and undefined timestamps when a bucket has no values.
  */
 export function bucket(
   data: (number | null | undefined)[][],

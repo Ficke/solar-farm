@@ -1,8 +1,4 @@
-"""Grid windows that leave the battery full by 4 pm, bought when the grid is cleanest.
-
-A rolling greedy plan rebuilt from the live battery level, not a weather
-forecast or a global optimum. Solar and load estimates come from observations.
-"""
+"""Build greedy charging plans from observed battery, solar and load data."""
 
 from __future__ import annotations
 
@@ -15,26 +11,23 @@ from statistics import mean, median
 from planner.plan import PACIFIC
 from planner.telemetry import CAPACITY_WH
 
-TIE_MOER = 50  # lb/MWh; forecasts this close count as equally clean
-MIN_SOLAR_WH = 150  # later solar below this is not worth keeping room for
-MIN_CHARGE_W = 200  # less than this into the battery is passthrough, not charging
+TIE_MOER = 50  # Round emissions to groups of this many lb/MWh.
+MIN_SOLAR_WH = 150  # Reserve headroom when the solar allowance reaches this value.
+MIN_CHARGE_W = 200  # Exclude low-power passthrough readings.
 MIN_CHARGE_READINGS = 3
-RECENT_CHARGE_READINGS = 30  # about the last half hour of charging
-TOLERANCE_WH = 30  # about 1%; smaller floor and full shortfalls are ignored
+RECENT_CHARGE_READINGS = 30  # Favor recent charging speed over older readings.
+TOLERANCE_WH = 30  # Ignore floor and target deficits below about 1%.
 
 
 def estimates(
     samples: list[dict], now: int, solar_wh: float, load_w: float, charge_w: float
 ) -> dict:
-    """Seven completed days of solar, one day of load, a week of AC charging.
+    """Estimate solar, load and net AC charging from recent telemetry.
 
-    Solar days need six hours of coverage between 9am and 5pm; gaps over 15
-    minutes are excluded. Until then, use configured daily Wh
-    distributed from 9am to 5pm. Load needs six hours of recent coverage.
-    The charge rate is the median grid power going into the battery (AC in
-    less load) over the last RECENT_CHARGE_READINGS readings of at least
-    MIN_CHARGE_W in the past week, so a charge running slow today counts
-    within minutes. Below MIN_CHARGE_READINGS, the configured rate.
+    Solar uses qualifying days among the last seven completed days; load uses
+    the last 24 hours. Both require six hours of coverage and exclude gaps
+    over 15 minutes. Charging uses the latest 30 qualifying readings within
+    a week. Insufficient coverage falls back to the supplied defaults.
     """
     samples = sorted({s["t"]: s for s in samples if s["t"] <= now}.values(), key=lambda s: s["t"])
     today = datetime.fromtimestamp(now, PACIFIC).date()
@@ -113,16 +106,11 @@ def build_adaptive_plan(
     efficiency: float = 0.9,
     region: str = "CAISO_NORTH",
 ) -> dict:
-    """Plan grid time so the battery is full by the next 4 pm.
+    """Target a full battery by the next 4 pm Pacific, outside peak hours.
 
-    Grid energy is whatever expected solar and load leave short of full. It is
-    bought in the cleanest 15-minute forecast blocks before 4 pm; blocks within
-    TIE_MOER of each other count as equal and the later one wins, so solar gets
-    in first. Grid fills to full except for room kept for later solar, which
-    counts half the usual output and only when that is at least MIN_SOLAR_WH:
-    a little solar is not worth missing a clean window for. The battery never
-    plans below its floor. An infeasible plan is reported, never hidden by
-    scheduling during peak or outside the supplied forecast.
+    Rank 15-minute blocks by rounded emissions groups, preferring later ties
+    so solar arrives first. Reserve room for material later solar at half
+    its estimated output. Report unmet floor or target energy as a shortfall.
     """
     tnow = int(now.timestamp())
     floor = CAPACITY_WH * floor_pct / 100
@@ -155,7 +143,6 @@ def build_adaptive_plan(
                 "allowed": moer is not None and not 16 <= local.hour < 21,
             }
         )
-    # Room kept for solar still to come after each block.
     later = [0.0] * len(slots)
     for i in range(len(slots) - 2, -1, -1):
         later[i] = later[i + 1] + slots[i + 1]["solar"]
@@ -176,7 +163,7 @@ def build_adaptive_plan(
         return out
 
     def fill(by: int, desired: float) -> None:
-        """Add only what the level at block ``by`` needs to reach ``desired``."""
+        """Fill a deficit using only ranked blocks at or before ``by``."""
         for i in ranked:
             levels = trajectory()
             need = desired - levels[by]
@@ -189,8 +176,7 @@ def build_adaptive_plan(
 
     for i in range(len(slots)):
         fill(i, floor)
-    # Fill to full in the cleanest blocks, leaving room for material later
-    # solar, and stop at the first block that reaches that ceiling.
+    # Stop once a clean block can reach the ceiling reserved for later solar.
     for i in ranked:
         levels = trajectory()
         before = levels[i - 1] if i else initial
@@ -198,7 +184,7 @@ def build_adaptive_plan(
         grid[i] += max(0.0, min(slots[i]["max"] - grid[i], room))
         if grid[i] < slots[i]["max"] - 0.01:
             break
-    # Cover what load still drains, or what the clean blocks couldn't fit.
+    # Cover any deadline deficit left by solar headroom or limited blocks.
     if slots:
         fill(len(slots) - 1, target)
     windows: list[list[int]] = []
@@ -246,7 +232,7 @@ def build_adaptive_plan(
 
 
 def next_deadline(now: datetime) -> int:
-    """The next 4 pm Pacific, when the peak starts and grid charging must end."""
+    """Return the next 4 pm Pacific deadline in Unix seconds."""
     local = now.astimezone(PACIFIC)
     day = local.date() if local.hour < 16 else local.date() + timedelta(days=1)
     return int(datetime.combine(day, time(16), PACIFIC).timestamp())

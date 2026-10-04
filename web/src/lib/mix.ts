@@ -1,7 +1,7 @@
 import { align } from "./align";
 import type { MixRow } from "./api";
 
-/** CAISO's fuels grouped for the chart, top of the stack first. */
+/** Order fuel groups from the top of the chart stack. */
 export const GROUPS: { label: string; color: string; keys: (keyof MixRow)[] }[] = [
   { label: "Gas", color: "--mix-gas", keys: ["gas"] },
   { label: "Imports", color: "--mix-imports", keys: ["imports"] },
@@ -17,15 +17,13 @@ export const GROUPS: { label: string; color: string; keys: (keyof MixRow)[] }[] 
   { label: "Nuclear", color: "--mix-nuclear", keys: ["nuclear"] },
 ];
 
-/** Half the width of the moving average the chart draws, in seconds. */
+/** Average within 15 minutes on each side of a point. */
 const SMOOTH = 15 * 60;
 
 /**
- * Generation by group in GW, as raw values (for the tooltip) and stacked
- * (for drawing, each series the running total from the bottom). The drawn
- * stack is a 30-minute centered average of CAISO's 5-minute values, so it
- * reads as a trend; the tooltip keeps the reported value. Negative
- * values (charging batteries, exports) stack downward from zero.
+ * Return raw group values and a smoothed cumulative stack, in GW.
+ * Average the stack over a centered 30-minute span; keep tooltip values raw.
+ * Stack charging batteries and exports downward from zero.
  */
 export function stackMix(rows: MixRow[]) {
   const gw = (r: MixRow, keys: (keyof MixRow)[]) =>
@@ -60,8 +58,7 @@ export function stackMix(rows: MixRow[]) {
         }),
   );
   const stacked = smooth.map((col) => [...col]);
-  // Each series fills to zero and later ones paint over earlier ones, so a
-  // layer's drawn value is the running total on its own side of zero.
+  // Accumulate each side of zero separately because layers fill toward zero.
   for (let i = 0; i < raw[0].length; i++) {
     let up = 0;
     let down = 0;

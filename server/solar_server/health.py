@@ -1,8 +1,6 @@
-"""Staleness checks that Cloud Monitoring turns into emails (infra/monitoring.tf).
+"""Log one structured entry per problem on each collect.
 
-Runs on every collect. Each problem is one JSON line on stdout, which Cloud
-Run stores as a structured log entry; a log-match alert policy watches for
-its `alert` name. Log-match alerts are free, unlike metric-based ones.
+Cloud Monitoring matches the ``alert`` field to policies in infra/monitoring.tf.
 """
 
 from __future__ import annotations
@@ -12,12 +10,12 @@ import sys
 
 from solar_server.store import PLUG, SAMPLES, Store, window
 
-PLUG_SILENT = 10 * 60  # the plug reports every minute
-SAMPLES_STALE = 30 * 60  # collect stores one every minute
-PLAN_STALE = 2 * 3600  # a plan is made every minute
-NOT_CHARGING = 10 * 60  # grid on this long with the battery not taking it
-CHARGING_W = 100  # the plug draws more than this when the battery is charging
-NEARLY_FULL = 95  # a full battery tapers, so only check below this
+PLUG_SILENT = 10 * 60
+SAMPLES_STALE = 30 * 60
+PLAN_STALE = 2 * 3600
+NOT_CHARGING = 10 * 60
+CHARGING_W = 100  # Treat sustained low plug draw as possible charging failure.
+NEARLY_FULL = 95  # Exclude near-full batteries because charging tapers.
 
 
 def _latest(store: Store, series: str, now: int, within: int, key: str = "t") -> int | None:
@@ -26,7 +24,7 @@ def _latest(store: Store, series: str, now: int, within: int, key: str = "t") ->
 
 
 def problems(store: Store, now: int) -> dict[str, str]:
-    """Alert name -> what's wrong, for everything that has gone quiet."""
+    """Return alert names and descriptions for stale data or low charging power."""
     found = {}
     if _latest(store, PLUG, now, PLUG_SILENT, key="received") is None:
         found["plug_silent"] = "No report from the plug in 10 minutes."

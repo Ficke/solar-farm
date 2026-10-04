@@ -1,10 +1,6 @@
 name: Deploy
 
-# Builds the server image and rolls it out to both Cloud Run services on
-# every push to main that changes the server, the planner or the dashboard.
-# CI runs first on the same commit. After the rollout the public service's
-# /health must answer, or both services go back to the revisions they were
-# serving before.
+# Require CI before rollout; restore recorded revisions after rollout or health failures.
 on:
   push:
     branches: [main]
@@ -72,9 +68,8 @@ jobs:
             gcloud run services update "$svc" --region "$REGION" --image "$IMAGE" --quiet
             gcloud run services update-traffic "$svc" --region "$REGION" --to-latest --quiet
           done
-      # solar-web sits behind IAP, so only solar-edge can be probed from here.
-      # Both run the same image. Not /healthz: Cloud Run's front end reserves
-      # paths ending in z and answers them with its own 404.
+      # Probe the shared image through public solar-edge; solar-web requires IAP.
+      # Use /health because Cloud Run reserves /healthz.
       - name: Smoke test
         run: |
           set -o pipefail

@@ -1,6 +1,5 @@
 <script lang="ts">
-  // Energy and CO2 avoided per day, week or month, one column per period
-  // across both charts. Hovering a column shows its numbers.
+  // Align energy and CO2 columns by period on both charts.
   import type { Co2 } from "./api";
   import { fmtLb, fmtWh, niceTicks, periodLabel, periodName, type Slot, slots } from "./co2";
   import Tooltip, { type TipRow } from "./Tooltip.svelte";
@@ -24,7 +23,7 @@
   // Skip period labels when they'd collide; always keep the latest.
   const every = $derived(Math.max(1, Math.ceil((by === "month" ? 36 : 48) / gw)));
 
-  // Energy, kWh: solar and grid stacked above zero (what went in), load below (what came out).
+  // Show input above zero and load below, in kWh.
   const eTicks = $derived(
     niceTicks(
       -Math.max(...cols.map(({ p }) => (p ? p.load_wh / 1000 : 0)), 0),
@@ -36,7 +35,7 @@
   const eHi = $derived(eTicks.at(-1) ?? 1);
   const ey = (kwh: number) => PAD.t + ((eHi - kwh) / (eHi - eLo)) * (EH - PAD.t - PAD.b);
 
-  // CO2 avoided, lb: below zero when charging cost more than it saved.
+  // Negative avoided CO2 indicates emissions above the direct-grid baseline.
   const cTicks = $derived.by(() => {
     const v = cols.map(({ p }) => p?.avoided_lb ?? 0);
     return niceTicks(Math.min(0, ...v), Math.max(0.05, ...v), 3);
@@ -57,7 +56,6 @@
   });
 
   const tip = $derived<Slot | null>(hovered != null ? (cols[hovered] ?? null) : null);
-  // Beside the hovered column, on whichever side has room, kept inside the card.
   const tipX = $derived.by(() => {
     if (hovered == null) return 0;
     const right = cx(hovered) + gw / 2 + 4;
@@ -72,7 +70,7 @@
     hovered = i >= 0 && i < cols.length ? i : null;
   }
 
-  // A bar from y0 to y1, rounded only at the y1 end so stacked segments meet flat.
+  // Round only the outer end so stacked segments meet flush.
   function bar(x: number, y0: number, y1: number, round: boolean) {
     const h = Math.abs(y0 - y1);
     if (h < 0.5) return "";
