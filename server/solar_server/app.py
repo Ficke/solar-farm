@@ -14,7 +14,7 @@ from fastapi import FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from solar_server import tasks, views
+from solar_server import health, tasks, views
 from solar_server.auth import TokenVerifier, check_plug_key, check_scheduler, google_verifier
 from solar_server.config import Settings
 from solar_server.sources import LiveSources, Sources
@@ -82,7 +82,9 @@ def _edge_routes(app, settings, store, sources, verify, clock) -> None:
     @app.post("/tasks/collect")
     def collect(request: Request) -> dict:
         check_scheduler(request, settings.scheduler_sa, verify)
-        return tasks.collect(store, sources, now())
+        sample = tasks.collect(store, sources, now())
+        health.check(store, int(clock()))
+        return sample
 
     @app.post("/tasks/plan")
     def plan(request: Request) -> dict:

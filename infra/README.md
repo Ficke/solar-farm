@@ -3,16 +3,17 @@
 Everything in the `solar-farm-510518` project is defined here in [OpenTofu](https://opentofu.org). There are two parts:
 
 - **`bootstrap/`**: the part CI can't create for itself. That's the state bucket, keyless GitHub access (Workload Identity Federation) and a $5 budget alert. You run it once from your machine.
-- **`./`**: everything else. That's the APIs, Firestore, Secret Manager, Artifact Registry, the two Cloud Run services, IAP, Cloud Scheduler and the deploy account. The Infra workflow applies it on every push to `main` that touches `infra/`.
+- **`./`**: everything else. That's the APIs, Firestore, Secret Manager, Artifact Registry, the two Cloud Run services, IAP, Cloud Scheduler, alerts and the deploy account. The Infra workflow applies it on every push to `main` that touches `infra/`.
 
 | Resource | What it's for |
 | --- | --- |
 | `solar-web` (Cloud Run, IAP on) | Private dashboard and its API. Only `DASHBOARD_USERS` can sign in. |
 | `solar-edge` (Cloud Run, public) | `/plug/*` for the Shelly plug (checks `X-Plug-Key`) and `/tasks/*` for Cloud Scheduler (checks a Google-signed token). |
-| Firestore `(default)` | Readings, plans and plug reports. |
+| Firestore `(default)` | Readings, plans and plug reports. Weekly backups and 7 days of point-in-time recovery. |
 | Secret Manager | WattTime and Jackery logins, plus the plug key (generated here). |
 | Cloud Scheduler | `solar-collect` every 5 min, `solar-plan` at :02 and :32. |
 | Artifact Registry `solar-farm` | Server images; keeps the 5 newest. |
+| Alert policies | Email when the plug is silent for 10 min, readings stop for 30 min, the plan is over 2 h old, or a scheduled task fails. |
 
 ## One-time setup
 
@@ -50,7 +51,10 @@ tofu -chdir=infra/bootstrap init
 tofu -chdir=infra/bootstrap apply -var billing_account=ACCOUNT_ID
 
 gh variable set DASHBOARD_USERS --body '["you@gmail.com"]'
+openssl rand -base64 32 | tee /dev/tty | gh secret set TOFU_STATE_PASSPHRASE
 ```
+
+The last command encrypts OpenTofu's state. Save the passphrase it prints in your password manager: without it the state can't be read.
 
 The workflows already know the two values the bootstrap prints, since they're fixed names in this project.
 
@@ -86,6 +90,7 @@ Edit the `.tf` files and open a PR. CI checks formatting and validates the confi
 
 ## Notes
 
-- The state bucket is private and versioned. It holds the secret values, because OpenTofu needs them to manage the secret versions.
+- The state holds the secret values, because OpenTofu needs them to manage the secret versions, so it's encrypted with `TOFU_STATE_PASSPHRASE` (OpenTofu state encryption). The bucket is also private and versioned. For a local `tofu plan`, put the passphrase in `terraform.tfvars` as `state_passphrase`.
+- Alerts are log-match policies, which are free. The server logs a line for each stale part on every collect (`server/solar_server/health.py`); Cloud Scheduler logs its own failures. They go to `DASHBOARD_USERS`, at most one email per alert every 6 hours.
 - Only workflows on `main` of `Ficke/solar-farm` can get Google credentials. Pull requests and forks can't.
 - The infra account is a project owner, which lets it manage IAM. It has no access outside this project.

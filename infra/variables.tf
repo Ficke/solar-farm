@@ -13,9 +13,21 @@ variable "github_repo" {
   default = "Ficke/solar-farm"
 }
 
+variable "state_passphrase" {
+  description = "Encrypts OpenTofu state and plans (GitHub secret TOFU_STATE_PASSPHRASE)."
+  type        = string
+  sensitive   = true
+}
+
 variable "dashboard_users" {
   description = "Google accounts allowed to open the dashboard."
   type        = list(string)
+}
+
+variable "alert_emails" {
+  description = "Where alerts go. Empty means the dashboard users."
+  type        = list(string)
+  default     = []
 }
 
 variable "iap_oauth_client_id" {

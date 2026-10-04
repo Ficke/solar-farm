@@ -26,6 +26,7 @@ jobs:
     env:
       TF_IN_AUTOMATION: "1"
       TF_INPUT: "0"
+      TF_VAR_state_passphrase: ${{ secrets.TOFU_STATE_PASSPHRASE }}
       TF_VAR_dashboard_users: ${{ vars.DASHBOARD_USERS }}
       TF_VAR_iap_oauth_client_id: ${{ secrets.IAP_OAUTH_CLIENT_ID }}
       TF_VAR_iap_oauth_client_secret: ${{ secrets.IAP_OAUTH_CLIENT_SECRET }}

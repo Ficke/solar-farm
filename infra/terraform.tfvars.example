@@ -1,5 +1,6 @@
 # Copy to terraform.tfvars only for a local `tofu plan`; it is git-ignored.
 # CI passes these as TF_VAR_* from GitHub secrets and variables instead.
+state_passphrase        = "the TOFU_STATE_PASSPHRASE secret"
 dashboard_users         = ["you@gmail.com"]
 iap_oauth_client_id     = "1234567890-abc.apps.googleusercontent.com"
 iap_oauth_client_secret = "GOCSPX-..."
