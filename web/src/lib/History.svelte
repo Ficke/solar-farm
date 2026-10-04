@@ -3,6 +3,7 @@
   // across both charts. Hovering a column shows its numbers.
   import type { Co2 } from "./api";
   import { fmtLb, fmtWh, niceTicks, periodLabel, periodName, type Slot, slots } from "./co2";
+  import Tooltip, { type TipRow } from "./Tooltip.svelte";
 
   let { co2, now }: { co2: Co2 | undefined; now: number } = $props();
   let width = $state(400);
@@ -81,6 +82,20 @@
   }
   const co2Label = (lb: number) => (lb < 0 ? "CO₂ added" : "CO₂ avoided");
   const span = (wh: [string, string]) => `${wh[0]} ${wh[1]}`;
+
+  function tipRows({ p }: Slot): TipRow[] {
+    if (!p) return [{ name: "No readings" }];
+    return [
+      { color: "--solar", value: span(fmtWh(p.solar_wh)), name: "Solar" },
+      { color: "--grid", value: span(fmtWh(p.grid_wh)), name: "Grid" },
+      { color: "--ink-3", value: span(fmtWh(p.load_wh)), name: "Load" },
+      {
+        color: p.avoided_lb < 0 ? "--bad" : "--good",
+        value: `${fmtLb(Math.abs(p.avoided_lb))} lb`,
+        name: co2Label(p.avoided_lb),
+      },
+    ];
+  }
 </script>
 
 <dl class="tiles">
@@ -163,21 +178,14 @@
   </svg>
 
   {#if tip}
-    {@const p = tip.p}
-    <div class="tip" bind:clientWidth={tipW} style:left="{tipX}px">
-      <div class="when">{periodName(tip.start, by)}</div>
-      {#if p}
-        <div class="row"><span class="key" style:background="var(--solar)"></span><strong>{span(fmtWh(p.solar_wh))}</strong><span class="name">Solar</span></div>
-        <div class="row"><span class="key" style:background="var(--grid)"></span><strong>{span(fmtWh(p.grid_wh))}</strong><span class="name">Grid</span></div>
-        <div class="row"><span class="key" style:background="var(--ink-3)"></span><strong>{span(fmtWh(p.load_wh))}</strong><span class="name">Load</span></div>
-        <div class="row">
-          <span class="key" style:background={p.avoided_lb < 0 ? "var(--bad)" : "var(--good)"}></span>
-          <strong>{fmtLb(Math.abs(p.avoided_lb))} lb</strong><span class="name">{co2Label(p.avoided_lb)}</span>
-        </div>
-      {:else}
-        <div class="name">No readings</div>
-      {/if}
-    </div>
+    <Tooltip
+      bind:width={tipW}
+      x={tipX}
+      y={28}
+      offset={0}
+      title={periodName(tip.start, by)}
+      rows={tipRows(tip)}
+    />
   {/if}
 </div>
 
@@ -236,40 +244,5 @@
   .hl {
     fill: var(--ink);
     opacity: 0.06;
-  }
-  .tip {
-    position: absolute;
-    top: 28px;
-    z-index: 2;
-    pointer-events: none;
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    box-shadow: 0 4px 16px rgb(0 0 0 / 0.15);
-    padding: 8px 10px;
-    font-size: 12px;
-    white-space: nowrap;
-  }
-  .when {
-    color: var(--ink-2);
-    margin-bottom: 4px;
-  }
-  .row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    line-height: 1.6;
-  }
-  .row strong {
-    color: var(--ink);
-    font-variant-numeric: tabular-nums;
-  }
-  .name {
-    color: var(--ink-3);
-  }
-  .key {
-    width: 10px;
-    height: 10px;
-    border-radius: 2px;
   }
 </style>
