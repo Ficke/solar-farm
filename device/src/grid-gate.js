@@ -24,11 +24,13 @@ var CFG = {
   planMaxAge: 10800, // seconds a plan stays trusted
   indexMaxAge: 900, // seconds a live index reading stays trusted
   safetyOffMax: 108000, // 30 h off (a whole missed day) forces the grid on
-  safetyHold: 7200 // how long a safety charge lasts
+  safetyHold: 7200, // how long a safety charge lasts
+  bridge: 180 // stay on through a gap this short between windows, in seconds
 };
 
 var S = {
   plan: null,
+  planAt: 0,
   index: null,
   indexAt: 0,
   token: "",
@@ -55,6 +57,14 @@ function inWindows(windows, now) {
   return false;
 }
 
+// On inside a window. Once on, a window starting within cfg.bridge keeps it
+// on, so a replan that moves a boundary by a minute or two doesn't flick the
+// relay off and back on.
+function planOn(s, now, cfg) {
+  var w = s.plan.windows;
+  return inWindows(w, now) || (s.on === true && inWindows(w, now + cfg.bridge));
+}
+
 function decide(s, now, localMin, cfg) {
   if (localMin < 0) return { on: false, reason: "no-time" };
   if (localMin >= cfg.peakStart && localMin < cfg.peakEnd) {
@@ -64,13 +74,13 @@ function decide(s, now, localMin, cfg) {
   // Only a recent, feasible battery-aware plan may suppress the time backstop.
   if (s.plan && s.plan.strategy === "adaptive" && s.plan.shortfall_wh === 0 &&
       now - s.plan.generated_at >= 0 && now - s.plan.generated_at < 900) {
-    return { on: inWindows(s.plan.windows, now), reason: "plan" };
+    return { on: planOn(s, now, cfg), reason: "plan" };
   }
   if (s.safetyUntil > now || (s.lastOnAt > 0 && now - s.lastOnAt > cfg.safetyOffMax)) {
     return { on: true, reason: "safety" };
   }
   if (s.plan && now - s.plan.generated_at < cfg.planMaxAge) {
-    return { on: inWindows(s.plan.windows, now), reason: "plan" };
+    return { on: planOn(s, now, cfg), reason: "plan" };
   }
   if (s.index !== null && now - s.indexAt < cfg.indexMaxAge) {
     var limit = s.on ? cfg.threshold + cfg.hysteresis : cfg.threshold;
@@ -163,19 +173,26 @@ function applyDecision(d, now) {
 
 // --- plan fetch -------------------------------------------------------------
 
+function acceptPlan(body) {
+  var p = null;
+  try {
+    p = JSON.parse(body);
+  } catch (e) {
+    print("grid-gate: plan is not JSON");
+    return;
+  }
+  if (validPlan(p)) {
+    S.plan = p;
+    S.planAt = nowUnix();
+  }
+}
+
 function onPlan(res, errCode, errMsg) {
   if (errCode !== 0 || !res || res.code !== 200) {
     print("grid-gate: plan fetch failed " + errCode + " " + errMsg);
     return;
   }
-  var p = null;
-  try {
-    p = JSON.parse(res.body);
-  } catch (e) {
-    print("grid-gate: plan is not JSON");
-    return;
-  }
-  if (validPlan(p)) S.plan = p;
+  acceptPlan(res.body);
 }
 
 function fetchPlan(now) {
@@ -211,8 +228,14 @@ function reportBody(now) {
   });
 }
 
+// The server answers a report with the current plan (200), or 204 before
+// there is one, so each replan reaches the plug within a minute.
 function onReport(res, errCode) {
-  if (errCode !== 0 || !res || res.code !== 204) print("grid-gate: report failed " + errCode);
+  if (errCode !== 0 || !res || (res.code !== 200 && res.code !== 204)) {
+    print("grid-gate: report failed " + errCode);
+    return;
+  }
+  if (res.code === 200) acceptPlan(res.body);
 }
 
 function sendReport(now) {
@@ -221,7 +244,7 @@ function sendReport(now) {
     "HTTP.Request",
     {
       method: "POST",
-      url: CFG.reportUrl,
+      url: CFG.reportUrl + "?plan=1",
       headers: { "X-Plug-Key": CFG.plugKey, "Content-Type": "application/json" },
       body: reportBody(now),
       timeout: 10
@@ -301,7 +324,8 @@ function planIsFresh(now) {
 function tick() {
   var now = nowUnix();
   if (now > 0) {
-    if (S.ticks % 10 === 0) fetchPlan(now);
+    // Reports bring the plan back every minute; fetch it only when they don't.
+    if (S.ticks % 10 === 0 && now - S.planAt >= 300) fetchPlan(now);
     // A report uses one of Shelly's two concurrent call slots, so never start
     // both remote reads on the same tick.
     else if (S.ticks % 5 === 0 && !planIsFresh(now)) fetchIndex(now);

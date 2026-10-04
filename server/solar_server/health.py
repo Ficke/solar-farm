@@ -15,6 +15,9 @@ from solar_server.store import PLUG, SAMPLES, Store, window
 PLUG_SILENT = 10 * 60  # the plug reports every minute
 SAMPLES_STALE = 30 * 60  # collect stores one every minute
 PLAN_STALE = 2 * 3600  # a plan is made every minute
+NOT_CHARGING = 10 * 60  # grid on this long with the battery not taking it
+CHARGING_W = 100  # the plug draws more than this when the battery is charging
+NEARLY_FULL = 95  # a full battery tapers, so only check below this
 
 
 def _latest(store: Store, series: str, now: int, within: int, key: str = "t") -> int | None:
@@ -29,6 +32,17 @@ def problems(store: Store, now: int) -> dict[str, str]:
         found["plug_silent"] = "No report from the plug in 10 minutes."
     if _latest(store, SAMPLES, now, SAMPLES_STALE) is None:
         found["samples_stale"] = "No Jackery or WattTime reading stored in 30 minutes."
+    reports = window(store, PLUG, now - NOT_CHARGING, now)
+    battery = ((store.get_state("sample") or {}).get("sample") or {}).get("battery_pct")
+    if (
+        len(reports) >= NOT_CHARGING // 60 - 2
+        and all(r.get("on") and (r.get("w") or 0) < CHARGING_W for r in reports)
+        and battery is not None
+        and battery < NEARLY_FULL
+    ):
+        found["grid_not_charging"] = (
+            f"Grid on for 10 minutes but the battery isn't charging ({battery:.0f}%)."
+        )
     plan = store.get_state("plan")
     made = (plan or {}).get("generated_at")
     if not isinstance(made, int | float) or now - made > PLAN_STALE:

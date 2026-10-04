@@ -1,8 +1,10 @@
 from datetime import UTC, datetime, timedelta
+from itertools import pairwise
 
 import pytest
 from planner.adaptive import build_adaptive_plan, estimates
 from planner.plan import PACIFIC
+from planner.telemetry import CAPACITY_WH
 
 NOW = datetime(2026, 10, 3, 14, tzinfo=UTC)  # 7am Pacific
 
@@ -191,3 +193,48 @@ def test_charge_rate_ignores_passthrough_and_needs_a_few_readings():
         for i, w in enumerate([1050.0, 1050.0, 1100.0, 150.0, 220.0, float("nan")])
     ]
     assert estimates(readings, t, 500, 100, 1700)["charge_w"] == pytest.approx(1000)
+
+
+def adams_forecast(day: datetime) -> list[tuple[datetime, float]]:
+    """2026-10-04: near zero from noon to 2pm, about 535 until the 4pm peak."""
+    out = []
+    for i in range(30 * 12):
+        t = day + timedelta(minutes=i * 5)
+        hour = t.astimezone(PACIFIC).hour
+        out.append((t, 2.0 if 12 <= hour < 14 else 535.0 if 14 <= hour < 16 else 950.0))
+    return out
+
+
+def test_current_block_stays_planned_between_forecast_points():
+    points = adams_forecast(datetime(2026, 10, 4, 18, tzinfo=UTC))  # 11am Pacific
+    now = datetime(2026, 10, 4, 13, 58, tzinfo=PACIFIC)
+    plan = build_adaptive_plan(points, now, 93, inputs(load=1))
+    assert plan["windows"][0][0] == int(now.timestamp())
+
+
+def test_slow_charging_still_fills_by_4pm():
+    """Adam's 1:45 pm plan on 2026-10-04: 85% and one short window planned at
+    1,700 W, but the battery charges at half that. Replanning every minute
+    from live readings, as the server does, must still fill it by 4 pm. The
+    only gaps are planned ones or a minute or two the plug bridges."""
+    points = adams_forecast(datetime(2026, 10, 4, 18, tzinfo=UTC))
+    now = datetime(2026, 10, 4, 13, 45, tzinfo=PACIFIC)
+    first = build_adaptive_plan(points, now, 85, inputs(load=1))
+    assert first["windows"][0][0] == int(now.timestamp())
+    assert first["windows"][0][1] - first["windows"][0][0] <= 20 * 60
+    pct, samples, on_minutes = 85.0, [], []
+    estimate = inputs(load=1)
+    while now.astimezone(PACIFIC).hour < 16:
+        t = int(now.timestamp())
+        if now.minute % 5 == 0:  # the server's estimate refresh while charging
+            estimate = estimates(samples, t, 500, 1, 1700)
+        plan = build_adaptive_plan(points, now, pct, estimate)
+        on = any(s <= t < e for s, e in plan["windows"])
+        if on:
+            on_minutes.append(t)
+            pct = min(100.0, pct + 850 * 0.9 / 60 / CAPACITY_WH * 100)
+        samples.append({"t": t, "ac_input_w": 850.0 if on else 0.0, "output_w": 1.0})
+        now += timedelta(minutes=1)
+    assert pct >= 99
+    gaps = [b - a - 60 for a, b in pairwise(on_minutes) if b - a > 60]
+    assert all(g <= 180 or g >= 15 * 60 for g in gaps), gaps
