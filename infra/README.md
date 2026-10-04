@@ -94,3 +94,4 @@ Edit the `.tf` files and open a PR. CI checks formatting and validates the confi
 - Alerts are log-match policies, which are free. The server logs a line for each stale part on every collect (`server/solar_server/health.py`); Cloud Scheduler logs its own failures. They go to `DASHBOARD_USERS`, at most one email per alert every 6 hours.
 - Only workflows on `main` of `Ficke/solar-farm` can get Google credentials. Pull requests and forks can't.
 - The infra account is a project owner, which lets it manage IAM. It has no access outside this project.
+- Claude cloud sessions read Firestore as `claude-reader`, which only has Cloud Datastore Viewer. Its key lives in the cloud environment's API credentials (type "GCP access token", allowed website `firestore.googleapis.com`), never in environment variables, chat or this repo. To rotate it, create a new key, replace the credential, then delete the old key.

@@ -13,3 +13,7 @@ output "image_repository" {
 output "deploy_service_account" {
   value = google_service_account.deploy.email
 }
+
+output "claude_reader_service_account" {
+  value = google_service_account.claude_reader.email
+}
