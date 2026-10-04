@@ -11,14 +11,21 @@
 Talks to the plug's local JSON-RPC API (http://<host>/rpc). Run it from a
 machine on the same network as the plug. Secrets come from Google Secret
 Manager by default; .env can override them for local development.
+
+Besides the script, it turns on the plug's local password (generated on the
+first run and kept in the git-ignored config/device.toml) and installs two
+firmware schedules that work even if the script stops: the relay is forced
+off every minute of the peak, and the script is restarted every 10 minutes.
 """
 
 from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import json
 import os
+import secrets
 import subprocess
 import sys
 import time
@@ -34,7 +41,17 @@ SCRIPT_NAME = "grid-gate"
 CHUNK = 1024
 PROJECT = "solar-farm-510518"
 SENSITIVE_KVS_KEYS = {"gg.plug_key", "gg.wt_auth"}
-READ_ONLY_METHODS = {"Shelly.GetDeviceInfo", "Script.GetStatus", "Script.List", "Switch.GetStatus"}
+READ_ONLY_METHODS = {
+    "KVS.Get",
+    "Schedule.List",
+    "Script.GetStatus",
+    "Script.List",
+    "Shelly.GetDeviceInfo",
+    "Switch.GetStatus",
+}
+SCHEDULES_KEY = "gg.schedules"
+DEFAULT_PEAK = (960, 1260)  # minutes after local midnight, as in grid-gate.js
+WATCHDOG_TIMESPEC = "0 */10 * * * *"
 
 
 def load_env(path: Path) -> None:
@@ -54,8 +71,8 @@ class Shelly:
         self.dry_run = dry_run
 
     def call(self, method: str, params: dict | None = None):
-        if self.dry_run and method not in ("Script.List", "Shelly.GetDeviceInfo"):
-            shown = {k: ("…" if k == "code" else v) for k, v in (params or {}).items()}
+        if self.dry_run and method not in READ_ONLY_METHODS:
+            shown = {k: ("…" if k in ("code", "ha1") else v) for k, v in (params or {}).items()}
             if method == "KVS.Set" and shown.get("key") in SENSITIVE_KVS_KEYS:
                 shown["value"] = "…"
             print(f"[dry-run] {method} {json.dumps(shown)}")
@@ -74,6 +91,12 @@ class Shelly:
                 if attempt + 1 == attempts:
                     raise
                 time.sleep(attempt + 1)
+        if r.status_code == 401:
+            raise SystemExit(
+                "The plug rejected its password. It has to match `password` in "
+                "config/device.toml (or SHELLY_PASSWORD in .env). To start over, turn off "
+                "authentication in the Shelly app and run deploy again."
+            )
         r.raise_for_status()
         body = r.json()
         if "error" in body:
@@ -114,6 +137,99 @@ def secret_value(env_name: str, secret_id: str) -> str | None:
     return out.stdout.strip() or None
 
 
+def shelly_password(cfg: dict) -> str | None:
+    return os.environ.get("SHELLY_PASSWORD") or cfg.get("password")
+
+
+def save_password(cfg_path: Path, password: str) -> None:
+    """Add the generated password to the git-ignored device.toml."""
+    entry = (
+        "# The plug's local password, set by deploy.py. Log in as admin.\n"
+        f'password = "{password}"\n'
+    )
+    # Top-level keys have to come before the first [table].
+    text = cfg_path.read_text()
+    at = text.find("\n[")
+    at = len(text) if at < 0 else at + 1
+    head = text[:at].rstrip("\n")
+    cfg_path.write_text(f"{head}\n\n{entry}\n{text[at:]}".rstrip("\n") + "\n")
+
+
+def ensure_auth(dev: Shelly, info: dict, cfg: dict, cfg_path: Path) -> None:
+    """Use the plug's local password, turning it on first if the plug has none.
+
+    Without it anyone on the Wi-Fi can read the plug key and WattTime login
+    from the key-value store, or flip the relay during the peak.
+    """
+    password = shelly_password(cfg)
+    if info.get("auth_en"):
+        if not password:
+            raise SystemExit(
+                "The plug has a password but config/device.toml doesn't. Add it as "
+                '`password = "..."` (or SHELLY_PASSWORD in .env), or turn off authentication '
+                "in the Shelly app and run deploy again to set a new one."
+            )
+    else:
+        if not password:
+            password = secrets.token_urlsafe(18)
+            if not dev.dry_run:
+                save_password(cfg_path, password)
+                print(f"Saved a new plug password in {cfg_path}.")
+        # Gen2+ digest auth: ha1 = sha256("admin:<device id>:<password>").
+        realm = info.get("auth_domain") or info["id"]
+        ha1 = hashlib.sha256(f"admin:{realm}:{password}".encode()).hexdigest()
+        dev.call("Shelly.SetAuth", {"user": "admin", "realm": realm, "ha1": ha1})
+        if not dev.dry_run:
+            print("Turned on the plug's local password.")
+    dev.auth = HTTPDigestAuth("admin", password)
+
+
+def peak_timespecs(start: int, end: int) -> list[str]:
+    """Cron specs firing every minute of [start + 1, end), local minutes.
+
+    The first minute is left to the script, which ticks once a minute and
+    switches off on its own, so the backstop only acts if the script didn't.
+    """
+    first, last = start + 1, end - 1
+    if first > last:
+        return []
+    (h1, m1), (h2, m2) = divmod(first, 60), divmod(last, 60)
+    if h1 == h2:
+        return [f"0 {m1}-{m2} {h1} * * *"]
+    specs = [f"0 {m1}-59 {h1} * * *" if m1 else f"0 * {h1} * * *"]
+    if h2 - h1 > 1:
+        middle = str(h1 + 1) if h2 - h1 == 2 else f"{h1 + 1}-{h2 - 1}"
+        specs.append(f"0 * {middle} * * *")
+    specs.append(f"0 0-{m2} {h2} * * *" if m2 < 59 else f"0 * {h2} * * *")
+    return specs
+
+
+def saved_schedule_ids(dev: Shelly) -> list[int]:
+    try:
+        return json.loads(dev.call("KVS.Get", {"key": SCHEDULES_KEY}).get("value") or "[]")
+    except RuntimeError:  # the key doesn't exist before the first deploy
+        return []
+
+
+def remove_schedules(dev: Shelly) -> None:
+    """Delete the schedules an earlier deploy made, leaving any of yours alone."""
+    existing = {j["id"] for j in dev.call("Schedule.List").get("jobs", [])}
+    for job_id in saved_schedule_ids(dev):
+        if job_id in existing:
+            dev.call("Schedule.Delete", {"id": job_id})
+    dev.call("KVS.Set", {"key": SCHEDULES_KEY, "value": "[]"})
+
+
+def add_schedule(dev: Shelly, ids: list[int], timespec: str, method: str, params: dict) -> None:
+    job = dev.call(
+        "Schedule.Create",
+        {"enable": True, "timespec": timespec, "calls": [{"method": method, "params": params}]},
+    )
+    if "id" in job:
+        ids.append(job["id"])
+        dev.call("KVS.Set", {"key": SCHEDULES_KEY, "value": json.dumps(ids)})
+
+
 def kvs_settings(cfg: dict) -> dict[str, str]:
     kv = {"gg.plan_url": cfg["plan_url"]}
     if cfg.get("report_url"):
@@ -141,10 +257,11 @@ def kvs_settings(cfg: dict) -> dict[str, str]:
     return kv
 
 
-def deploy(dev: Shelly, cfg: dict) -> None:
+def deploy(dev: Shelly, cfg: dict, cfg_path: Path) -> None:
     info = dev.call("Shelly.GetDeviceInfo")
     model, dev_id, fw = info.get("model", "?"), info.get("id", "?"), info.get("ver", "?")
     print(f"Connected to {model} ({dev_id}), firmware {fw}")
+    ensure_auth(dev, info, cfg, cfg_path)
 
     # The script reads local time for the peak block, so pin the timezone.
     dev.call(
@@ -160,6 +277,15 @@ def deploy(dev: Shelly, cfg: dict) -> None:
     for key, value in kvs_settings(cfg).items():
         dev.call("KVS.Set", {"key": key, "value": value})
 
+    # The peak backstop is firmware, so it holds even if the script is broken.
+    # Old schedules go first so the watchdog can't start a half-uploaded script.
+    remove_schedules(dev)
+    schedule_ids: list[int] = []
+    tuning = cfg.get("tuning", {})
+    peak = (tuning.get("peakStart", DEFAULT_PEAK[0]), tuning.get("peakEnd", DEFAULT_PEAK[1]))
+    for spec in peak_timespecs(*peak):
+        add_schedule(dev, schedule_ids, spec, "Switch.Set", {"id": 0, "on": False})
+
     scripts = dev.call("Script.List").get("scripts", [])
     existing = next((s for s in scripts if s.get("name") == SCRIPT_NAME), None)
     if existing:
@@ -174,10 +300,15 @@ def deploy(dev: Shelly, cfg: dict) -> None:
         dev.call("Script.PutCode", {"id": script_id, "code": code[i : i + CHUNK], "append": i > 0})
     dev.call("Script.SetConfig", {"id": script_id, "config": {"enable": True}})
     dev.call("Script.Start", {"id": script_id})
+    add_schedule(dev, schedule_ids, WATCHDOG_TIMESPEC, "Script.Start", {"id": script_id})
     if not dev.dry_run:
         verify_script(dev, script_id)
     print(f"Deployed {SCRIPT_NAME} as script {script_id} ({len(code)} bytes).")
-    print(f"Status: http://{cfg['host']}/script/{script_id}/status")
+    print(
+        f"Schedules: relay off every minute from {peak[0] // 60}:{peak[0] % 60:02d} to "
+        f"{peak[1] // 60}:{peak[1] % 60:02d}, script restarted if stopped."
+    )
+    print(f"Status: http://{cfg['host']}/script/{script_id}/status (user admin)")
 
 
 def main() -> int:
@@ -196,8 +327,8 @@ def main() -> int:
         )
         return 1
     cfg = tomllib.loads(cfg_path.read_text())
-    dev = Shelly(cfg["host"], os.environ.get("SHELLY_PASSWORD") or None, dry_run=args.dry_run)
-    deploy(dev, cfg)
+    dev = Shelly(cfg["host"], None, dry_run=args.dry_run)
+    deploy(dev, cfg, cfg_path)
     return 0
 
 

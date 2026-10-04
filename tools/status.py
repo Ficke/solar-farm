@@ -9,13 +9,18 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import tomllib
 from datetime import datetime
 from pathlib import Path
 
 import requests
-from deploy import ROOT, SCRIPT_NAME, Shelly, load_env  # ty: ignore[unresolved-import]
+from deploy import (  # ty: ignore[unresolved-import]
+    ROOT,
+    SCRIPT_NAME,
+    Shelly,
+    load_env,
+    shelly_password,
+)
 
 
 def fmt(ts: int | None) -> str:
@@ -30,7 +35,7 @@ def main() -> int:
 
     load_env(ROOT / ".env")
     cfg = tomllib.loads(Path(args.config).read_text())
-    dev = Shelly(cfg["host"], os.environ.get("SHELLY_PASSWORD") or None)
+    dev = Shelly(cfg["host"], shelly_password(cfg))
 
     sw = dev.call("Switch.GetStatus", {"id": 0})
     print(
