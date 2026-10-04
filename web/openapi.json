@@ -920,7 +920,7 @@
           "t"
         ],
         "title": "Sample",
-        "description": "Every 5 minutes: the Jackery and WattTime."
+        "description": "Every minute from the Jackery; WattTime when it has a new reading."
       },
       "StoredPlugReport": {
         "properties": {

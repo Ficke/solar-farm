@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 import pytest
 from fastapi.testclient import TestClient
 from planner.jackery import Reading
-from solar_server import tasks, totals
+from solar_server import tasks, totals, views
 from solar_server.app import create_app
 from solar_server.config import Settings
 from solar_server.store import FORECASTS, MIX, PLANS, PLUG, SAMPLES, MemoryStore
@@ -98,6 +98,27 @@ def test_collect_stores_one_sample_with_every_source():
     assert store.day(SAMPLES, "2026-10-04") == [body]
 
 
+def test_collect_stores_only_new_watttime_readings_and_mix_every_5_minutes():
+    store = MemoryStore()
+    tasks.collect(store, FakeSources(), datetime.fromtimestamp(NOW, UTC))
+    mix = store.day(MIX, "2026-10-04")
+    sample = tasks.collect(store, FakeSources(), datetime.fromtimestamp(NOW + 60, UTC))
+    assert sample == {
+        "t": NOW + 60,
+        "battery_pct": 81.0,
+        "solar_w": 120.0,
+        "ac_input_w": 0.0,
+        "output_w": 90.0,
+    }
+    assert store.day(MIX, "2026-10-04") == mix
+    # The dashboard still shows WattTime's last reading.
+    latest = (store.get_state("sample") or {})["sample"]
+    assert latest == {**sample, "moer": 880.0, "moer_t": NOW - 300, "index": 82.0}
+    later = datetime.fromtimestamp(NOW - 300 + tasks.WATTTIME_KEEP + 60, UTC)
+    tasks.collect(store, FakeSources(), later)
+    assert "moer" not in (store.get_state("sample") or {})["sample"]
+
+
 def test_collect_keeps_going_when_a_source_fails():
     c, _ = make("edge", sources=FakeSources(jackery=False, fail_index=True))
     body = c.post("/tasks/collect", headers=AUTH).json()
@@ -113,6 +134,7 @@ def test_replan_failure_does_not_lose_collected_telemetry(monkeypatch):
     def fail(*args):
         raise RuntimeError("planning failed")
 
+    monkeypatch.setattr(tasks, "plan", fail)
     monkeypatch.setattr(tasks, "refresh_charging_plan", fail)
     c, store = make("edge")
     old = {"generated_at": NOW - 600, "windows": []}
@@ -151,9 +173,9 @@ def test_plan_task_feeds_the_plug_without_the_forecast():
 
 def test_grid_mix_is_stored_once_per_row():
     c, store = make("edge")
+    # A reading keeps the last hour; on the half hour the plan fills in the last day.
     c.post("/tasks/collect", headers=AUTH)
-    # A reading keeps the last hour; a plan fills in the last day.
-    assert [r["t"] for r in store.day(MIX, "2026-10-04")] == [NOW - 600]
+    assert [r["t"] for r in store.day(MIX, "2026-10-04")] == [NOW - 600, NOW - 7200]
     c.post("/tasks/plan", headers=AUTH)
     c.post("/tasks/collect", headers=AUTH)
     assert [r["t"] for r in store.day(MIX, "2026-10-04")] == [NOW - 600, NOW - 7200]
@@ -397,3 +419,28 @@ def test_collect_updates_the_daily_totals():
     assert c.post("/tasks/collect", headers=AUTH).status_code == 200
     assert store.days["2026-10-04"]["battery_peak_pct"] == 81.0
     assert store.state["totals"] == {"day": "2026-10-04"}
+
+
+def test_full_days_need_three_hours_of_solar_readings(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(views.telemetry, "recommend_reserve", lambda full: seen.update(full))
+    store = MemoryStore()
+    base = {"grid_wh": 0, "solar_wh": 400}
+    store.put_total("2026-10-01", {**base, "day": "2026-10-01", "solar_n": 36})
+    store.put_total("2026-10-02", {**base, "day": "2026-10-02", "solar_n": 200, "solar_h": 2.9})
+    store.put_total("2026-10-03", {**base, "day": "2026-10-03", "solar_n": 200, "solar_h": 3.0})
+    views.daily_view(store, NOW, 5)
+    assert set(seen) == {"2026-10-01", "2026-10-03"}
+    points = [(NOW + 60 * i, 100.0) for i in range(181)]
+    assert totals.covered_h(points) == 3.0
+
+
+def test_collect_plans_with_a_fresh_forecast_and_keeps_one_every_half_hour():
+    store = MemoryStore()
+    for minute in range(31):
+        t = datetime.fromtimestamp(NOW + 60 * minute, UTC)
+        tasks.collect(store, FakeSources(), t)
+        tasks.plan(store, FakeSources(), Settings(), t, archive=tasks.archive_due(t))
+    plan = store.get_state("plan") or {}
+    assert plan["forecast_at"] == NOW + 30 * 60
+    assert [f["t"] for f in store.day(FORECASTS, "2026-10-04")] == [NOW, NOW + 30 * 60]

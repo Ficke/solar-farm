@@ -8,9 +8,9 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Protocol
 
-from planner.jackery import Reading
+from planner.jackery import Account, Reading
 
-from planner import caiso, jackery, watttime
+from planner import caiso, watttime
 from solar_server.config import Settings
 
 
@@ -27,6 +27,7 @@ class LiveSources:
     settings: Settings
     _token: str = ""
     _token_at: float = 0.0
+    _jackery: Account | None = None
 
     def _auth(self) -> str:
         # WattTime tokens last 30 minutes; reuse one while the instance is warm.
@@ -54,6 +55,7 @@ class LiveSources:
         s = self.settings
         if not s.jackery_email:
             return None
-        return asyncio.run(
-            jackery.read(s.jackery_email, s.jackery_password, s.jackery_sn or None, now)
-        )
+        # Readings come every minute; keep the login while the instance is warm.
+        if self._jackery is None:
+            self._jackery = Account(s.jackery_email, s.jackery_password, s.jackery_sn or None)
+        return asyncio.run(self._jackery.read(now))

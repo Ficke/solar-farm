@@ -78,13 +78,17 @@ def _edge_routes(app, settings, store, sources, verify, clock) -> None:
     @app.post("/tasks/collect")
     def collect(request: Request) -> dict:
         check_scheduler(request, settings.scheduler_sa, verify)
-        sample = tasks.collect(store, sources, now())
+        t = now()
+        sample = tasks.collect(store, sources, t)
+        log = logging.getLogger(__name__)
         try:
-            tasks.refresh_charging_plan(store, settings, now())
+            tasks.plan(store, sources, settings, t, archive=tasks.archive_due(t))
         except Exception:
-            logging.getLogger(__name__).exception(
-                "charging replan failed after telemetry collection"
-            )
+            log.exception("forecast refresh failed; replanning with the cached one")
+            try:
+                tasks.refresh_charging_plan(store, settings, t)
+            except Exception:
+                log.exception("charging replan failed after telemetry collection")
         health.check(store, int(clock()))
         return sample
 

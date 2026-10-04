@@ -54,13 +54,30 @@ def parse_properties(props: dict, now: datetime) -> Reading:
     )
 
 
-async def read(email: str, password: str, serial: str | None, now: datetime) -> Reading:
-    from socketry import Client
+class Account:
+    """Reads one power station, logging in once rather than for every reading.
 
-    client = await Client.login(email, password)
-    devices = await client.fetch_devices()
-    index = 0
-    if serial:
-        index = next(i for i, d in enumerate(devices) if str(d.get("devSn")) == serial)
-    props = await client.device(index).get_all_properties()
-    return parse_properties(props, now)
+    socketry renews the token when it nears expiry. After any failure the next
+    read logs in again.
+    """
+
+    def __init__(self, email: str, password: str, serial: str | None) -> None:
+        self.email, self.password, self.serial = email, password, serial
+        self._device = None
+
+    async def read(self, now: datetime) -> Reading:
+        from socketry import Client
+
+        if self._device is None:
+            client = await Client.login(self.email, self.password)
+            devices = await client.fetch_devices()
+            index = 0
+            if self.serial:
+                index = next(i for i, d in enumerate(devices) if str(d.get("devSn")) == self.serial)
+            self._device = client.device(index)
+        try:
+            props = await self._device.get_all_properties()
+        except Exception:
+            self._device = None
+            raise
+        return parse_properties(props, now)

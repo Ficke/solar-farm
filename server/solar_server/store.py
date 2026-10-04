@@ -17,10 +17,10 @@ from typing import Any, Protocol
 
 from planner.plan import PACIFIC
 
-SAMPLES = "samples"  # every 5 min: battery, solar, emissions
+SAMPLES = "samples"  # every minute: battery, solar; emissions when WattTime has a new one
 PLUG = "plug"  # every minute: relay state, reason, grid watts
-PLANS = "plans"  # every 5 min, plus forecast updates: the windows each plan picked
-FORECASTS = "forecasts"  # every 30 min: the 24-hour forecast each plan used
+PLANS = "plans"  # a plan every 5 min, plus any that changed the windows
+FORECASTS = "forecasts"  # every 30 min: the 24-hour forecast (plans fetch one every minute)
 MIX = "mix"  # every 5 min: CAISO's generation by fuel, MW: {t, solar, wind, gas, ...}
 TOTALS = "totals"  # one document per day: energy and CO2 totals (see totals.py)
 

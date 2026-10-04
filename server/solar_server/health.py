@@ -13,8 +13,8 @@ import sys
 from solar_server.store import PLUG, SAMPLES, Store, window
 
 PLUG_SILENT = 10 * 60  # the plug reports every minute
-SAMPLES_STALE = 30 * 60  # collect stores one every 5 minutes
-PLAN_STALE = 2 * 3600  # a plan is made every 30 minutes
+SAMPLES_STALE = 30 * 60  # collect stores one every minute
+PLAN_STALE = 2 * 3600  # a plan is made every minute
 
 
 def _latest(store: Store, series: str, now: int, within: int, key: str = "t") -> int | None:

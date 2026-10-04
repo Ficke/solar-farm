@@ -1,4 +1,4 @@
-"""What Cloud Scheduler triggers: a reading every 5 minutes, a plan every 30."""
+"""What Cloud Scheduler triggers: a reading, forecast and plan every minute."""
 
 from __future__ import annotations
 
@@ -23,25 +23,30 @@ def _num(v: float | None) -> float | None:
 
 
 def collect(store: Store, sources: Sources, now: datetime) -> dict:
-    """One sample: WattTime's latest marginal rate and percentile, plus the Jackery.
+    """One sample a minute from the Jackery, plus WattTime's newest marginal rate.
 
-    Also stores CAISO's grid mix for the last hour and updates today's totals.
+    WattTime publishes a rate every 5 minutes; it and its percentile are added
+    only when a new one has come out. On 5-minute marks CAISO's grid mix for
+    the last hour and today's totals are updated.
 
     Each source is optional; a sample is stored with whatever arrived.
     """
     t = int(now.timestamp())
     sample: dict = {"t": t}
+    five = now.minute % 5 == 0
     try:
         point = sources.actual("co2_moer", now)
-        if point:
+        last = ((store.get_state("sample") or {}).get("sample") or {}).get("moer_t")
+        if point and int(point[0].timestamp()) != last:
             sample["moer"] = _num(point[1])
             sample["moer_t"] = int(point[0].timestamp())
     except Exception as e:
         log.warning("watttime co2_moer failed: %s", e)
-    try:
-        sample["index"] = _num(sources.signal_index())
-    except Exception as e:
-        log.warning("watttime signal-index failed: %s", e)
+    if "moer" in sample:
+        try:
+            sample["index"] = _num(sources.signal_index())
+        except Exception as e:
+            log.warning("watttime signal-index failed: %s", e)
     try:
         r = sources.jackery(now)
         if r is not None:
@@ -55,19 +60,32 @@ def collect(store: Store, sources: Sources, now: datetime) -> dict:
         log.warning("jackery failed: %s", e)
     if len(sample) > 1:
         record_sample(store, sample)
-    store_mix(store, sources, now, since=t - 3600)
-    try:
-        totals.update(store, t)
-    except Exception as e:
-        log.warning("daily totals failed: %s", e)
+    if five:
+        store_mix(store, sources, now, since=t - 3600)
+        try:
+            totals.update(store, t)
+        except Exception as e:
+            log.warning("daily totals failed: %s", e)
     return sample
 
 
+WATTTIME_KEYS = ("moer", "moer_t", "index")
+WATTTIME_KEEP = 1800  # show WattTime's last reading for up to half an hour
+
+
 def record_sample(store: Store, sample: dict) -> None:
-    """Keep the sample, and the latest one with today's solar total for /api/now."""
-    today = _today(store, SAMPLES, "solar_w", store.get_state("sample"), sample)
+    """Keep the sample, and the latest one with today's solar total for /api/now.
+
+    The latest one keeps WattTime's last reading between its 5-minute updates.
+    """
+    state = store.get_state("sample")
+    today = _today(store, SAMPLES, "solar_w", state, sample)
     store.append(SAMPLES, sample)
-    store.put_state("sample", {"sample": sample, "today": today})
+    latest = dict(sample)
+    last = (state or {}).get("sample") or {}
+    if "moer" not in sample and 0 <= sample["t"] - last.get("moer_t", 0) <= WATTTIME_KEEP:
+        latest.update({k: last[k] for k in WATTTIME_KEYS if k in last})
+    store.put_state("sample", {"sample": latest, "today": today})
 
 
 def record_plug(store: Store, report: dict) -> None:
@@ -117,27 +135,43 @@ def store_mix(store: Store, sources: Sources, now: datetime, since: int) -> None
         store.extend(MIX, [r for r in rows if since <= r["t"] <= t])
 
 
-def plan(store: Store, sources: Sources, settings: Settings, now: datetime) -> dict:
-    """Refresh the emissions forecast and the battery-aware charging plan."""
+def archive_due(now: datetime) -> bool:
+    """A forecast is kept for good every 30 minutes; the rest only drive the plan."""
+    return now.minute % 30 == 0
+
+
+def plan(
+    store: Store, sources: Sources, settings: Settings, now: datetime, archive: bool = True
+) -> dict:
+    """Refresh the emissions forecast and the battery-aware charging plan.
+
+    The latest forecast lives in ``state/plan``. With ``archive``, the forecast
+    is also kept in ``forecasts`` and the last day's grid mix is filled in.
+    """
     points = sources.forecast(24)
     if not any(now <= t < now + timedelta(hours=24) for t, _ in points) or not all(
         math.isfinite(v) for _, v in points
     ):
         raise ValueError("unusable emissions forecast; keeping the previous plan")
     p = charging_plan(store, points, settings, now)
-    try:
-        p["index_now"] = sources.signal_index()
-    except Exception as e:
-        log.warning("signal-index skipped: %s", e)
+    # collect stores the percentile with each new WattTime reading.
+    p["index_now"] = ((store.get_state("sample") or {}).get("sample") or {}).get("index")
+    if p["index_now"] is None:
+        try:
+            p["index_now"] = sources.signal_index()
+        except Exception as e:
+            log.warning("signal-index skipped: %s", e)
     p["forecast"] = [[int(t.timestamp()), round(v, 1)] for t, v in points]
     p["forecast_at"] = int(now.timestamp())
-    # Fill any gaps in the last day's grid mix.
-    store_mix(store, sources, now, since=int(now.timestamp()) - 86400)
+    if archive:
+        # Fill any gaps in the last day's grid mix.
+        store_mix(store, sources, now, since=int(now.timestamp()) - 86400)
+    old = store.get_state("plan") or {}
     store.put_state("plan", p)
-    # Keep every plan and forecast, so the dashboard can check the forecast
-    # against what happened and later features can look back.
-    store.append(PLANS, plan_record(p))
-    if points:
+    keep_plan(store, old, p)
+    # Keep a forecast every 30 minutes, so the dashboard can check it against
+    # what happened and later features can look back.
+    if archive and points:
         store.append(
             FORECASTS,
             {
@@ -197,7 +231,7 @@ def charging_estimates(store: Store, settings: Settings, now: int) -> dict:
 
 
 def refresh_charging_plan(store: Store, settings: Settings, now: datetime) -> None:
-    """Replan after each 5-minute reading using the cached emissions forecast."""
+    """Replan after each reading using the cached emissions forecast."""
     old = store.get_state("plan") or {}
     forecast = old.get("forecast", [])
     if not forecast or int(now.timestamp()) - old.get("forecast_at", old["generated_at"]) > 7200:
@@ -209,7 +243,15 @@ def refresh_charging_plan(store: Store, settings: Settings, now: datetime) -> No
     p.update(forecast=forecast, forecast_at=old.get("forecast_at", old["generated_at"]))
     p["index_now"] = old.get("index_now")
     store.put_state("plan", p)
-    store.append(PLANS, plan_record(p))
+    keep_plan(store, old, p)
+
+
+def keep_plan(store: Store, old: dict, new: dict) -> None:
+    """Plans are made every minute. Keep one every 5 minutes, and any that
+    changed the windows, so a day's history stays well under Firestore's 1 MB."""
+    changed = [list(w) for w in new["windows"]] != [list(w) for w in old.get("windows", [])]
+    if changed or new["generated_at"] % 300 < 60:
+        store.append(PLANS, plan_record(new))
 
 
 # Numbers kept with each stored plan, so its choices can be checked later.

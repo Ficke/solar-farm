@@ -1,7 +1,6 @@
 locals {
   jobs = {
-    collect = { path = "/tasks/collect", schedule = "*/5 * * * *", what = "Jackery + WattTime sample" }
-    plan    = { path = "/tasks/plan", schedule = "2,32 * * * *", what = "24 h forecast and grid plan" }
+    collect = { path = "/tasks/collect", schedule = "* * * * *", what = "Readings, forecast and plan; CAISO every 5 min" }
   }
 }
 
