@@ -6,6 +6,8 @@ dashboard's types follow from it on its next check or build.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel
 
 type Window = tuple[int, int]  # [start, end), unix seconds
@@ -18,7 +20,7 @@ class Sample(BaseModel):
     battery_pct: float | None = None
     solar_w: float | None = None
     ac_input_w: float | None = None
-    output_w: float | None = None
+    output_w: float | None = None  # what the Jackery is powering
     moer: float | None = None  # WattTime's actual marginal CO2, lb/MWh
     moer_t: int | None = None
     index: float | None = None  # 0-100 percentile of the past month, lower is cleaner
@@ -99,6 +101,7 @@ class Day(BaseModel):
     day: str
     solar_wh: int
     grid_wh: int
+    load_wh: int
     battery_peak_pct: float | None
 
 
@@ -111,3 +114,20 @@ class Reserve(BaseModel):
 class Daily(BaseModel):
     days: list[Day]
     reserve: Reserve
+
+
+class Co2Period(BaseModel):
+    """One day, week (starting Monday) or month ("2026-10")."""
+
+    start: str
+    load_wh: int  # what the Jackery powered
+    grid_wh: int  # what the plug drew from the wall
+    solar_wh: int
+    load_lb: float  # CO2 had the load run straight from the wall
+    grid_lb: float  # CO2 from what the plug actually drew
+    avoided_lb: float  # load_lb - grid_lb
+
+
+class Co2(BaseModel):
+    by: Literal["day", "week", "month"]
+    periods: list[Co2Period]

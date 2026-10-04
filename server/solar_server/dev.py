@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 
 from planner.plan import PACIFIC, build_plan
 
-from solar_server import tasks
+from solar_server import tasks, totals
 from solar_server.app import create_app
 from solar_server.config import Settings
 from solar_server.store import FORECASTS, MIX, PLANS, MemoryStore
@@ -71,13 +71,15 @@ def sample_store(now: int) -> MemoryStore:
         solar = max(0.0, 230 * math.sin(math.pi * (h - 7) / 12)) if 7 <= h < 19 else 0.0
         on = 10.5 <= h < 14
         grid = 300.0 if on and battery < 80 else 0.0
-        battery = min(100.0, max(5.0, battery + (solar + grid - 60) * 5 / 60 / 30.72))
+        load = 60.0 + 40 * rng.random() + (90.0 if 18 <= h < 23 else 0.0)
+        battery = min(100.0, max(5.0, battery + (solar + grid - load) * 5 / 60 / 30.72))
         tasks.record_sample(
             store,
             {
                 "t": t,
                 "battery_pct": round(battery),
                 "solar_w": round(solar),
+                "output_w": round(load),
                 "moer": round(_moer(t), 1),
                 "moer_t": t,
                 "index": 5 if on else 70,
@@ -99,6 +101,8 @@ def sample_store(now: int) -> MemoryStore:
         on = 10.5 <= h < 14
         reason = "peak" if 16 <= h < 21 else "plan"
         tasks.record_plug(store, {"t": t, "on": on, "reason": reason, "w": 280.0 if on else 0.0})
+
+    totals.update(store, now)
 
     last = now - now % 1800
     forecast = next(f for f in reversed(store.day(FORECASTS, _day(last))) if f["t"] == last)

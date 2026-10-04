@@ -10,6 +10,8 @@ export type Now = Schemas["Now"];
 export type Timeline = Schemas["Timeline"];
 export type Accuracy = Schemas["Accuracy"];
 export type Daily = Schemas["Daily"];
+export type Co2 = Schemas["Co2"];
+export type Period = Co2["by"];
 
 type Path = keyof paths;
 type Query<P extends Path> = paths[P]["get"]["parameters"]["query"];
@@ -27,4 +29,5 @@ export const api = {
   timeline: (pastHours = 24) => get("/api/timeline", { past_hours: pastHours }),
   daily: (days = 14) => get("/api/daily", { days }),
   accuracy: (leadHours: number) => get("/api/accuracy", { lead_hours: leadHours }),
+  co2: (by: Period, count: number) => get("/api/co2", { by, count }),
 };

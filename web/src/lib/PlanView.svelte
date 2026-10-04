@@ -89,17 +89,6 @@
   <p class="muted">No grid charging planned.</p>
 {/if}
 
-<div class="rules">
-  <h3>Rules, in priority order</h3>
-  <ol>
-    <li>4–9 PM: off</li>
-    <li>Off for 30 hours: on for 2 hours</li>
-    <li>Plan under 3 hours old: on during its windows</li>
-    <li>No current plan: on when cleaner than 75% of the past month</li>
-    <li>No internet: on 10 AM–3 PM</li>
-  </ol>
-</div>
-
 <style>
   svg {
     display: block;
@@ -147,21 +136,5 @@
   .muted {
     color: var(--ink-3);
     font-weight: 400;
-  }
-  .rules {
-    margin-top: 14px;
-    font-size: 13px;
-    color: var(--ink-2);
-  }
-  h3 {
-    font: 600 13px var(--f-body);
-    margin: 0 0 4px;
-    color: var(--ink);
-  }
-  ol {
-    margin: 0;
-    padding-left: 18px;
-    columns: 2 260px;
-    column-gap: 24px;
   }
 </style>

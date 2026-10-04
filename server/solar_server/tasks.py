@@ -7,10 +7,11 @@ from datetime import datetime
 
 from planner.plan import PACIFIC, build_plan
 
+from solar_server import totals
 from solar_server.config import Settings
 from solar_server.sources import Sources
 from solar_server.store import FORECASTS, MIX, PLANS, PLUG, SAMPLES, Store, day_key
-from solar_server.views import integrate_wh
+from solar_server.totals import integrate_wh
 
 log = logging.getLogger(__name__)
 
@@ -22,7 +23,7 @@ def _num(v: float | None) -> float | None:
 def collect(store: Store, sources: Sources, now: datetime) -> dict:
     """One sample: WattTime's latest marginal rate and percentile, plus the Jackery.
 
-    Also stores CAISO's grid mix for the last hour.
+    Also stores CAISO's grid mix for the last hour and updates today's totals.
 
     Each source is optional; a sample is stored with whatever arrived.
     """
@@ -53,6 +54,10 @@ def collect(store: Store, sources: Sources, now: datetime) -> dict:
     if len(sample) > 1:
         record_sample(store, sample)
     store_mix(store, sources, now, since=t - 3600)
+    try:
+        totals.update(store, t)
+    except Exception as e:
+        log.warning("daily totals failed: %s", e)
     return sample
 
 

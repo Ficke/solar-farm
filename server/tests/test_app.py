@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 import pytest
 from fastapi.testclient import TestClient
 from planner.jackery import Reading
-from solar_server import tasks
+from solar_server import tasks, totals
 from solar_server.app import create_app
 from solar_server.config import Settings
 from solar_server.store import FORECASTS, MIX, PLANS, PLUG, SAMPLES, MemoryStore
@@ -220,6 +220,7 @@ def test_dashboard_api_summarizes_the_day():
             "forecast": [[NOW, 200.0], [NOW + 300, 210.0]],
         },
     )
+    totals.update(store, NOW)
     web, _ = make("web", store=store)
 
     now = web.get("/api/now").json()
@@ -235,7 +236,13 @@ def test_dashboard_api_summarizes_the_day():
 
     daily = web.get("/api/daily", params={"days": 3}).json()
     assert daily["days"] == [
-        {"day": "2026-10-04", "solar_wh": 500, "grid_wh": 400, "battery_peak_pct": 82.0}
+        {
+            "day": "2026-10-04",
+            "solar_wh": 500,
+            "grid_wh": 400,
+            "load_wh": 0,
+            "battery_peak_pct": 82.0,
+        }
     ]
     assert daily["reserve"]["reserve_pct"] is None  # today isn't a full day yet
 
@@ -303,3 +310,47 @@ def test_live_view_hides_old_readings_and_yesterdays_totals():
     tasks.record_plug(tomorrow, {"t": NOW, "on": True, "reason": "plan", "w": 100.0})
     late = create_app(Settings(role="web"), tomorrow, FakeSources(), clock=lambda: NOW + 8 * 3600)
     assert TestClient(late).get("/api/now").json()["today"]["grid_wh"] == 0
+
+
+def test_co2_avoided_compares_the_load_with_what_the_plug_drew():
+    store = MemoryStore()
+    # Noon to 17:00: 100 W of load all along. The rate is 1000 lb/MWh, except
+    # 12:00-13:00 when it's 0 and the plug charges at 400 W.
+    for i in range(61):
+        t = NOW - 5 * 3600 + i * 300
+        moer = 0.0 if t < NOW - 4 * 3600 else 1000.0
+        tasks.record_sample(store, {"t": t, "output_w": 100.0, "moer": moer, "moer_t": t})
+    for i in range(61):
+        t = NOW - 5 * 3600 + i * 60
+        tasks.record_plug(store, {"t": t, "on": True, "reason": "plan", "w": 400.0})
+    assert totals.update(store, NOW) == [f"2026-10-0{d}" for d in range(1, 5)]
+    day = store.days["2026-10-04"]
+    assert (day["load_wh"], day["grid_wh"]) == (500.0, 400.0)
+    # 400 Wh of the 500 Wh load ran at 1000 lb/MWh; the grid ran at 0.
+    assert day["load_lb"] == pytest.approx(0.4, abs=0.002)
+    assert day["grid_lb"] == pytest.approx(0.0, abs=0.002)
+
+    web, _ = make("web", store=store)
+    rows = web.get("/api/co2", params={"by": "day", "count": 2}).json()["periods"]
+    assert [r["start"] for r in rows] == ["2026-10-04"]
+    assert rows[0]["avoided_lb"] == pytest.approx(0.4, abs=0.002)
+    week = web.get("/api/co2", params={"by": "week"}).json()["periods"]
+    assert [r["start"] for r in week] == ["2026-09-28"]
+    month = web.get("/api/co2", params={"by": "month", "count": 3}).json()["periods"]
+    assert [(r["start"], r["load_wh"]) for r in month] == [("2026-10", 500)]
+
+
+def test_totals_pick_up_from_the_last_day_updated():
+    store = MemoryStore()
+    tasks.record_plug(store, {"t": NOW, "on": True, "reason": "plan", "w": 100.0})
+    totals.update(store, NOW)
+    assert totals.update(store, NOW) == ["2026-10-04"]
+    # Just after midnight, yesterday is finished off along with today.
+    assert totals.update(store, NOW + 7 * 3600 + 60) == ["2026-10-04", "2026-10-05"]
+
+
+def test_collect_updates_the_daily_totals():
+    c, store = make("edge")
+    assert c.post("/tasks/collect", headers=AUTH).status_code == 200
+    assert store.days["2026-10-04"]["battery_peak_pct"] == 81.0
+    assert store.state["totals"] == {"day": "2026-10-04"}

@@ -2,20 +2,13 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
-from itertools import pairwise
+from datetime import date, datetime, time, timedelta
+
+from planner.plan import PACIFIC
 
 from planner import telemetry
+from solar_server import totals
 from solar_server.store import FORECASTS, MIX, PLUG, SAMPLES, Store, day_key, window
-
-MAX_GAP = 3600  # don't integrate across outages longer than an hour
-
-
-def integrate_wh(points: list[tuple[int, float]]) -> float:
-    wh = 0.0
-    for (t0, w0), (t1, w1) in pairwise(points):
-        wh += (w0 + w1) / 2 * min(t1 - t0, MAX_GAP) / 3600
-    return wh
 
 
 def now_view(store: Store, now: int) -> dict:
@@ -63,33 +56,63 @@ def timeline_view(store: Store, now: int, past_hours: int = 24) -> dict:
 
 
 def daily_view(store: Store, now: int, days: int = 14) -> dict:
-    since = now - days * 86400
-    by_day_solar: dict[str, list] = defaultdict(list)
-    by_day_grid: dict[str, list] = defaultdict(list)
-    peak: dict[str, float] = {}
-    for s in window(store, SAMPLES, since, now):
-        d = day_key(s["t"])
-        if s.get("solar_w") is not None:
-            by_day_solar[d].append((s["t"], float(s["solar_w"])))
-        if s.get("battery_pct") is not None:
-            peak[d] = max(peak.get(d, 0.0), float(s["battery_pct"]))
-    for r in window(store, PLUG, since, now):
-        if r.get("w") is not None:
-            by_day_grid[day_key(r["t"])].append((r["t"], float(r["w"])))
-    keys = sorted(set(by_day_solar) | set(by_day_grid))
+    stored = totals.read(store, now - days * 86400, now)
     rows = [
         {
-            "day": d,
-            "solar_wh": round(integrate_wh(by_day_solar[d])),
-            "grid_wh": round(integrate_wh(by_day_grid[d])),
-            "battery_peak_pct": peak.get(d),
+            "day": d["day"],
+            "solar_wh": round(d["solar_wh"]),
+            "grid_wh": round(d["grid_wh"]),
+            "load_wh": round(d.get("load_wh", 0)),
+            "battery_peak_pct": d.get("battery_peak_pct"),
         }
-        for d in keys
+        for d in stored
     ]
     # Same rule as the weekly GitHub issue; only full days count.
-    full = {d: integrate_wh(by_day_solar[d]) for d in keys if len(by_day_solar[d]) >= 36}
-    full.pop(day_key(now), None)
+    today = day_key(now)
+    full = {d["day"]: d["solar_wh"] for d in stored if d["solar_n"] >= 36 and d["day"] != today}
     return {"days": rows, "reserve": telemetry.recommend_reserve(full)}
+
+
+def co2_view(store: Store, now: int, by: str = "day", count: int = 14) -> dict:
+    """CO2 avoided per day, week (from Monday) or month, oldest first, the current one last."""
+    today = datetime.fromtimestamp(now, PACIFIC).date()
+    if by == "day":
+        first = today - timedelta(days=count - 1)
+    elif by == "week":
+        first = today - timedelta(days=today.weekday() + 7 * (count - 1))
+    else:
+        months = today.year * 12 + today.month - 1 - (count - 1)
+        first = date(months // 12, months % 12 + 1, 1)
+    since = int(datetime.combine(first, time(12), PACIFIC).timestamp())
+    periods: dict[str, dict] = {}
+    for d in totals.read(store, since, now):
+        day = date.fromisoformat(d["day"])
+        if by == "week":
+            key = (day - timedelta(days=day.weekday())).isoformat()
+        elif by == "month":
+            key = day.isoformat()[:7]
+        else:
+            key = d["day"]
+        p = periods.setdefault(key, {"start": key, **dict.fromkeys(CO2_SUMS, 0.0)})
+        for k in CO2_SUMS:
+            p[k] += d.get(k, 0.0)
+    return {
+        "by": by,
+        "periods": [_co2_row(p) for p in sorted(periods.values(), key=lambda p: p["start"])],
+    }
+
+
+CO2_SUMS = ("load_wh", "grid_wh", "solar_wh", "load_lb", "grid_lb")
+
+
+def _co2_row(p: dict) -> dict:
+    return {
+        "start": p["start"],
+        **{k: round(p[k]) for k in ("load_wh", "grid_wh", "solar_wh")},
+        "load_lb": round(p["load_lb"], 3),
+        "grid_lb": round(p["grid_lb"], 3),
+        "avoided_lb": round(p["load_lb"] - p["grid_lb"], 3),
+    }
 
 
 def accuracy_view(store: Store, now: int, lead_hours: int = 6, past_hours: int = 24) -> dict:
