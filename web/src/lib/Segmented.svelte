@@ -25,25 +25,30 @@
 <style>
   .seg {
     display: inline-flex;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    overflow: hidden;
+    padding: 2px;
+    gap: 2px;
+    border-radius: 7px;
+    background: var(--panel-2);
   }
   button {
     font: inherit;
-    font-size: 12px;
-    padding: 4px 10px;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 3px 10px;
     border: 0;
+    border-radius: 5px;
     background: transparent;
     color: var(--ink-2);
     cursor: pointer;
   }
-  button + button {
-    border-left: 1px solid var(--line);
+  button:hover {
+    color: var(--ink);
   }
   button[aria-pressed="true"] {
-    background: var(--panel-2);
+    background: var(--panel);
     color: var(--ink);
-    font-weight: 600;
+    box-shadow:
+      0 0 0 1px var(--line),
+      0 1px 2px rgb(0 0 0 / 0.06);
   }
 </style>

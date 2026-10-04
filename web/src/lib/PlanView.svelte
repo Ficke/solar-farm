@@ -155,7 +155,7 @@
   }
   .tick,
   .lab {
-    font: 11px var(--f-body);
+    font: 11px var(--f-sans);
     fill: var(--ink-3);
   }
   table {
@@ -167,7 +167,7 @@
   }
   td {
     padding: 7px 8px 7px 0;
-    border-top: 1px solid var(--line);
+    border-top: 1px solid var(--rule);
   }
   td:nth-child(2),
   td:nth-child(3) {
@@ -180,16 +180,12 @@
     text-align: right;
   }
   .st span {
-    font-size: 12px;
-    padding: 2px 8px;
-    border-radius: 999px;
-    background: var(--panel-2);
+    font-size: 13px;
     color: var(--ink-3);
   }
   .st .now,
   .st .next {
-    background: var(--grid-fill);
-    color: var(--ink);
+    color: var(--grid);
     font-weight: 600;
   }
   .muted {

@@ -55,9 +55,9 @@
     pointer-events: none;
     background: var(--panel);
     border: 1px solid var(--line);
-    border-radius: 8px;
-    box-shadow: 0 4px 16px rgb(0 0 0 / 0.15);
-    padding: 8px 10px;
+    border-radius: 6px;
+    box-shadow: 0 2px 8px rgb(0 0 0 / 0.08);
+    padding: 6px 10px;
     font-size: 12px;
     white-space: nowrap;
   }
