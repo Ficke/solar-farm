@@ -38,6 +38,11 @@ Both tools are [uv scripts](https://docs.astral.sh/uv/guides/scripts/): uv insta
 
 `deploy.py` sets the plug's timezone, writes settings into the plug's key-value store (secrets never go in the repo), uploads the script in 1 KB chunks, enables it on boot and starts it. It reads the plug key and WattTime credentials from Google Secret Manager, where the Infra workflow copied the repository secrets. A local `.env` is only needed to override those values during development.
 
+It also protects the plug:
+
+- **Local password.** On the first run it turns on the plug's password (user `admin`) and saves it as `password` in `config/device.toml`, which is git-ignored. Without one, anyone on the Wi-Fi could read the plug key and WattTime login from the plug. The Shelly app asks for it when you open the plug on your home network; cloud control is unaffected. If you lose it, turn off authentication in the Shelly app and deploy again.
+- **Firmware backstops** that work even if the script stops: a schedule switches the relay off every minute from 4:01pm to 8:59pm (the script itself switches off at 4:00pm), and another restarts the script every 10 minutes. Both follow `peakStart`/`peakEnd` in `[tuning]`. To pause the script on purpose, disable that schedule in the Shelly app first. Deploy replaces only the schedules it made.
+
 ## Dashboard
 
 The private dashboard is at https://solar-web-v5whpbqqpq-uw.a.run.app (Google sign-in; only the accounts in the `DASHBOARD_USERS` variable get in). It leads with whether the grid is on, why, and when it next changes, then the plan in one place (a 24-hour strip and a list of windows), WattTime's actual and forecast emissions, CAISO's generation by source, a check of how far off the forecast was 1 to 12 hours ahead, the battery and power history, the last week's energy, and the suggested reserve. Hover a chart for exact times and values. It refreshes itself every 30 seconds.

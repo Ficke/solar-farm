@@ -11,6 +11,10 @@ report_url = "https://solar-edge-v5whpbqqpq-uw.a.run.app/plug/report"
 
 timezone = "America/Los_Angeles"
 
+# The plug's local password (user "admin"). Leave it out: the first deploy
+# turns authentication on and writes a generated one here.
+# password = ""
+
 # Optional overrides for the script's defaults (minutes after local midnight,
 # seconds for ages). Leave out anything you don't want to change.
 [tuning]
