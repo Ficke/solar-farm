@@ -23,6 +23,7 @@ PLANS = "plans"  # a plan every 5 min, plus any that changed the windows
 FORECASTS = "forecasts"  # every 30 min: the 24-hour forecast (plans fetch one every minute)
 MIX = "mix"  # every 5 min: CAISO's generation by fuel, MW: {t, solar, wind, gas, ...}
 TOTALS = "totals"  # one document per day: energy and CO2 totals (see totals.py)
+LOCKS = "locks"  # leases, so only one collect runs at a time
 
 
 def _state_document(data: dict[str, Any]) -> dict[str, str]:
@@ -60,6 +61,8 @@ class Store(Protocol):
     def get_state(self, name: str) -> dict[str, Any] | None: ...
     def put_total(self, day: str, data: dict[str, Any]) -> None: ...
     def totals(self, days: list[str]) -> list[dict[str, Any]]: ...
+    def claim(self, name: str, now: int, ttl: int) -> bool: ...
+    def release(self, name: str) -> None: ...
 
 
 def window(store: Store, series: str, since: int, until: int) -> list[dict[str, Any]]:
@@ -74,6 +77,7 @@ class MemoryStore:
         self.series: dict[tuple[str, str], list[dict]] = defaultdict(list)
         self.state: dict[str, dict] = {}
         self.days: dict[str, dict] = {}
+        self.locks: dict[str, int] = {}
 
     def append(self, series: str, item: dict[str, Any]) -> None:
         self.series[(series, day_key(item["t"]))].append(dict(item))
@@ -99,6 +103,15 @@ class MemoryStore:
 
     def totals(self, days: list[str]) -> list[dict[str, Any]]:
         return [dict(self.days[d]) for d in days if d in self.days]
+
+    def claim(self, name: str, now: int, ttl: int) -> bool:
+        if self.locks.get(name, 0) > now:
+            return False
+        self.locks[name] = now + ttl
+        return True
+
+    def release(self, name: str) -> None:
+        self.locks.pop(name, None)
 
 
 class FirestoreStore:
@@ -140,3 +153,20 @@ class FirestoreStore:
         refs = [self.db.collection(TOTALS).document(d) for d in days]
         snaps = {s.id: s for s in self.db.get_all(refs) if s.exists}
         return [snaps[d].to_dict() or {} for d in days if d in snaps]
+
+    def claim(self, name: str, now: int, ttl: int) -> bool:
+        """Take the lease ``name`` for ``ttl`` seconds unless someone holds it."""
+        ref = self.db.collection(LOCKS).document(name)
+
+        @self._fs.transactional
+        def take(transaction) -> bool:
+            snap = ref.get(transaction=transaction)
+            if snap.exists and (snap.to_dict() or {}).get("until", 0) > now:
+                return False
+            transaction.set(ref, {"until": now + ttl})
+            return True
+
+        return take(self.db.transaction())
+
+    def release(self, name: str) -> None:
+        self.db.collection(LOCKS).document(name).set({"until": 0})

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request, Response
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from solar_server import health, tasks, views
@@ -53,6 +54,10 @@ def create_app(
     return app
 
 
+# Cloud Scheduler gives a collect up to 120 s (infra/scheduler.tf).
+COLLECT_LEASE = 120
+
+
 def _edge_routes(app, settings, store, sources, verify, clock) -> None:
     def now() -> datetime:
         return datetime.fromtimestamp(clock(), UTC)
@@ -65,31 +70,44 @@ def _edge_routes(app, settings, store, sources, verify, clock) -> None:
             raise HTTPException(status_code=503, detail="no plan yet")
         return p
 
-    @app.post("/plug/report", status_code=204)
+    @app.post("/plug/report", status_code=204, response_model=None)
     def plug_report(
-        report: PlugReport, x_plug_key: Annotated[str | None, Header()] = None
-    ) -> Response:
+        report: PlugReport,
+        x_plug_key: Annotated[str | None, Header()] = None,
+        plan: bool = False,
+    ) -> Response | dict:
+        """Store the plug's minute report. With ``?plan=1`` the reply carries
+        the current plan, so the plug follows each replan within a minute."""
         check_plug_key(x_plug_key, settings.plug_key)
         item: dict[str, Any] = report.model_dump(exclude_none=True)
         item["received"] = int(clock())
         tasks.record_plug(store, item)
-        return Response(status_code=204)
+        p = tasks.plug_plan(store) if plan else None
+        return Response(status_code=204) if p is None else JSONResponse(p)
 
     @app.post("/tasks/collect")
     def collect(request: Request) -> dict:
         check_scheduler(request, settings.scheduler_sa, verify)
         t = now()
-        sample = tasks.collect(store, sources, t)
         log = logging.getLogger(__name__)
+        # A slow run can still be going when the next minute's starts. Only
+        # one may run, so an older reading or plan never overwrites a newer one.
+        if not store.claim("collect", int(t.timestamp()), COLLECT_LEASE):
+            log.warning("previous collect still running; skipped")
+            return {"t": int(t.timestamp()), "skipped": True}
         try:
-            tasks.plan(store, sources, settings, t, archive=tasks.archive_due(t))
-        except Exception:
-            log.exception("forecast refresh failed; replanning with the cached one")
+            sample = tasks.collect(store, sources, t)
             try:
-                tasks.refresh_charging_plan(store, settings, t)
+                tasks.plan(store, sources, settings, t, archive=tasks.archive_due(t))
             except Exception:
-                log.exception("charging replan failed after telemetry collection")
-        health.check(store, int(clock()))
+                log.exception("forecast refresh failed; replanning with the cached one")
+                try:
+                    tasks.refresh_charging_plan(store, settings, t)
+                except Exception:
+                    log.exception("charging replan failed after telemetry collection")
+            health.check(store, int(clock()))
+        finally:
+            store.release("collect")
         return sample
 
     @app.post("/tasks/plan")

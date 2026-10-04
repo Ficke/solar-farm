@@ -258,6 +258,34 @@ def test_plug_report_is_stored():
     ]
 
 
+def test_overlapping_collects_skip_instead_of_racing():
+    c, store = make("edge")
+    assert store.claim("collect", NOW, 120)  # a slow collect is still running
+    r = c.post("/tasks/collect", headers=AUTH)
+    assert r.json() == {"t": NOW, "skipped": True}
+    assert store.day(SAMPLES, "2026-10-04") == []
+    store.release("collect")
+    assert "skipped" not in c.post("/tasks/collect", headers=AUTH).json()
+    assert store.day(SAMPLES, "2026-10-04")
+    # The lease is released, and a stuck one expires.
+    assert store.claim("collect", NOW, 120)
+    assert store.claim("collect", NOW + 121, 120)
+
+
+def test_plug_report_can_return_the_plan():
+    c, store = make("edge")
+    report = {"t": NOW, "on": False, "reason": "plan"}
+    key = {"X-Plug-Key": "k3y"}
+    # No plan yet: still just stored.
+    assert c.post("/plug/report?plan=1", json=report, headers=key).status_code == 204
+    store.put_state("plan", {"generated_at": NOW, "windows": [[NOW, NOW + 600]], "forecast": []})
+    r = c.post("/plug/report?plan=1", json=report, headers=key)
+    assert r.status_code == 200
+    assert r.json() == {"generated_at": NOW, "windows": [[NOW, NOW + 600]]}
+    # Plugs running the older script don't ask and get the old reply.
+    assert c.post("/plug/report", json=report, headers=key).status_code == 204
+
+
 def test_roles_only_expose_their_own_routes():
     web, _ = make("web")
     edge, _ = make("edge")

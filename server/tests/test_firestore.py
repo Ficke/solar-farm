@@ -86,3 +86,11 @@ def test_running_totals_carry_across_requests(store):
 def test_day_totals_round_trip(store):
     store.put_total("2026-10-04", {"day": "2026-10-04", "load_lb": 0.4})
     assert store.totals(["2026-10-03", "2026-10-04"]) == [{"day": "2026-10-04", "load_lb": 0.4}]
+
+
+def test_collect_lease_is_exclusive_and_expires(store):
+    assert store.claim("collect", NOW, 120)
+    assert not store.claim("collect", NOW + 60, 120)
+    assert store.claim("collect", NOW + 121, 120)
+    store.release("collect")
+    assert store.claim("collect", NOW + 122, 120)

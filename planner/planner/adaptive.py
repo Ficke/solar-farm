@@ -19,6 +19,7 @@ TIE_MOER = 50  # lb/MWh; forecasts this close count as equally clean
 MIN_SOLAR_WH = 150  # later solar below this is not worth keeping room for
 MIN_CHARGE_W = 200  # less than this into the battery is passthrough, not charging
 MIN_CHARGE_READINGS = 3
+RECENT_CHARGE_READINGS = 30  # about the last half hour of charging
 TOLERANCE_WH = 30  # about 1%; smaller floor and full shortfalls are ignored
 
 
@@ -31,8 +32,9 @@ def estimates(
     minutes are excluded. Until then, use configured daily Wh
     distributed from 9am to 5pm. Load needs six hours of recent coverage.
     The charge rate is the median grid power going into the battery (AC in
-    less load) over readings of at least MIN_CHARGE_W, once there are
-    MIN_CHARGE_READINGS of them; until then, the configured rate.
+    less load) over the last RECENT_CHARGE_READINGS readings of at least
+    MIN_CHARGE_W in the past week, so a charge running slow today counts
+    within minutes. Below MIN_CHARGE_READINGS, the configured rate.
     """
     samples = sorted({s["t"]: s for s in samples if s["t"] <= now}.values(), key=lambda s: s["t"])
     today = datetime.fromtimestamp(now, PACIFIC).date()
@@ -79,14 +81,14 @@ def estimates(
             load_energy += (max(0, a["output_w"]) + max(0, b["output_w"])) / 2 * seconds
             load_seconds += seconds
     charging = [
-        s["ac_input_w"] - max(0.0, s.get("output_w") or 0.0)
+        w
         for s in samples
         if now - 7 * 86400 <= s["t"]
         and s.get("ac_input_w") is not None
         and math.isfinite(s["ac_input_w"])
         and math.isfinite(s.get("output_w") or 0.0)
-    ]
-    charging = [w for w in charging if w >= MIN_CHARGE_W]
+        and (w := s["ac_input_w"] - max(0.0, s.get("output_w") or 0.0)) >= MIN_CHARGE_W
+    ][-RECENT_CHARGE_READINGS:]
     if daily:
         good_day = mean(daily)
         shape = {q: mean(ws) for q, ws in profile.items()}
@@ -129,7 +131,8 @@ def build_adaptive_plan(
     signals: dict[int, list[float]] = defaultdict(list)
     for t, value in points:
         ts = int(t.timestamp())
-        if tnow <= ts < deadline and math.isfinite(value):
+        # Points from the start of the current block keep it plannable until it ends.
+        if tnow // 900 * 900 <= ts < deadline and math.isfinite(value):
             signals[ts // 900 * 900].append(value)
     end = min(deadline, max(signals, default=tnow - 900) + 900)
     # State documents use JSON, which turns integer dictionary keys into strings.

@@ -43,6 +43,11 @@ locals {
       filter = "${local.edge_log}jsonPayload.alert=\"plan_stale\""
       doc    = "The grid plan is more than 2 hours old, so the plug is using its own fallback. Usually WattTime's forecast is failing; see the solar-edge logs."
     }
+    grid_not_charging = {
+      name   = "Grid on but the battery isn't charging"
+      filter = "${local.edge_log}jsonPayload.alert=\"grid_not_charging\""
+      doc    = "The plug has let grid power through for 10 minutes but drew under 100 W while the battery was below 95%. Usually the Jackery's Self-powered reserve or a charge limit is capping AC charging; check the working mode in the Jackery app."
+    }
     task_failed = {
       name   = "Scheduled task failed"
       filter = <<-EOT

@@ -6,7 +6,7 @@ import logging
 import math
 from datetime import datetime, timedelta
 
-from planner.adaptive import build_adaptive_plan, estimates
+from planner.adaptive import MIN_CHARGE_W, build_adaptive_plan, estimates
 from planner.plan import PACIFIC, build_plan
 
 from solar_server import totals
@@ -218,11 +218,20 @@ def charging_plan(
     )
 
 
+ESTIMATES_MAX_AGE = 1800
+ESTIMATES_MAX_AGE_CHARGING = 300  # so a slower charge than planned gets more time today
+
+
 def charging_estimates(store: Store, settings: Settings, now: int) -> dict:
-    """Read history at most twice an hour; replans normally use one state read."""
+    """Read history at most twice an hour, or every 5 minutes while the grid
+    is charging the battery; replans normally use one state read."""
     inputs = [settings.solar_day_wh, settings.load_w, settings.charge_w]
     cached = store.get_state("charging_estimates") or {}
-    if cached.get("inputs") == inputs and 0 <= now - cached.get("t", 0) < 1800:
+    latest = (store.get_state("sample") or {}).get("sample") or {}
+    into_battery = (latest.get("ac_input_w") or 0) - max(0.0, latest.get("output_w") or 0)
+    charging = into_battery >= MIN_CHARGE_W
+    max_age = ESTIMATES_MAX_AGE_CHARGING if charging else ESTIMATES_MAX_AGE
+    if cached.get("inputs") == inputs and 0 <= now - cached.get("t", 0) < max_age:
         return cached["estimate"]
     samples = window(store, SAMPLES, now - 8 * 86400, now)
     estimate = estimates(samples, now, *inputs)

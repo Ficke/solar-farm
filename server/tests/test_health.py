@@ -42,3 +42,17 @@ def test_no_plan_at_all_is_stale():
     store = healthy()
     store.state.clear()
     assert "plan_stale" in health.problems(store, NOW)
+
+
+def test_grid_on_but_battery_not_charging():
+    store = MemoryStore()
+    store.put_state("sample", {"sample": {"t": NOW, "battery_pct": 80.0}})
+    for i in range(10):
+        t = NOW - 540 + i * 60
+        store.append(PLUG, {"t": t, "on": True, "reason": "plan", "w": 3.0, "received": t})
+    assert "grid_not_charging" in health.problems(store, NOW)
+    # Charging normally, or nearly full and tapering, is fine.
+    store.append(PLUG, {"t": NOW, "on": True, "reason": "plan", "w": 900.0, "received": NOW})
+    assert "grid_not_charging" not in health.problems(store, NOW)
+    store.put_state("sample", {"sample": {"t": NOW, "battery_pct": 97.0}})
+    assert "grid_not_charging" not in health.problems(store, NOW + 600)

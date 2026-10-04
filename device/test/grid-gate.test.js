@@ -148,7 +148,7 @@ test("with a plug key, the plan request carries it and every tick posts a report
   assert.ok(!calls.some((c) => c.method === "HTTP.GET"));
 
   const post = reqs.find((c) => c.params.method === "POST");
-  assert.equal(post.params.url, "https://solar-edge.example.run.app/plug/report");
+  assert.equal(post.params.url, "https://solar-edge.example.run.app/plug/report?plan=1");
   assert.equal(post.params.headers["X-Plug-Key"], "k3y");
   const body = JSON.parse(post.params.body);
   assert.equal(body.t, NOW);
@@ -180,7 +180,7 @@ test("plan and index fetches never share a tick", () => {
     .map((c) => c.params.url);
   assert.deepEqual(startupUrls, [
     "https://solar-edge.example.run.app/plug/plan",
-    "https://solar-edge.example.run.app/plug/report"
+    "https://solar-edge.example.run.app/plug/report?plan=1"
   ]);
 
   for (let i = 0; i < 5; i++) h.timers[0].fn();
@@ -190,8 +190,70 @@ test("plan and index fetches never share a tick", () => {
     .map((c) => c.params.url);
   assert.deepEqual(latestUrls, [
     "https://api.watttime.org/login",
-    "https://solar-edge.example.run.app/plug/report"
+    "https://solar-edge.example.run.app/plug/report?plan=1"
   ]);
+});
+
+test("the plan comes back with each report and is followed on the next tick", () => {
+  let plan = { generated_at: NOW - 60, windows: [] };
+  const h = load({
+    time: "08:00",
+    kvs: {
+      "gg.plan_url": "https://solar-edge.example.run.app/plug/plan",
+      "gg.report_url": "https://solar-edge.example.run.app/plug/report",
+      "gg.plug_key": "k3y"
+    },
+    responses: {
+      "HTTP.Request": (p) =>
+        p.method === "POST" ? { code: 200, body: JSON.stringify(plan) } : { code: 503, body: "" }
+    }
+  });
+  assert.equal(h.device.sw.output, false);
+  // The server replans: a window from now. The next report brings it back.
+  plan = { generated_at: NOW, windows: [[NOW, NOW + 600]] };
+  h.timers[0].fn(); // decides with the old plan, then reports and gets the new one
+  h.timers[0].fn();
+  assert.equal(h.device.sw.output, true);
+  // While reports bring plans, the plug never fetches /plug/plan on its own.
+  const gets = h.calls.filter((c) => c.method === "HTTP.Request" && c.params.method === "GET");
+  assert.equal(gets.length, 1); // the one at startup
+  for (let i = 0; i < 20; i++) h.timers[0].fn();
+  assert.equal(
+    h.calls.filter((c) => c.method === "HTTP.Request" && c.params.method === "GET").length,
+    1
+  );
+});
+
+test("an older server's 204 reply is not a failure, and the plan fetch still runs", () => {
+  const plan = { generated_at: NOW - 60, windows: [[NOW - 60, NOW + 60]] };
+  const h = load({
+    time: "11:00",
+    kvs: {
+      "gg.plan_url": "https://solar-edge.example.run.app/plug/plan",
+      "gg.report_url": "https://solar-edge.example.run.app/plug/report",
+      "gg.plug_key": "k3y"
+    },
+    responses: {
+      "HTTP.Request": (p) => (p.method === "GET" ? { code: 200, body: JSON.stringify(plan) } : { code: 204 })
+    }
+  });
+  h.device.sys.unixtime = NOW + 600;
+  for (let i = 0; i < 10; i++) h.timers[0].fn();
+  const gets = h.calls.filter((c) => c.method === "HTTP.Request" && c.params.method === "GET");
+  assert.equal(gets.length, 2);
+});
+
+test("once on, a gap of a few minutes before the next window keeps the grid on", () => {
+  const { context } = load();
+  const plan = { generated_at: NOW - 60, windows: [[NOW - 600, NOW], [NOW + 120, NOW + 900]] };
+  const on = freshState(context, { plan, on: true });
+  assert.deepEqual({ ...context.decide(on, NOW, 720, context.CFG) }, { on: true, reason: "plan" });
+  // Off already: it waits for the window rather than starting early.
+  const off = freshState(context, { plan, on: false });
+  assert.equal(context.decide(off, NOW, 720, context.CFG).on, false);
+  // A longer gap is a planned stop.
+  const later = { generated_at: NOW - 60, windows: [[NOW - 600, NOW], [NOW + 600, NOW + 900]] };
+  assert.equal(context.decide(freshState(context, { plan: later, on: true }), NOW, 720, context.CFG).on, false);
 });
 
 test("a failed relay change is retried on the next tick", () => {
