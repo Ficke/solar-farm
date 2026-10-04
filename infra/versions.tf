@@ -20,16 +20,9 @@ terraform {
     method "aes_gcm" "main" {
       keys = key_provider.pbkdf2.passphrase
     }
-    # Lets the first apply read the old unencrypted state; it saves it back
-    # encrypted. After that, drop this method and the fallback below, and
-    # set enforced = true on state (OpenTofu refuses enforced with it).
-    method "unencrypted" "migrate" {}
-
     state {
-      method = method.aes_gcm.main
-      fallback {
-        method = method.unencrypted.migrate
-      }
+      method   = method.aes_gcm.main
+      enforced = true
     }
     plan {
       method   = method.aes_gcm.main
