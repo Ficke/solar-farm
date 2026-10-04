@@ -11,7 +11,7 @@ Grid-aware charging for a Jackery Explorer 3000 v2 with a 250 W panel in a San F
   3. A plan less than 3 hours old: on inside its windows.
   4. Otherwise WattTime's live index for `CAISO_NORTH`: on at or below the 25th percentile.
   5. No internet: on from 10am to 3pm.
-- **Server** (`server/` and `planner/`, on Google Cloud Run): every 30 minutes it reads WattTime's 24-hour marginal-emissions forecast and picks the cleanest 4 hours outside the peak, which the plug reads from `/plug/plan`. Every 5 minutes it records the battery %, solar watts (from Jackery's cloud) and grid emissions, and the plug reports its state every minute.
+- **Server** (`server/` and `planner/`, on Google Cloud Run): every 30 minutes it reads WattTime's 24-hour marginal-emissions forecast and picks the cleanest 4 hours outside the peak, which the plug reads from `/plug/plan`. Every 5 minutes it records the battery %, solar watts (from Jackery's cloud), grid emissions and CAISO's generation by source, and the plug reports its state every minute.
 - **Dashboard** (`web/`): the private page described below. It also suggests a reserve from two weeks of solar readings; the reserve itself is set by hand in the Jackery app.
 
 ## One-time setup
@@ -40,9 +40,9 @@ Both tools are [uv scripts](https://docs.astral.sh/uv/guides/scripts/): uv insta
 
 ## Dashboard
 
-The private dashboard is at https://solar-web-v5whpbqqpq-uw.a.run.app (Google sign-in; only the accounts in the `DASHBOARD_USERS` variable get in). It leads with whether the grid is on, why, and when it next changes, then the plan in one place (a 24-hour strip and a list of windows), WattTime's actual and forecast emissions, a check of how far off the forecast was 1 to 12 hours ahead, the battery and power history, the last week's energy, and the suggested reserve. Hover a chart for exact times and values. It refreshes itself every 30 seconds.
+The private dashboard is at https://solar-web-v5whpbqqpq-uw.a.run.app (Google sign-in; only the accounts in the `DASHBOARD_USERS` variable get in). It leads with whether the grid is on, why, and when it next changes, then the plan in one place (a 24-hour strip and a list of windows), WattTime's actual and forecast emissions, CAISO's generation by source, a check of how far off the forecast was 1 to 12 hours ahead, the battery and power history, the last week's energy, and the suggested reserve. Hover a chart for exact times and values. It refreshes itself every 30 seconds.
 
-Every reading, plug report, plan and forecast is kept in Firestore, with a weekly backup kept for 14 weeks.
+Every reading, grid mix row, plug report, plan and forecast is kept in Firestore, with a weekly backup kept for 14 weeks.
 
 ## Dry run without the plug
 
@@ -55,7 +55,7 @@ bun device/sim.js --stale    # same, if the plan stopped updating (fallback rule
 
 The dashboard and the plug's server run on Google Cloud Run. All of it is defined in OpenTofu under [`infra/`](infra/README.md), which also has the one-time setup steps. The server in `server/` runs as two Cloud Run services from one image:
 
-- **solar-edge** (public) serves the plug, which reads `/plug/plan` and posts `/plug/report` each minute with its `X-Plug-Key`. It also serves Cloud Scheduler: `/tasks/collect` every 5 minutes records Jackery and WattTime readings in Firestore, and `/tasks/plan` every 30 minutes builds the plan.
+- **solar-edge** (public) serves the plug, which reads `/plug/plan` and posts `/plug/report` each minute with its `X-Plug-Key`. It also serves Cloud Scheduler: `/tasks/collect` every 5 minutes records Jackery, WattTime and CAISO readings in Firestore, and `/tasks/plan` every 30 minutes builds the plan.
 - **solar-web** (behind Google sign-in) serves the dashboard from `web/` and its API: `/api/now`, `/api/timeline`, `/api/accuracy` and `/api/daily`.
 
 The Deploy workflow builds the image and rolls it out on every merge to `main`.

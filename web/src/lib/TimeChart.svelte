@@ -11,6 +11,8 @@
     label: string;
     color: string;
     fill?: string;
+    /** Solid area: a square key instead of a line. */
+    area?: boolean;
     dash?: number[];
     width?: number;
     unit: string;
@@ -28,6 +30,8 @@
     yMax,
     yRule,
     label,
+    tipData,
+    shade = true,
   }: {
     data: (number | null | undefined)[][];
     series: Series[];
@@ -39,6 +43,10 @@
     yMax?: number;
     yRule?: { value: number; label: string };
     label: string;
+    /** Values for the tooltip when the drawn ones differ, e.g. a stacked chart. */
+    tipData?: (number | null | undefined)[][];
+    /** Paint the peak and plan bands behind the series. */
+    shade?: boolean;
   } = $props();
 
   let el: HTMLDivElement;
@@ -50,6 +58,7 @@
     getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
   function bands(u: uPlot) {
+    if (!shade) return;
     const { ctx } = u;
     const paint = (spans: [number, number][], color: string) => {
       ctx.fillStyle = color;
@@ -114,7 +123,7 @@
       t,
       values: series.map((_, k) => {
         // Show the nearest real value, since series are sampled at different rates.
-        const ys = u.data[k + 1];
+        const ys = (tipData ?? u.data)[k + 1];
         for (let d = 0; d < 30; d++) {
           for (const j of [i - d, i + d]) {
             const v = ys[j];
@@ -145,7 +154,12 @@
       padding: [6, PAD_R, 0, 0],
       scales: {
         x: { time: true, min: from, max: to },
-        y: { range: [0, yMax ?? null] as uPlot.Range.MinMax },
+        // A fixed floor and a fallback ceiling keep the y-axis, and with it
+        // the time axis, in place when a chart has no data yet.
+        y: {
+          range: (_u, _min, max) =>
+            yMax != null ? [0, yMax] : uPlot.rangeNum(0, max ?? 1, 0.1, true),
+        },
       },
       axes: [
         {
@@ -195,6 +209,9 @@
   <ul class="legend">
     {#each series as s (s.label)}
       <li>
+        {#if s.area}
+          <span class="swatch" style:background="var({s.color})"></span>
+        {:else}
         <svg width="18" height="8" aria-hidden="true"
           ><line
             x1="1"
@@ -205,7 +222,8 @@
             stroke-width={s.width ?? 2}
             stroke-dasharray={s.dash?.join(" ")}
           /></svg
-        >{s.label}
+        >
+        {/if}{s.label}
       </li>
     {/each}
   </ul>
@@ -221,7 +239,7 @@
         {#each series as s, k (s.label)}
           {#if tip.values[k] != null}
           <div class="row">
-            <span class="key" style:background="var({s.color})"></span>
+            <span class="key" class:area={s.area} style:background="var({s.color})"></span>
             <strong>{fmt(tip.values[k], s)}</strong>
             <span class="name">{s.label}</span>
           </div>
@@ -293,5 +311,11 @@
     width: 10px;
     height: 2px;
     border-radius: 1px;
+  }
+  .key.area,
+  .swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
   }
 </style>

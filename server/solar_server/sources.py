@@ -1,16 +1,16 @@
-"""Fetch from WattTime and Jackery. Kept thin so tests can swap in fakes."""
+"""Fetch from WattTime, CAISO and Jackery. Kept thin so tests can swap in fakes."""
 
 from __future__ import annotations
 
 import asyncio
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Protocol
 
 from planner.jackery import Reading
 
-from planner import jackery, watttime
+from planner import caiso, jackery, watttime
 from solar_server.config import Settings
 
 
@@ -18,9 +18,7 @@ class Sources(Protocol):
     def forecast(self, hours: int, signal: str = "co2_moer") -> list[tuple[datetime, float]]: ...
     def signal_index(self) -> float: ...
     def actual(self, signal: str, now: datetime) -> tuple[datetime, float] | None: ...
-    def history(
-        self, signal: str, start: datetime, end: datetime
-    ) -> list[tuple[datetime, float]]: ...
+    def mix(self, day: date, now: datetime) -> list[dict]: ...
     def jackery(self, now: datetime) -> Reading | None: ...
 
 
@@ -49,8 +47,8 @@ class LiveSources:
     def actual(self, signal: str, now: datetime) -> tuple[datetime, float] | None:
         return watttime.latest(self._auth(), now, self.settings.region, signal)
 
-    def history(self, signal: str, start: datetime, end: datetime) -> list[tuple[datetime, float]]:
-        return watttime.historical(self._auth(), start, end, self.settings.region, signal)
+    def mix(self, day: date, now: datetime) -> list[dict]:
+        return caiso.mix(day, now)
 
     def jackery(self, now: datetime) -> Reading | None:
         s = self.settings
