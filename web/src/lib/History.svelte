@@ -52,7 +52,7 @@
     solar: fmtWh(sum("solar_wh")),
     grid: fmtWh(sum("grid_wh")),
     load: fmtWh(sum("load_wh")),
-    avoided: fmtLb(sum("avoided_lb")),
+    avoided: sum("avoided_lb"),
   });
 
   const tip = $derived<Slot | null>(hovered != null ? (cols[hovered] ?? null) : null);
@@ -79,6 +79,7 @@
     const d = y1 < y0 ? r : -r;
     return `M${x},${y0}V${y1 + d}Q${x},${y1} ${x + r},${y1}H${x + bw - r}Q${x + bw},${y1} ${x + bw},${y1 + d}V${y0}Z`;
   }
+  const co2Label = (lb: number) => (lb < 0 ? "CO₂ added" : "CO₂ avoided");
   const span = (wh: [string, string]) => `${wh[0]} ${wh[1]}`;
 </script>
 
@@ -96,8 +97,10 @@
     <dd><b>{co2 ? totals.load[0] : "–"}</b><small>{totals.load[1]}</small></dd>
   </div>
   <div>
-    <dt><i class="sw" style:background="var(--good)"></i>CO₂ avoided</dt>
-    <dd><b>{co2 ? totals.avoided : "–"}</b><small>lb</small></dd>
+    <dt>
+      <i class="sw" style:background={totals.avoided < 0 ? "var(--bad)" : "var(--good)"}></i>{co2Label(totals.avoided)}
+    </dt>
+    <dd><b>{co2 ? fmtLb(Math.abs(totals.avoided)) : "–"}</b><small>lb</small></dd>
   </div>
 </dl>
 
@@ -130,7 +133,7 @@
     {/each}
   </svg>
 
-  <h3>CO₂ avoided, lb</h3>
+  <h3>Net CO₂ avoided, lb</h3>
   <svg viewBox="0 0 {width} {CH}" height={CH} role="img" aria-label="CO2 avoided per {by}">
     {#each cTicks as v (v)}
       <line x1={M.l} x2={width - M.r} y1={cy(v)} y2={cy(v)} stroke={v ? "var(--line)" : "var(--ink-3)"} />
@@ -169,7 +172,7 @@
         <div class="row"><span class="key" style:background="var(--ink-3)"></span><strong>{span(fmtWh(p.load_wh))}</strong><span class="name">Load</span></div>
         <div class="row">
           <span class="key" style:background={p.avoided_lb < 0 ? "var(--bad)" : "var(--good)"}></span>
-          <strong>{fmtLb(p.avoided_lb)} lb</strong><span class="name">CO₂ avoided</span>
+          <strong>{fmtLb(Math.abs(p.avoided_lb))} lb</strong><span class="name">{co2Label(p.avoided_lb)}</span>
         </div>
       {:else}
         <div class="name">No readings</div>
