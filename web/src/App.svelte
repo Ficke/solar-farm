@@ -20,7 +20,6 @@
   let co2 = $state<Co2>();
   let by = $state<Period>("day");
   let error = $state("");
-  let loadedAt = $state(0);
   let clock = $state(Date.now() / 1000);
 
   async function load(what: "now" | "charts" | "all") {
@@ -33,8 +32,7 @@
       }
       await Promise.all(jobs);
       error = "";
-      loadedAt = Date.now() / 1000;
-      clock = loadedAt;
+      tick();
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     }
@@ -133,13 +131,11 @@
 <main>
   <header>
     <h1>Solar Farm</h1>
-    <p class="sub">
-      {#if stale.length}
+    {#if stale.length}
+      <p class="sub">
         <span class="dot bad"></span>No data from {stale.map((h) => h.name.toLowerCase()).join(", ")}
-      {:else if loadedAt}
-        <span class="dot ok"></span>Updated {ago(clock - loadedAt)}
-      {/if}
-    </p>
+      </p>
+    {/if}
   </header>
 
   {#if error}
@@ -335,9 +331,6 @@
     width: 8px;
     height: 8px;
     border-radius: 50%;
-  }
-  .dot.ok {
-    background: var(--good);
   }
   .dot.bad {
     background: var(--bad);
