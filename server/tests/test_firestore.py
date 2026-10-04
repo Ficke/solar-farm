@@ -36,7 +36,7 @@ def test_every_series_round_trips_through_the_tasks(store):
     assert sample["solar_w"] == 120.0 and sample["moer_t"] == NOW - 300
     assert store.day(PLUG, day)[0]["w"] == 410.2
     assert store.day(PLANS, day) == [
-        {"t": NOW, "windows": [{"s": NOW + 18 * 3600, "e": NOW + 22 * 3600}]}
+        {"t": NOW, "windows": [{"s": NOW + 19 * 3600, "e": NOW + 23 * 3600}]}
     ]
     (forecast,) = store.day(FORECASTS, day)
     assert len(forecast["values"]) == 288
@@ -44,15 +44,22 @@ def test_every_series_round_trips_through_the_tasks(store):
 
     # The plan keeps its nested arrays, which Firestore can't store directly.
     plan = edge.get("/plug/plan", headers=KEY).json()
-    assert plan["windows"] == [[NOW + 18 * 3600, NOW + 22 * 3600]]
+    assert plan["windows"] == [[NOW + 19 * 3600, NOW + 23 * 3600]]
 
     web, _ = make("web", store=store)
     now = web.get("/api/now").json()
     assert now["sample"] == sample
     assert now["plug"]["w"] == 410.2
-    assert now["plan"]["windows"] == [[NOW + 18 * 3600, NOW + 22 * 3600]]
+    assert now["plan"]["windows"] == [[NOW + 19 * 3600, NOW + 23 * 3600]]
     tl = web.get("/api/timeline").json()
     assert len(tl["forecast"]) == 288 and len(tl["mix"]) == 2
+
+    # With a battery reading, the plan and its stored copy carry the estimate.
+    assert edge.post("/tasks/plan", headers=AUTH).status_code == 200
+    need = store.get_state("plan")["need"]
+    assert need["battery_pct"] == 81.0
+    assert store.day(PLANS, day)[-1]["need"] == need
+    assert web.get("/api/now").json()["plan"]["need"] == need
 
 
 def test_rows_already_stored_are_skipped(store):
