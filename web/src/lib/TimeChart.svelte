@@ -204,7 +204,9 @@
       cursor: {
         sync: { key: "timeline" },
         y: false,
-        points: { size: 8, width: 2, fill: css("--panel") },
+        // Stacked areas carry their values in the tooltip; dots on each
+        // layer edge would only clutter the stack.
+        points: { show: !series.some((s) => s.area), size: 8, width: 2, fill: css("--panel") },
       },
       legend: { show: false },
       padding: [6, PAD_R, 0, 0],
@@ -231,8 +233,8 @@
         {},
         ...series.map((s) => ({
           label: s.label,
-          // Stacked areas get a surface-colored edge so adjacent fills separate.
-          stroke: s.ramp ? rampStroke(s.ramp) : s.area ? css("--bg") : css(s.color),
+          // Stacked areas are edged in their own color, so layers meet cleanly.
+          stroke: s.ramp ? rampStroke(s.ramp) : css(s.color),
           fill: s.fill ? css(s.fill) : undefined,
           dash: s.dash,
           width: s.width ?? (s.area ? 1 : 2),
