@@ -146,6 +146,12 @@
     ]),
   );
   const mix = $derived(stackMix(tl?.mix ?? []));
+  const priceData = $derived(
+    align([
+      (tl?.prices ?? []).map((p) => [p.t, p.np15]),
+      (tl?.prices ?? []).map((p) => [p.t, p.sp15]),
+    ]),
+  );
   const batteryData = $derived(align([(tl?.samples ?? []).map((p) => [p.t, p.battery_pct])]));
   const powerData = $derived(
     align([
@@ -264,10 +270,10 @@
         },
       ]}
     />
-    <h3>Generation by source, GW</h3>
+    <h3>Generation by source, all CAISO, GW</h3>
     <TimeChart
       label="CAISO generation by source, past 24 hours"
-      title="Generation by source, GW"
+      title="Generation by source, all CAISO, GW"
       data={mix.stacked}
       tipData={mix.raw}
       shade={false}
@@ -284,6 +290,21 @@
         unit: "GW",
         digits: 1,
       }))}
+    />
+    <h3>Real-time price, $/MWh</h3>
+    <TimeChart
+      label="Real-time price, north and south, past 24 hours"
+      title="Real-time price, $/MWh"
+      data={priceData}
+      shade={false}
+      {from}
+      {to}
+      now={tnow}
+      height={120}
+      series={[
+        { label: "North", color: "--ink", unit: "$/MWh", digits: 0 },
+        { label: "South", color: "--load", width: LINE_THIN, unit: "$/MWh", digits: 0 },
+      ]}
     />
   </section>
 

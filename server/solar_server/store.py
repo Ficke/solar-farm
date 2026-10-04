@@ -22,6 +22,7 @@ PLUG = "plug"  # every minute: relay state, reason, grid watts
 PLANS = "plans"  # a plan every 5 min, plus any that changed the windows
 FORECASTS = "forecasts"  # every 30 min: the 24-hour forecast (plans fetch one every minute)
 MIX = "mix"  # every 5 min: CAISO's generation by fuel, MW: {t, solar, wind, gas, ...}
+PRICES = "prices"  # every 5 min: real-time price at the trading hubs, $/MWh: {t, np15, sp15}
 TOTALS = "totals"  # one document per day: energy and CO2 totals (see totals.py)
 LOCKS = "locks"  # leases, so only one collect runs at a time
 

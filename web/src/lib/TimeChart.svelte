@@ -267,13 +267,15 @@
         // A fixed floor and a fallback ceiling keep the y-axis, and with it
         // the time axis, in place when a chart has no data yet.
         // Zoomed in, line charts fit the visible values; areas keep their zero.
+        // Zero stays on the axis unless the values go below it.
         y: {
           range: (_u, min, max) => {
+            const floor = Math.min(0, min ?? 0);
             if (fit() && min != null && max != null) {
               const [a, b] = uPlot.rangeNum(min, max, 0.1, true);
-              return [Math.max(0, a ?? 0), yMax != null ? Math.min(yMax, b ?? yMax) : b];
+              return [Math.max(floor, a ?? 0), yMax != null ? Math.min(yMax, b ?? yMax) : b];
             }
-            return yMax != null ? [0, yMax] : uPlot.rangeNum(0, max ?? 1, 0.1, true);
+            return yMax != null ? [0, yMax] : uPlot.rangeNum(floor, max ?? 1, 0.1, true);
           },
         },
       },
@@ -295,6 +297,7 @@
           // Stacked areas are edged in their own color, so layers meet cleanly.
           stroke: s.ramp ? rampStroke(s.ramp) : css(s.color),
           fill: s.fill ? css(s.fill) : undefined,
+          fillTo: 0,
           dash: s.dash,
           width: mini ? LINE_THIN : (s.width ?? (s.area ? LINE_THIN : LINE)),
           spanGaps: false,

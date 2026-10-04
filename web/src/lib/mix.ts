@@ -24,15 +24,12 @@ const SMOOTH = 15 * 60;
  * Generation by group in GW, as raw values (for the tooltip) and stacked
  * (for drawing, each series the running total from the bottom). The drawn
  * stack is a 30-minute centered average of CAISO's 5-minute values, so it
- * reads as a trend; the tooltip keeps the reported value. Charging
- * batteries and solar's small night-time draw count as zero supply.
+ * reads as a trend; the tooltip keeps the reported value. Negative
+ * values (charging batteries, exports) stack downward from zero.
  */
 export function stackMix(rows: MixRow[]) {
   const gw = (r: MixRow, keys: (keyof MixRow)[]) =>
-    Math.max(
-      0,
-      keys.reduce((sum, k) => sum + ((r[k] as number | null) ?? 0), 0),
-    ) / 1000;
+    keys.reduce((sum, k) => sum + ((r[k] as number | null) ?? 0), 0) / 1000;
   const raw = align(
     GROUPS.map((g) => rows.map((r) => [r.t, gw(r, g.keys)] as [number, number])),
     GROUPS.map(() => 15 * 60),
@@ -63,13 +60,21 @@ export function stackMix(rows: MixRow[]) {
         }),
   );
   const stacked = smooth.map((col) => [...col]);
+  // Each series fills to zero and later ones paint over earlier ones, so a
+  // layer's drawn value is the running total on its own side of zero.
   for (let i = 0; i < raw[0].length; i++) {
-    let total = 0;
+    let up = 0;
+    let down = 0;
     for (let k = GROUPS.length; k >= 1; k--) {
       const v = smooth[k][i];
       if (v == null) continue;
-      total += v;
-      stacked[k][i] = total;
+      if (v < 0) {
+        down += v;
+        stacked[k][i] = down;
+      } else {
+        up += v;
+        stacked[k][i] = up;
+      }
     }
   }
   return { raw, stacked };
