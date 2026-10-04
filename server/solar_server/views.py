@@ -52,6 +52,7 @@ def now_view(store: Store, now: int) -> dict:
                 "forecast_at",
                 "forecast_until",
                 "missing",
+                "zeros_doubted_since",
             )
         }
         if plan

@@ -83,6 +83,7 @@ class PlanSummary(BaseModel):
     forecast_at: int | None = None
     forecast_until: int | None = None
     missing: list[Literal["battery", "forecast", "forecast_horizon"]] = []
+    zeros_doubted_since: int | None = None
 
 
 class Now(BaseModel):

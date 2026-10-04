@@ -19,7 +19,7 @@ Grid-aware charging for a Jackery Explorer 3000 v2 with a 250 W panel in a San F
 The goal each day is a **full battery by 4 pm**, when the peak starts, with the grid energy bought when the grid is cleanest and solar used where it matters.
 
 1. **Deadline and target:** the next 4 pm Pacific; full (3,072 Wh).
-2. **Cleanest first:** forecast 15-minute blocks before 4 pm, outside 4–9 pm, are ranked by marginal CO₂. Blocks within **50 lb/MWh** of each other count as equally clean and the later one wins, so solar gets in first.
+2. **Cleanest first:** forecast 15-minute blocks before 4 pm, outside 4–9 pm, are ranked by marginal CO₂. A block with no forecast is never used. The current block takes WattTime's live rate, and if the live rate is 300 lb/MWh or more while the forecast says 0 (curtailment), the rest of today's zeros take that rate until the live rate drops below 100. Blocks within **50 lb/MWh** of each other count as equally clean and the later one wins, so solar gets in first.
 3. **Fill to full:** grid tops the battery up to full in those blocks, cleanest first, stopping at the first block that reaches full. Solar before a block is already counted in the projected level.
 4. **Room for solar, only when it matters:** a block leaves room for solar still expected after it, counted at half the usual output, and only when that is at least **150 Wh** (about 5%). A little afternoon solar is not worth missing a clean window for.
 5. **Backstops:** projected charge never drops below **20%**, and if load or a short window leaves the battery more than 30 Wh short at 4 pm, the next cleanest block covers it. A shortfall is reported if that is impossible.

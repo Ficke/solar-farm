@@ -826,6 +826,17 @@
             "type": "array",
             "title": "Missing",
             "default": []
+          },
+          "zeros_doubted_since": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Zeros Doubted Since"
           }
         },
         "type": "object",
