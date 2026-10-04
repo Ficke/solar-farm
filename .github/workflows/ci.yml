@@ -1,10 +1,9 @@
 name: CI
 
-# Also called by Deploy and Infra, so nothing reaches Google Cloud until this
-# passes on the exact commit being shipped.
+# Runs on pull requests. On main, Deploy and Infra call it as their first job,
+# so nothing reaches Google Cloud until it passes on the exact commit being
+# shipped, and it doesn't run a second time on its own.
 on:
-  push:
-    branches: [main]
   pull_request:
   workflow_call:
 
@@ -47,6 +46,24 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run ty check
       - run: uv run pytest -q
+
+  # FirestoreStore against the Firestore emulator. The other tests use
+  # MemoryStore and run in the python job.
+  firestore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - run: >-
+          npx -y firebase-tools@15 emulators:exec --only firestore --project demo-solar-farm
+          "uv run pytest -q server/tests/test_firestore.py -rs"
 
   infra:
     runs-on: ubuntu-latest
