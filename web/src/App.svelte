@@ -34,6 +34,7 @@
       await Promise.all(jobs);
       error = "";
       loadedAt = Date.now() / 1000;
+      clock = loadedAt;
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     }
@@ -49,6 +50,8 @@
     co2 = await api.co2(p, COUNTS[p]);
   }
 
+  const tick = () => (clock = Date.now() / 1000);
+
   onMount(() => {
     load("all");
     // Hidden tabs don't poll; they catch up when shown again.
@@ -59,9 +62,12 @@
       // read many documents, so they refresh less often.
       setInterval(() => visible() && load("charts"), 60_000),
       setInterval(() => visible() && load("all"), 15 * 60_000),
-      setInterval(() => (clock = Date.now() / 1000), 5_000),
+      setInterval(tick, 1_000),
     ];
-    const wake = () => visible() && load("all");
+    const wake = () => {
+      tick();
+      if (visible()) load("all");
+    };
     document.addEventListener("visibilitychange", wake);
     return () => {
       timers.forEach(clearInterval);
