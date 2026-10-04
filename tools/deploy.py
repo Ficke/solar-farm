@@ -42,14 +42,12 @@ CHUNK = 1024
 PROJECT = "solar-farm-510518"
 SENSITIVE_KVS_KEYS = {"gg.plug_key", "gg.wt_auth"}
 READ_ONLY_METHODS = {
-    "KVS.Get",
     "Schedule.List",
     "Script.GetStatus",
     "Script.List",
     "Shelly.GetDeviceInfo",
     "Switch.GetStatus",
 }
-SCHEDULES_KEY = "gg.schedules"
 DEFAULT_PEAK = (960, 1260)  # minutes after local midnight, as in grid-gate.js
 WATCHDOG_TIMESPEC = "0 */10 * * * *"
 
@@ -185,49 +183,59 @@ def ensure_auth(dev: Shelly, info: dict, cfg: dict, cfg_path: Path) -> None:
 
 
 def peak_timespecs(start: int, end: int) -> list[str]:
-    """Cron specs firing every minute of [start + 1, end), local minutes.
+    """Cron specs firing at second 59 of every minute in [start, end), local minutes.
 
-    The first minute is left to the script, which ticks once a minute and
-    switches off on its own, so the backstop only acts if the script didn't.
+    Firing late in each minute leaves the first switch-off to the script, which
+    ticks once a minute, so the backstop only acts if the script didn't. A peak
+    on whole hours (the default 16:00 to 21:00) needs a single spec.
     """
-    first, last = start + 1, end - 1
-    if first > last:
+    last = end - 1
+    if start > last:
         return []
-    (h1, m1), (h2, m2) = divmod(first, 60), divmod(last, 60)
+    (h1, m1), (h2, m2) = divmod(start, 60), divmod(last, 60)
     if h1 == h2:
-        return [f"0 {m1}-{m2} {h1} * * *"]
-    specs = [f"0 {m1}-59 {h1} * * *" if m1 else f"0 * {h1} * * *"]
-    if h2 - h1 > 1:
-        middle = str(h1 + 1) if h2 - h1 == 2 else f"{h1 + 1}-{h2 - 1}"
-        specs.append(f"0 * {middle} * * *")
-    specs.append(f"0 0-{m2} {h2} * * *" if m2 < 59 else f"0 * {h2} * * *")
+        minutes = "*" if (m1, m2) == (0, 59) else str(m1) if m1 == m2 else f"{m1}-{m2}"
+        return [f"59 {minutes} {h1} * * *"]
+    specs = []
+    if m1:
+        specs.append(f"59 {m1}-59 {h1} * * *")
+        h1 += 1
+    full_end = h2 if m2 == 59 else h2 - 1
+    if h1 <= full_end:
+        hours = str(h1) if h1 == full_end else f"{h1}-{full_end}"
+        specs.append(f"59 * {hours} * * *")
+    if m2 < 59:
+        specs.append(f"59 {m2 if m2 == 0 else f'0-{m2}'} {h2} * * *")
     return specs
 
 
-def saved_schedule_ids(dev: Shelly) -> list[int]:
-    try:
-        return json.loads(dev.call("KVS.Get", {"key": SCHEDULES_KEY}).get("value") or "[]")
-    except RuntimeError:  # the key doesn't exist before the first deploy
-        return []
+def is_ours(job: dict, script_id: int | None) -> bool:
+    """A schedule deploy makes: relay off, or restart grid-gate."""
+    calls = job.get("calls") or []
+    if len(calls) != 1:
+        return False
+    method, params = calls[0].get("method"), calls[0].get("params") or {}
+    if method == "Switch.Set":
+        return params.get("id") == 0 and params.get("on") is False
+    return method == "Script.Start" and script_id is not None and params.get("id") == script_id
 
 
-def remove_schedules(dev: Shelly) -> None:
-    """Delete the schedules an earlier deploy made, leaving any of yours alone."""
-    existing = {j["id"] for j in dev.call("Schedule.List").get("jobs", [])}
-    for job_id in saved_schedule_ids(dev):
-        if job_id in existing:
-            dev.call("Schedule.Delete", {"id": job_id})
-    dev.call("KVS.Set", {"key": SCHEDULES_KEY, "value": "[]"})
+def remove_schedules(dev: Shelly, script_id: int | None) -> None:
+    """Delete schedules an earlier deploy made, matched by what they do.
+
+    Matching by content (not by saved ids) also clears copies left by an
+    interrupted deploy. Any other schedule you made in the app stays.
+    """
+    for job in dev.call("Schedule.List").get("jobs", []):
+        if is_ours(job, script_id):
+            dev.call("Schedule.Delete", {"id": job["id"]})
 
 
-def add_schedule(dev: Shelly, ids: list[int], timespec: str, method: str, params: dict) -> None:
-    job = dev.call(
+def add_schedule(dev: Shelly, timespec: str, method: str, params: dict) -> None:
+    dev.call(
         "Schedule.Create",
         {"enable": True, "timespec": timespec, "calls": [{"method": method, "params": params}]},
     )
-    if "id" in job:
-        ids.append(job["id"])
-        dev.call("KVS.Set", {"key": SCHEDULES_KEY, "value": json.dumps(ids)})
 
 
 def kvs_settings(cfg: dict) -> dict[str, str]:
@@ -277,17 +285,17 @@ def deploy(dev: Shelly, cfg: dict, cfg_path: Path) -> None:
     for key, value in kvs_settings(cfg).items():
         dev.call("KVS.Set", {"key": key, "value": value})
 
+    scripts = dev.call("Script.List").get("scripts", [])
+    existing = next((s for s in scripts if s.get("name") == SCRIPT_NAME), None)
+
     # The peak backstop is firmware, so it holds even if the script is broken.
     # Old schedules go first so the watchdog can't start a half-uploaded script.
-    remove_schedules(dev)
-    schedule_ids: list[int] = []
+    remove_schedules(dev, existing["id"] if existing else None)
     tuning = cfg.get("tuning", {})
     peak = (tuning.get("peakStart", DEFAULT_PEAK[0]), tuning.get("peakEnd", DEFAULT_PEAK[1]))
     for spec in peak_timespecs(*peak):
-        add_schedule(dev, schedule_ids, spec, "Switch.Set", {"id": 0, "on": False})
+        add_schedule(dev, spec, "Switch.Set", {"id": 0, "on": False})
 
-    scripts = dev.call("Script.List").get("scripts", [])
-    existing = next((s for s in scripts if s.get("name") == SCRIPT_NAME), None)
     if existing:
         script_id = existing["id"]
         if existing.get("running"):
@@ -300,7 +308,7 @@ def deploy(dev: Shelly, cfg: dict, cfg_path: Path) -> None:
         dev.call("Script.PutCode", {"id": script_id, "code": code[i : i + CHUNK], "append": i > 0})
     dev.call("Script.SetConfig", {"id": script_id, "config": {"enable": True}})
     dev.call("Script.Start", {"id": script_id})
-    add_schedule(dev, schedule_ids, WATCHDOG_TIMESPEC, "Script.Start", {"id": script_id})
+    add_schedule(dev, WATCHDOG_TIMESPEC, "Script.Start", {"id": script_id})
     if not dev.dry_run:
         verify_script(dev, script_id)
     print(f"Deployed {SCRIPT_NAME} as script {script_id} ({len(code)} bytes).")

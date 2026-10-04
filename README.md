@@ -59,7 +59,7 @@ Both tools are [uv scripts](https://docs.astral.sh/uv/guides/scripts/): uv insta
 It also protects the plug:
 
 - **Local password.** On the first run it turns on the plug's password (user `admin`) and saves it as `password` in `config/device.toml`, which is git-ignored. Without one, anyone on the Wi-Fi could read the plug key and WattTime login from the plug. The Shelly app asks for it when you open the plug on your home network; cloud control is unaffected. If you lose it, turn off authentication in the Shelly app and deploy again.
-- **Firmware backstops** that work even if the script stops: a schedule switches the relay off every minute from 4:01pm to 8:59pm (the script itself switches off at 4:00pm), and another restarts the script every 10 minutes. Both follow `peakStart`/`peakEnd` in `[tuning]`. To pause the script on purpose, disable that schedule in the Shelly app first. Deploy replaces only the schedules it made.
+- **Firmware backstops** that work even if the script stops, shown in the Shelly app as two "Advanced time" schedules. One switches the relay off at the end of every minute from 4pm to 9pm (late in the minute, so the script's own 4pm switch-off comes first); it follows `peakStart`/`peakEnd` in `[tuning]`. The other restarts the script every 10 minutes; the app labels it "Call may not work as expected" because it doesn't recognize script calls, but it works. To pause the script on purpose, disable that schedule first. Each deploy deletes any relay-off or script-restart schedule before adding its two; other schedules you make in the app stay.
 
 ## Dashboard
 

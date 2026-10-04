@@ -103,15 +103,17 @@ def test_deployment_verification_reports_script_failure(monkeypatch):
         deploy.verify_script(Device(), 1)
 
 
-def test_peak_timespecs_cover_the_peak_after_its_first_minute():
-    assert deploy.peak_timespecs(960, 1260) == [
-        "0 1-59 16 * * *",
-        "0 * 17-19 * * *",
-        "0 * 20 * * *",
+def test_peak_timespecs_fire_late_in_each_peak_minute():
+    assert deploy.peak_timespecs(960, 1260) == ["59 * 16-20 * * *"]
+    assert deploy.peak_timespecs(960, 1020) == ["59 * 16 * * *"]
+    assert deploy.peak_timespecs(990, 1050) == ["59 30-59 16 * * *", "59 0-29 17 * * *"]
+    assert deploy.peak_timespecs(990, 1200) == [
+        "59 30-59 16 * * *",
+        "59 * 17-19 * * *",
     ]
-    assert deploy.peak_timespecs(990, 1050) == ["0 31-59 16 * * *", "0 0-29 17 * * *"]
-    assert deploy.peak_timespecs(960, 1080) == ["0 1-59 16 * * *", "0 * 17 * * *"]
-    assert deploy.peak_timespecs(960, 961) == []
+    assert deploy.peak_timespecs(960, 1215) == ["59 * 16-19 * * *", "59 0-14 20 * * *"]
+    assert deploy.peak_timespecs(960, 961) == ["59 0 16 * * *"]
+    assert deploy.peak_timespecs(960, 960) == []
 
 
 class FakePlug(deploy.Shelly):
@@ -191,23 +193,31 @@ def test_deploy_replaces_its_own_schedules_and_keeps_others(monkeypatch):
     monkeypatch.setenv("SHELLY_PASSWORD", "pw")
     monkeypatch.setattr(deploy, "kvs_settings", lambda cfg: {})
     monkeypatch.setattr(deploy.time, "sleep", lambda seconds: None)
-    plug = FakePlug(auth_en=True, jobs=[1, 2, 7], kvs={deploy.SCHEDULES_KEY: "[1, 2, 3]"})
+    off = [{"method": "Switch.Set", "params": {"id": 0, "on": False}}]
+    restart = [{"method": "Script.Start", "params": {"id": 1}}]
+    plug = FakePlug(auth_en=True)
+    # Two earlier deploys' worth, plus schedules someone made in the app.
+    plug.jobs = {
+        1: {"id": 1, "calls": off},
+        2: {"id": 2, "calls": restart},
+        3: {"id": 3, "calls": off},
+        4: {"id": 4, "calls": restart},
+        7: {"id": 7, "calls": [{"method": "Switch.Set", "params": {"id": 0, "on": True}}]},
+        8: {"id": 8, "calls": [{"method": "Script.Start", "params": {"id": 2}}]},
+    }
 
     deploy.deploy(plug, {"host": "192.0.2.1"}, deploy.Path("unused"))
 
-    assert 7 in plug.jobs  # someone else's
-    ours = [plug.jobs[i] for i in deploy.json.loads(plug.kvs[deploy.SCHEDULES_KEY])]
-    assert [j["timespec"] for j in ours] == [
-        "0 1-59 16 * * *",
-        "0 * 17-19 * * *",
-        "0 * 20 * * *",
-        deploy.WATCHDOG_TIMESPEC,
-    ]
-    assert ours[0]["calls"] == [{"method": "Switch.Set", "params": {"id": 0, "on": False}}]
-    assert ours[-1]["calls"] == [{"method": "Script.Start", "params": {"id": 1}}]
-    assert set(plug.jobs) == {7, *(j["id"] for j in ours)}
+    assert set(plug.jobs) == {7, 8, 9, 10}
+    assert plug.jobs[9]["timespec"] == "59 * 16-20 * * *"
+    assert plug.jobs[9]["calls"] == off
+    assert plug.jobs[10]["timespec"] == deploy.WATCHDOG_TIMESPEC
+    assert plug.jobs[10]["calls"] == restart
 
     # The old watchdog is gone before the script is stopped and re-uploaded.
     methods = [m for m, _ in plug.calls]
     assert methods.index("Schedule.Delete") < methods.index("Script.Stop")
-    assert methods.index("Script.Start") < len(methods) - methods[::-1].index("Schedule.Create")
+
+    # Deploying again leaves the same two, not four.
+    deploy.deploy(plug, {"host": "192.0.2.1"}, deploy.Path("unused"))
+    assert len(plug.jobs) == 4
