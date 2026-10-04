@@ -27,7 +27,14 @@ def store():
 def test_every_series_round_trips_through_the_tasks(store):
     edge, _ = make("edge", store=store)
     assert edge.post("/tasks/plan", headers=AUTH).status_code == 200
+    fallback = edge.get("/plug/plan", headers=KEY).json()
+    assert fallback["strategy"] == "fallback"
+    assert fallback["windows"] == [[NOW + 18 * 3600, NOW + 19 * 3600]]
     assert edge.post("/tasks/collect", headers=AUTH).status_code == 200
+    plan = edge.get("/plug/plan", headers=KEY).json()
+    assert plan["strategy"] == "adaptive"
+    assert plan["target_pct"] == 83.7
+    assert plan["windows"] and plan["windows"] != fallback["windows"]
     report = {"t": NOW, "on": True, "reason": "plan", "w": 410.2, "wh": 1200}
     assert edge.post("/plug/report", json=report, headers=KEY).status_code == 204
 
@@ -36,21 +43,24 @@ def test_every_series_round_trips_through_the_tasks(store):
     assert sample["solar_w"] == 120.0 and sample["moer_t"] == NOW - 300
     assert store.day(PLUG, day)[0]["w"] == 410.2
     assert store.day(PLANS, day) == [
-        {"t": NOW, "windows": [{"s": NOW + 18 * 3600, "e": NOW + 22 * 3600}]}
+        {"t": NOW, "windows": [{"s": s, "e": e} for s, e in p["windows"]]} for p in (fallback, plan)
     ]
     (forecast,) = store.day(FORECASTS, day)
     assert len(forecast["values"]) == 288
     assert sorted(r["t"] for r in store.day(MIX, day)) == [NOW - 7200, NOW - 600]
 
     # The plan keeps its nested arrays, which Firestore can't store directly.
-    plan = edge.get("/plug/plan", headers=KEY).json()
-    assert plan["windows"] == [[NOW + 18 * 3600, NOW + 22 * 3600]]
+    stored = store.get_state("plan")
+    assert stored is not None and stored["windows"] == plan["windows"]
+    # Replanning through the JSON-encoded estimate cache preserves solar shape.
+    assert edge.post("/tasks/collect", headers=AUTH).status_code == 200
+    assert edge.get("/plug/plan", headers=KEY).json() == plan
 
     web, _ = make("web", store=store)
     now = web.get("/api/now").json()
     assert now["sample"] == sample
     assert now["plug"]["w"] == 410.2
-    assert now["plan"]["windows"] == [[NOW + 18 * 3600, NOW + 22 * 3600]]
+    assert now["plan"]["windows"] == plan["windows"]
     tl = web.get("/api/timeline").json()
     assert len(tl["forecast"]) == 288 and len(tl["mix"]) == 2
 
