@@ -19,6 +19,10 @@ SAMPLES = "samples"  # every 5 min: battery, solar, emissions
 PLUG = "plug"  # every minute: relay state, reason, grid watts
 PLANS = "plans"  # every 30 min: the windows each plan picked
 FORECASTS = "forecasts"  # every 30 min: the 24-hour forecast each plan used
+# WattTime publishes these late (health damage within hours, average CO2
+# hourly within days), so each plan run refetches recent history.
+AOER = "aoer"  # average CO2 across all plants, lb/MWh: {t, v}
+HEALTH = "health"  # health damage, $/MWh: {t, v}
 
 
 def _state_document(data: dict[str, Any]) -> dict[str, str]:
@@ -50,6 +54,7 @@ def day_keys(since: int, until: int) -> list[str]:
 
 class Store(Protocol):
     def append(self, series: str, item: dict[str, Any]) -> None: ...
+    def extend(self, series: str, items: list[dict[str, Any]]) -> None: ...
     def day(self, series: str, day: str) -> list[dict[str, Any]]: ...
     def put_state(self, name: str, data: dict[str, Any]) -> None: ...
     def get_state(self, name: str) -> dict[str, Any] | None: ...
@@ -69,6 +74,13 @@ class MemoryStore:
 
     def append(self, series: str, item: dict[str, Any]) -> None:
         self.series[(series, day_key(item["t"]))].append(dict(item))
+
+    def extend(self, series: str, items: list[dict[str, Any]]) -> None:
+        # Like Firestore's ArrayUnion: items already stored are skipped.
+        for item in items:
+            day = self.series[(series, day_key(item["t"]))]
+            if item not in day:
+                day.append(dict(item))
 
     def day(self, series: str, day: str) -> list[dict[str, Any]]:
         return list(self.series.get((series, day), []))
@@ -90,6 +102,15 @@ class FirestoreStore:
     def append(self, series: str, item: dict[str, Any]) -> None:
         ref = self.db.collection(series).document(day_key(item["t"]))
         ref.set({"items": self._fs.ArrayUnion([item])}, merge=True)
+
+    def extend(self, series: str, items: list[dict[str, Any]]) -> None:
+        # One write per day; ArrayUnion skips items already stored.
+        by_day: dict[str, list] = defaultdict(list)
+        for item in items:
+            by_day[day_key(item["t"])].append(item)
+        for day, chunk in by_day.items():
+            ref = self.db.collection(series).document(day)
+            ref.set({"items": self._fs.ArrayUnion(chunk)}, merge=True)
 
     def day(self, series: str, day: str) -> list[dict[str, Any]]:
         snap = self.db.collection(series).document(day).get()

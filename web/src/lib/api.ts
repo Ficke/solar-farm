@@ -8,7 +8,6 @@ export interface Sample {
   output_w?: number;
   moer?: number; // WattTime's actual marginal CO2, lb/MWh
   moer_t?: number;
-  aoer?: number; // actual average CO2 across all plants, lb/MWh
   index?: number; // 0-100 percentile of the past month, lower is cleaner
 }
 
@@ -37,6 +36,9 @@ export interface Timeline {
   samples: Sample[];
   plug: PlugReport[];
   forecast: [number, number][];
+  forecast_health: [number, number][];
+  aoer: [number, number][]; // average CO2 across all plants, lb/MWh (hourly, published late)
+  health: [number, number][]; // health damage, $/MWh (published a few hours late)
   windows: Window[];
 }
 

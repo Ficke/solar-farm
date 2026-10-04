@@ -6,7 +6,7 @@ from collections import defaultdict
 from itertools import pairwise
 
 from planner import telemetry
-from solar_server.store import FORECASTS, PLUG, SAMPLES, Store, day_key, window
+from solar_server.store import AOER, FORECASTS, HEALTH, PLUG, SAMPLES, Store, day_key, window
 
 MAX_GAP = 3600  # don't integrate across outages longer than an hour
 
@@ -56,7 +56,12 @@ def timeline_view(store: Store, now: int, past_hours: int = 24) -> dict:
             {k: r.get(k) for k in ("t", "on", "reason", "w")}
             for r in window(store, PLUG, since, now)
         ],
-        "forecast": [p for p in plan.get("forecast", []) if p[0] >= now - 300],
+        **{
+            k: [p for p in plan.get(k, []) if p[0] >= now - 300]
+            for k in ("forecast", "forecast_health")
+        },
+        "aoer": [[i["t"], i["v"]] for i in window(store, AOER, since, now)],
+        "health": [[i["t"], i["v"]] for i in window(store, HEALTH, since, now)],
         "windows": plan.get("windows", []),
     }
 

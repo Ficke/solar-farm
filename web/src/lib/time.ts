@@ -67,7 +67,7 @@ export function peakWindows(from: number, to: number): [number, number][] {
 
 export function hours(seconds: number): string {
   const h = seconds / 3600;
-  return h === 1 ? "1 hour" : `${Number.isInteger(h) ? h : h.toFixed(1)} hours`;
+  return `${Number.isInteger(h) ? h : h.toFixed(1)} h`;
 }
 
 export function ago(seconds: number): string {

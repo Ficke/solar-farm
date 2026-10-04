@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { align } from "./lib/align";
   import { type Accuracy, api, type Daily, type Now, type Timeline } from "./lib/api";
+  import { FUTURE, PAST } from "./lib/layout";
   import PlanView from "./lib/PlanView.svelte";
   import { explain } from "./lib/status";
   import TimeChart from "./lib/TimeChart.svelte";
@@ -9,7 +10,6 @@
   import WeekBars from "./lib/WeekBars.svelte";
 
   const RESERVE = 80; // set by hand in the Jackery app
-  const FUTURE = 24 * 3600;
   const LEADS = [1, 3, 6, 12];
 
   let now = $state<Now>();
@@ -63,15 +63,15 @@
   const windows = $derived(tl?.windows ?? now?.plan?.windows ?? []);
   const forecast = $derived(tl?.forecast ?? []);
   const tnow = $derived(now?.now ?? clock);
-  const t0 = $derived(tl?.since ?? clock - 24 * 3600);
-  const t1 = $derived((tl?.now ?? clock) + FUTURE);
+  // One time axis for every chart and the plan strip.
+  const base = $derived(tl?.now ?? clock);
+  const from = $derived(base - PAST);
+  const to = $derived(base + FUTURE);
   const age = (t?: number | null) => (t ? clock - t : Infinity);
 
-  // The one sentence that answers "what is it doing, and what's next?"
-  const nextWindow = $derived(windows.find(([, e]) => e > tnow) ?? null);
   const headline = $derived.by(() => {
-    if (!plug) return { title: "Waiting for the plug", detail: "It reports every minute." };
-    const why = explain(plug, windows, tnow);
+    if (!plug) return { title: "No report from the plug yet", detail: "" };
+    const why = explain(plug);
     const current = windows.find(([st, e]) => st <= tnow && tnow < e);
     if (plug.on) {
       return {
@@ -79,39 +79,39 @@
         detail: why,
       };
     }
-    const n = nextWindow && nextWindow[0] > tnow ? nextWindow : null;
+    const n = windows.find(([st]) => st > tnow);
     return {
-      title: n ? `Grid off · next on ${fmtWhen(n[0], tnow)} for ${hours(n[1] - n[0])}` : "Grid off",
-      detail: why,
+      title: n ? `Grid off until ${fmtWhen(n[0], tnow)}` : "Grid off",
+      detail: n ? `${why} · then on for ${hours(n[1] - n[0])}` : why,
     };
   });
 
   const emissionsData = $derived(
     align(
-      (tl?.samples ?? []).map((p) => [p.moer_t ?? p.t, p.moer]),
-      forecast.map(([t, v]) => [t, v]),
-      (tl?.samples ?? []).map((p) => [p.moer_t ?? p.t, p.aoer]),
+      [
+        (tl?.samples ?? []).map((p) => [p.moer_t ?? p.t, p.moer]),
+        [
+          ...(acc?.points ?? []).map(([t, , f]) => [t, f] as [number, number | null]),
+          ...forecast.map(([t, v]) => [t, v] as [number, number]),
+        ],
+        tl?.aoer ?? [],
+      ],
+      [15 * 60, 15 * 60, 2 * 3600], // average CO2 is hourly
     ),
   );
-  const accuracyData = $derived(
-    align(
-      (acc?.points ?? []).map(([t, a]) => [t, a]),
-      (acc?.points ?? []).map(([t, , f]) => [t, f]),
-    ),
-  );
-  const accFrom = $derived(acc?.points[0]?.[0] ?? tnow - 24 * 3600);
-  const batteryData = $derived(align((tl?.samples ?? []).map((p) => [p.t, p.battery_pct])));
+  const healthData = $derived(align([tl?.health ?? [], tl?.forecast_health ?? []]));
+  const batteryData = $derived(align([(tl?.samples ?? []).map((p) => [p.t, p.battery_pct])]));
   const powerData = $derived(
-    align(
+    align([
       (tl?.samples ?? []).map((p) => [p.t, p.solar_w]),
       (tl?.plug ?? []).map((p) => [p.t, p.w ?? (p.on ? null : 0)]),
-    ),
+    ]),
   );
 
   const health = $derived([
-    { name: "Battery and emissions", t: s?.t, limit: 900, every: "every 5 min" },
-    { name: "Plug", t: plug?.t, limit: 300, every: "every minute" },
-    { name: "Plan", t: now?.plan?.generated_at, limit: 3 * 3600, every: "every 30 min" },
+    { name: "Battery", t: s?.t, limit: 900 },
+    { name: "Plug", t: plug?.t, limit: 300 },
+    { name: "Plan", t: now?.plan?.generated_at, limit: 3 * 3600 },
   ]);
   const stale = $derived(health.filter((h) => age(h.t) > h.limit));
 </script>
@@ -121,30 +121,29 @@
     <h1>Solar Farm</h1>
     <p class="sub">
       {#if stale.length}
-        <span class="bad-dot"></span>{stale.map((h) => h.name).join(", ")} not reporting
+        <span class="dot bad"></span>No data from {stale.map((h) => h.name.toLowerCase()).join(", ")}
       {:else if loadedAt}
-        <span class="ok-dot"></span>Live · updated {ago(clock - loadedAt)}
+        <span class="dot ok"></span>Updated {ago(clock - loadedAt)}
       {/if}
     </p>
   </header>
 
   {#if error}
-    <p class="banner">Couldn't refresh ({error}). Showing the last data.</p>
+    <p class="banner">Couldn't refresh: {error}</p>
   {/if}
 
   <section class="card now" class:on={plug?.on} aria-labelledby="now-h">
     <div class="headline">
-      <span class="dot" aria-hidden="true"></span>
+      <span class="state" aria-hidden="true"></span>
       <div>
         <h2 id="now-h">{headline.title}</h2>
-        <p>{headline.detail}.</p>
+        {#if headline.detail}<p>{headline.detail}</p>{/if}
       </div>
     </div>
     <dl class="tiles">
       <div>
         <dt>Battery</dt>
         <dd><b>{s?.battery_pct ?? "–"}</b><small>%</small></dd>
-        <dd class="n">Grid charges up to {RESERVE}%</dd>
       </div>
       <div>
         <dt>Solar</dt>
@@ -157,8 +156,8 @@
         <dd class="n">{now ? `${now.today.grid_wh} Wh today` : ""}</dd>
       </div>
       <div>
-        <dt>Grid emissions</dt>
-        <dd><b>{s?.moer != null ? Math.round(s.moer) : "–"}</b><small>lb CO₂/MWh</small></dd>
+        <dt>Marginal CO₂</dt>
+        <dd><b>{s?.moer != null ? Math.round(s.moer) : "–"}</b><small>lb/MWh</small></dd>
         <dd class="n">
           {s?.index != null ? `Cleaner than ${Math.round(100 - s.index)}% of the past month` : ""}
         </dd>
@@ -168,88 +167,79 @@
 
   <section class="card" aria-labelledby="plan-h">
     <h2 id="plan-h">Plan</h2>
-    <PlanView {windows} {forecast} now={tnow} generatedAt={now?.plan?.generated_at ?? null} />
+    <PlanView {windows} {forecast} {from} {to} now={tnow} />
   </section>
 
-  <section class="card" aria-labelledby="em-h">
-    <h2 id="em-h">Grid emissions</h2>
-    <p class="lede">
-      The marginal rate is the extra CO₂ from the next unit of power you use, and it's what the
-      plan follows. In California it jumps between about 900 (gas) and near 0 (spare solar).
-    </p>
+  <section class="card charts" aria-labelledby="grid-h">
+    <h2 id="grid-h">Grid</h2>
+    <div class="head">
+      <h3>CO₂, lb/MWh</h3>
+      <div class="ctl">
+        <span class="stat">
+          {#if acc?.error != null}Average error <b>{acc.error}</b>, forecast made{:else}No past forecasts yet, made{/if}
+        </span>
+        <div class="seg" role="group" aria-label="Hours ahead">
+          {#each LEADS as h (h)}
+            <button aria-pressed={lead === h} onclick={() => pickLead(h)}>{h} h</button>
+          {/each}
+        </div>
+        <span class="stat">ahead</span>
+      </div>
+    </div>
     <TimeChart
-      label="Grid emissions, past 24 hours and forecast"
+      label="Marginal and average CO2, past 24 hours and forecast"
       data={emissionsData}
-      from={t0}
-      to={t1}
+      {from}
+      {to}
       now={tnow}
       {windows}
-      height={190}
+      height={180}
       series={[
-        { label: "Marginal, actual", color: "--ink", unit: "lb/MWh" },
-        { label: "Marginal, forecast", color: "--accent", dash: [5, 4], unit: "lb/MWh" },
-        { label: "Average, all plants", color: "--ink-3", width: 1.5, unit: "lb/MWh" },
+        { label: "Marginal", color: "--ink", unit: "lb/MWh" },
+        { label: "Forecast", color: "--accent", dash: [5, 4], unit: "lb/MWh" },
+        { label: "Average", color: "--ink-3", width: 1.5, unit: "lb/MWh" },
+      ]}
+    />
+    <h3>Health damage, $/MWh</h3>
+    <TimeChart
+      label="Health damage, past 24 hours and forecast"
+      data={healthData}
+      {from}
+      {to}
+      now={tnow}
+      {windows}
+      height={100}
+      series={[
+        { label: "Actual", color: "--ink", unit: "$/MWh", digits: 1 },
+        { label: "Forecast", color: "--accent", dash: [5, 4], unit: "$/MWh", digits: 1 },
       ]}
     />
   </section>
 
-  <section class="card" aria-labelledby="acc-h">
-    <div class="head">
-      <h2 id="acc-h">How good is the forecast?</h2>
-      <div class="seg" role="group" aria-label="Forecast made this long before">
-        {#each LEADS as h (h)}
-          <button aria-pressed={lead === h} onclick={() => pickLead(h)}>{h} h ahead</button>
-        {/each}
-      </div>
-    </div>
-    {#if acc && acc.compared > 0}
-      <p class="lede">
-        Made {hours(lead * 3600)} ahead, the forecast was off by
-        <strong>{acc.error} lb/MWh</strong> on average over the last {acc.compared} readings.
-      </p>
-      <TimeChart
-        label="Actual marginal emissions against the forecast made earlier"
-        data={accuracyData}
-        from={accFrom}
-        to={tnow}
-        now={tnow}
-        height={160}
-        series={[
-          { label: "Actual", color: "--ink", unit: "lb/MWh" },
-          { label: `Forecast from ${lead} h before`, color: "--accent", dash: [5, 4], unit: "lb/MWh" },
-        ]}
-      />
-    {:else}
-      <p class="lede">
-        Every forecast is now being saved. Once one is {hours(lead * 3600)} old, this compares
-        what it said with what actually happened.
-      </p>
-    {/if}
-  </section>
-
-  <section class="card" aria-labelledby="bat-h">
-    <h2 id="bat-h">Battery and power</h2>
+  <section class="card charts" aria-labelledby="bat-h">
+    <h2 id="bat-h">Battery</h2>
+    <h3>Charge, %</h3>
     <TimeChart
       label="Battery charge, past 24 hours"
       data={batteryData}
-      from={t0}
-      to={t1}
+      {from}
+      {to}
       now={tnow}
       {windows}
-      height={130}
+      height={110}
       yMax={100}
-      yRule={{ value: RESERVE, label: `Grid charges up to ${RESERVE}%` }}
+      yRule={{ value: RESERVE, label: `Reserve ${RESERVE}%` }}
       series={[{ label: "Battery", color: "--accent", unit: "%" }]}
     />
-    <div class="gap"></div>
+    <h3>Power in, W</h3>
     <TimeChart
       label="Solar and grid power into the battery, past 24 hours"
       data={powerData}
-      from={t0}
-      to={t1}
+      {from}
+      {to}
       now={tnow}
       {windows}
-      height={130}
+      height={110}
       series={[
         { label: "Solar", color: "--solar", fill: "--solar-fill", unit: "W" },
         { label: "Grid", color: "--grid", fill: "--grid-fill", unit: "W" },
@@ -257,7 +247,7 @@
     />
     <p class="key">
       <span><i class="sw plan"></i>Planned grid charging</span>
-      <span><i class="sw peak"></i>PG&amp;E peak, 4–9 PM</span>
+      <span><i class="sw peak"></i>Peak, 4–9 PM</span>
     </p>
   </section>
 
@@ -266,7 +256,7 @@
       <div class="head">
         <h2 id="week-h">Last 7 days</h2>
         <button class="link" onclick={() => (weekTable = !weekTable)}>
-          {weekTable ? "Show chart" : "Show table"}
+          {weekTable ? "Chart" : "Table"}
         </button>
       </div>
       {#if weekTable}
@@ -293,23 +283,22 @@
     </section>
     <section class="card" aria-labelledby="res-h">
       <h2 id="res-h">Reserve</h2>
-      <p class="big">{RESERVE}%<small>set in the Jackery app</small></p>
+      <dl class="pair">
+        <div><dt>Set</dt><dd>{RESERVE}%</dd></div>
+        <div>
+          <dt>Suggested</dt>
+          <dd>{daily?.reserve.reserve_pct != null ? `${daily.reserve.reserve_pct}%` : "–"}</dd>
+        </div>
+      </dl>
       {#if daily?.reserve.reserve_pct != null}
-        <p class="lede">
-          Suggested: <strong>{daily.reserve.reserve_pct}%</strong>. That leaves room for a good
-          solar day ({daily.reserve.good_day_wh} Wh) over the last {daily.reserve.days} full days.
-        </p>
-      {:else}
-        <p class="lede">A suggestion appears after a few full days of readings.</p>
+        <p class="n">Room for a {daily.reserve.good_day_wh} Wh solar day</p>
       {/if}
     </section>
   </div>
 
   <footer>
     {#each health as h (h.name)}
-      <span class:stale={age(h.t) > h.limit} title="Expected {h.every}">
-        <i></i>{h.name}: {h.t ? ago(age(h.t)) : "never"}
-      </span>
+      <span class:stale={age(h.t) > h.limit}><i></i>{h.name} {h.t ? ago(age(h.t)) : "never"}</span>
     {/each}
   </footer>
 </main>
@@ -344,14 +333,15 @@
     align-items: center;
     gap: 6px;
   }
-  .ok-dot,
-  .bad-dot {
+  .sub .dot {
     width: 8px;
     height: 8px;
     border-radius: 50%;
+  }
+  .dot.ok {
     background: var(--good);
   }
-  .bad-dot {
+  .dot.bad {
     background: var(--bad);
   }
   .banner {
@@ -379,14 +369,39 @@
   .head h2 {
     margin: 0;
   }
-  .lede {
-    margin: 0 0 10px;
-    font-size: 13px;
-    color: var(--ink-2);
-    max-width: 70ch;
+  h3 {
+    font: 500 12px var(--f-body);
+    color: var(--ink-3);
+    margin: 14px 0 2px;
   }
-  .lede strong {
+  .charts h2 + h3 {
+    margin-top: 4px;
+  }
+  .ctl {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .stat {
+    font-size: 12px;
+    color: var(--ink-3);
+  }
+  .stat b {
     color: var(--ink);
+    font-weight: 600;
+  }
+  .head h3 {
+    margin: 0;
+  }
+  .pair {
+    display: flex;
+    gap: 28px;
+    margin: 0 0 6px;
+  }
+  .pair dd {
+    margin: 0;
+    font: 600 28px var(--f-display);
   }
   .headline {
     display: flex;
@@ -401,7 +416,7 @@
     margin: 2px 0 0;
     color: var(--ink-2);
   }
-  .dot {
+  .state {
     width: 14px;
     height: 14px;
     margin-top: 6px;
@@ -409,7 +424,7 @@
     background: var(--ink-3);
     flex: none;
   }
-  .now.on .dot {
+  .now.on .state {
     background: var(--grid);
     box-shadow: 0 0 0 4px var(--grid-fill);
   }
@@ -473,10 +488,7 @@
     cursor: pointer;
     padding: 0;
   }
-  .gap {
-    height: 12px;
-  }
-  .key {
+    .key {
     display: flex;
     flex-wrap: wrap;
     gap: 4px 14px;
@@ -521,16 +533,7 @@
       grid-template-columns: 1fr;
     }
   }
-  .big {
-    font: 600 30px var(--f-display);
-    margin: 0 0 6px;
-  }
-  .big small {
-    margin-left: 8px;
-    font: 400 13px var(--f-body);
-    color: var(--ink-3);
-  }
-  table {
+    table {
     width: 100%;
     border-collapse: collapse;
     font-size: 14px;
