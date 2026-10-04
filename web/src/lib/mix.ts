@@ -17,9 +17,14 @@ export const GROUPS: { label: string; color: string; keys: (keyof MixRow)[] }[] 
   { label: "Nuclear", color: "--mix-nuclear", keys: ["nuclear"] },
 ];
 
+/** Half the width of the moving average the chart draws, in seconds. */
+const SMOOTH = 15 * 60;
+
 /**
  * Generation by group in GW, as raw values (for the tooltip) and stacked
- * (for drawing, each series the running total from the bottom). Charging
+ * (for drawing, each series the running total from the bottom). The drawn
+ * stack is a 30-minute centered average of CAISO's 5-minute values, so it
+ * reads as a trend; the tooltip keeps the reported value. Charging
  * batteries and solar's small night-time draw count as zero supply.
  */
 export function stackMix(rows: MixRow[]) {
@@ -32,11 +37,36 @@ export function stackMix(rows: MixRow[]) {
     GROUPS.map((g) => rows.map((r) => [r.t, gw(r, g.keys)] as [number, number])),
     GROUPS.map(() => 15 * 60),
   );
-  const stacked = raw.map((col) => [...col]);
+  const xs = raw[0] as number[];
+  const smooth = raw.map((col, k) =>
+    k === 0
+      ? col
+      : col.map((v, i) => {
+          if (v == null) return v;
+          let sum = 0;
+          let n = 0;
+          for (let j = i; j >= 0 && xs[i] - xs[j] <= SMOOTH; j--) {
+            const w = col[j];
+            if (w != null) {
+              sum += w;
+              n++;
+            }
+          }
+          for (let j = i + 1; j < xs.length && xs[j] - xs[i] <= SMOOTH; j++) {
+            const w = col[j];
+            if (w != null) {
+              sum += w;
+              n++;
+            }
+          }
+          return sum / n;
+        }),
+  );
+  const stacked = smooth.map((col) => [...col]);
   for (let i = 0; i < raw[0].length; i++) {
     let total = 0;
     for (let k = GROUPS.length; k >= 1; k--) {
-      const v = raw[k][i];
+      const v = smooth[k][i];
       if (v == null) continue;
       total += v;
       stacked[k][i] = total;
