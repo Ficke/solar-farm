@@ -4,6 +4,7 @@
   // with the time and every series; the cursor is synced across charts.
   import uPlot from "uplot";
   import type { Window } from "./api";
+  import { AXIS_W, hourTicks, PAD_R } from "./layout";
   import { fmtClock, fmtDayClock, fmtWeekday, localMinutes, peakWindows } from "./time";
 
   export interface Series {
@@ -141,13 +142,19 @@
         points: { size: 8, width: 2, fill: css("--panel") },
       },
       legend: { show: false },
+      padding: [6, PAD_R, 0, 0],
       scales: {
         x: { time: true, min: from, max: to },
         y: { range: [0, yMax ?? null] as uPlot.Range.MinMax },
       },
       axes: [
-        { ...axis, space: 64, size: 28, values: (_u, ticks) => ticks.map(tickLabel) },
-        { ...axis, size: 44 },
+        {
+          ...axis,
+          size: 28,
+          splits: () => hourTicks(from, to, w),
+          values: (_u, ticks) => ticks.map(tickLabel),
+        },
+        { ...axis, size: AXIS_W },
       ],
       series: [
         {},

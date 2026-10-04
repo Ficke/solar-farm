@@ -15,9 +15,12 @@ from solar_server.config import Settings
 
 
 class Sources(Protocol):
-    def forecast(self, hours: int) -> list[tuple[datetime, float]]: ...
+    def forecast(self, hours: int, signal: str = "co2_moer") -> list[tuple[datetime, float]]: ...
     def signal_index(self) -> float: ...
     def actual(self, signal: str, now: datetime) -> tuple[datetime, float] | None: ...
+    def history(
+        self, signal: str, start: datetime, end: datetime
+    ) -> list[tuple[datetime, float]]: ...
     def jackery(self, now: datetime) -> Reading | None: ...
 
 
@@ -35,14 +38,19 @@ class LiveSources:
             self._token_at = time.monotonic()
         return self._token
 
-    def forecast(self, hours: int) -> list[tuple[datetime, float]]:
-        return watttime.forecast(self._auth(), self.settings.region, horizon_hours=hours)
+    def forecast(self, hours: int, signal: str = "co2_moer") -> list[tuple[datetime, float]]:
+        return watttime.forecast(
+            self._auth(), self.settings.region, horizon_hours=hours, signal_type=signal
+        )
 
     def signal_index(self) -> float:
         return watttime.signal_index(self._auth(), self.settings.region)
 
     def actual(self, signal: str, now: datetime) -> tuple[datetime, float] | None:
         return watttime.latest(self._auth(), now, self.settings.region, signal)
+
+    def history(self, signal: str, start: datetime, end: datetime) -> list[tuple[datetime, float]]:
+        return watttime.historical(self._auth(), start, end, self.settings.region, signal)
 
     def jackery(self, now: datetime) -> Reading | None:
         s = self.settings

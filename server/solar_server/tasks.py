@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from planner.plan import build_plan
 
 from solar_server.config import Settings
 from solar_server.sources import Sources
-from solar_server.store import FORECASTS, PLANS, SAMPLES, Store
+from solar_server.store import AOER, FORECASTS, HEALTH, PLANS, SAMPLES, Store
 
 log = logging.getLogger(__name__)
 
@@ -18,29 +18,24 @@ def _num(v: float | None) -> float | None:
     return None if v is None else round(float(v), 1)
 
 
-# Signals recorded from WattTime's actuals: marginal CO2 (what the plan
-# follows), average CO2 across all plants, and health damage. Stored now so
-# later features have history to work with.
-ACTUALS = {"moer": "co2_moer", "aoer": "co2_aoer", "health": "health_damage"}
+# WattTime's other signals, published late: (series, signal, hours to refetch).
+LATE_SIGNALS = ((AOER, "co2_aoer", 72), (HEALTH, "health_damage", 24))
 
 
 def collect(store: Store, sources: Sources, now: datetime) -> dict:
-    """One sample: WattTime's latest actuals and percentile, plus the Jackery.
+    """One sample: WattTime's latest marginal rate and percentile, plus the Jackery.
 
     Each source is optional; a sample is stored with whatever arrived.
     """
     t = int(now.timestamp())
     sample: dict = {"t": t}
-    for key, signal in ACTUALS.items():
-        try:
-            point = sources.actual(signal, now)
-            if point:
-                # Health damage values are small, so keep more digits.
-                sample[key] = round(point[1], 4) if key == "health" else _num(point[1])
-                if key == "moer":
-                    sample["moer_t"] = int(point[0].timestamp())
-        except Exception as e:
-            log.warning("watttime %s failed: %s", signal, e)
+    try:
+        point = sources.actual("co2_moer", now)
+        if point:
+            sample["moer"] = _num(point[1])
+            sample["moer_t"] = int(point[0].timestamp())
+    except Exception as e:
+        log.warning("watttime co2_moer failed: %s", e)
     try:
         sample["index"] = _num(sources.signal_index())
     except Exception as e:
@@ -70,6 +65,13 @@ def plan(store: Store, sources: Sources, settings: Settings, now: datetime) -> d
     except Exception as e:
         log.warning("signal-index skipped: %s", e)
     p["forecast"] = [[int(t.timestamp()), round(v, 1)] for t, v in points]
+    # Health damage, for the dashboard only; the plan follows the marginal rate.
+    try:
+        health = sources.forecast(24, "health_damage")
+        p["forecast_health"] = [[int(t.timestamp()), round(v, 2)] for t, v in health]
+    except Exception as e:
+        log.warning("watttime health_damage forecast failed: %s", e)
+    backfill(store, sources, now)
     store.put_state("plan", p)
     # Keep every plan and forecast, so the dashboard can check the forecast
     # against what happened and later features can look back.
@@ -90,9 +92,20 @@ def plan(store: Store, sources: Sources, settings: Settings, now: datetime) -> d
     return p
 
 
+def backfill(store: Store, sources: Sources, now: datetime) -> None:
+    """Store the late-published signals for the last few days; repeats are skipped."""
+    for series, signal, hours in LATE_SIGNALS:
+        try:
+            points = sources.history(signal, now - timedelta(hours=hours), now)
+        except Exception as e:
+            log.warning("watttime %s history failed: %s", signal, e)
+            continue
+        store.extend(series, [{"t": int(t.timestamp()), "v": round(v, 2)} for t, v in points])
+
+
 def plug_plan(store: Store) -> dict | None:
     """The plan as the plug reads it (the shape build_plan returns)."""
     p = store.get_state("plan")
     if p is None:
         return None
-    return {k: v for k, v in p.items() if k != "forecast"}
+    return {k: v for k, v in p.items() if not k.startswith("forecast")}

@@ -14,7 +14,7 @@ from planner.plan import PACIFIC, build_plan
 
 from solar_server.app import create_app
 from solar_server.config import Settings
-from solar_server.store import FORECASTS, PLANS, PLUG, SAMPLES, MemoryStore
+from solar_server.store import AOER, FORECASTS, HEALTH, PLANS, PLUG, SAMPLES, MemoryStore
 
 STEP = 300
 
@@ -56,10 +56,14 @@ def sample_store(now: int) -> MemoryStore:
                 "solar_w": round(solar),
                 "moer": round(_moer(t), 1),
                 "moer_t": t,
-                "aoer": round(_aoer(t), 1),
                 "index": 5 if on else 70,
             },
         )
+        # Average CO2 arrives hourly and late; health damage a couple of hours late.
+        if t % 3600 == 0 and t < now - 6 * 3600:
+            store.append(AOER, {"t": t, "v": round(_aoer(t), 1)})
+        if t < now - 2 * 3600:
+            store.append(HEALTH, {"t": t, "v": round(_moer(t) / 40 + 2, 2)})
         if t % 1800 == 0:
             # Forecasts get the curtailment stretch roughly right, with its
             # edges off by up to an hour the further out they look.
@@ -85,7 +89,13 @@ def sample_store(now: int) -> MemoryStore:
     windows = plan["windows"]
     store.put_state(
         "plan",
-        {"generated_at": last, "windows": windows, "forecast": points, "index_now": 70},
+        {
+            "generated_at": last,
+            "windows": windows,
+            "forecast": points,
+            "forecast_health": [[t, round(v / 40 + 2, 2)] for t, v in points],
+            "index_now": 70,
+        },
     )
     return store
 
@@ -97,7 +107,7 @@ def _day(t: int) -> str:
 class NoSources:
     """The web role never calls out; these only exist to satisfy create_app."""
 
-    def forecast(self, hours: int) -> list:
+    def forecast(self, hours: int, signal: str = "co2_moer") -> list:
         return []
 
     def signal_index(self) -> float:
@@ -105,6 +115,9 @@ class NoSources:
 
     def actual(self, signal: str, now: datetime) -> None:
         return None
+
+    def history(self, signal: str, start: datetime, end: datetime) -> list:
+        return []
 
     def jackery(self, now: object) -> None:
         return None

@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from planner.jackery import Reading
 from solar_server.app import create_app
 from solar_server.config import Settings
-from solar_server.store import FORECASTS, PLANS, PLUG, SAMPLES, MemoryStore
+from solar_server.store import AOER, FORECASTS, HEALTH, PLANS, PLUG, SAMPLES, MemoryStore
 
 NOW = 1791158400  # Sat 4 Oct 2026, 17:00 Pacific
 SCHED = "solar-scheduler@p.iam.gserviceaccount.com"
@@ -17,7 +17,9 @@ class FakeSources:
         self.fail_index = fail_index
         self.actuals = actuals
 
-    def forecast(self, hours):
+    def forecast(self, hours, signal="co2_moer"):
+        if signal != "co2_moer":
+            return [(datetime.fromtimestamp(NOW, UTC), 1.0)]
         start = NOW - NOW % 300
         # dirty now, clean from +18h onwards
         return [
@@ -33,8 +35,11 @@ class FakeSources:
     def actual(self, signal, now):
         if not self.actuals:
             raise RuntimeError("watttime down")
-        value = {"co2_moer": 880.0, "co2_aoer": 410.0, "health_damage": 0.02}[signal]
-        return (datetime.fromtimestamp(NOW - 300, UTC), value)
+        return (datetime.fromtimestamp(NOW - 300, UTC), 880.0)
+
+    def history(self, signal, start, end):
+        value = {"co2_aoer": 410.0, "health_damage": 12.5}[signal]
+        return [(datetime.fromtimestamp(NOW - 3600, UTC), value)]
 
     def jackery(self, now):
         if not self.with_jackery:
@@ -86,8 +91,6 @@ def test_collect_stores_one_sample_with_every_source():
         "t": NOW,
         "moer": 880.0,
         "moer_t": NOW - 300,
-        "aoer": 410.0,
-        "health": 0.02,
         "index": 82.0,
         "battery_pct": 81.0,
         "solar_w": 120.0,
@@ -115,7 +118,8 @@ def test_plan_task_feeds_the_plug_without_the_forecast():
     assert len(store.get_state("plan")["forecast"]) == 288
 
     plan = c.get("/plug/plan", headers={"X-Plug-Key": "k3y"}).json()
-    assert "forecast" not in plan
+    assert not any(k.startswith("forecast") for k in plan)
+    assert store.get_state("plan")["forecast_health"] == [[NOW, 1.0]]
     assert plan["generated_at"] == NOW
     assert plan["index_now"] == 82.0
     # 4 clean hours, all in the cheap stretch 18 h out
@@ -127,6 +131,20 @@ def test_plan_task_feeds_the_plug_without_the_forecast():
     ]
     (snap,) = store.day(FORECASTS, "2026-10-04")
     assert snap["t"] == NOW and snap["step"] == 300 and len(snap["values"]) == 288
+
+
+def test_plan_task_backfills_late_signals_once():
+    c, store = make("edge")
+    c.post("/tasks/plan", headers=AUTH)
+    c.post("/tasks/plan", headers=AUTH)
+    assert store.day(AOER, "2026-10-04") == [{"t": NOW - 3600, "v": 410.0}]
+    assert store.day(HEALTH, "2026-10-04") == [{"t": NOW - 3600, "v": 12.5}]
+
+    web, _ = make("web", store=store)
+    tl = web.get("/api/timeline").json()
+    assert tl["aoer"] == [[NOW - 3600, 410.0]]
+    assert tl["health"] == [[NOW - 3600, 12.5]]
+    assert tl["forecast_health"] == [[NOW, 1.0]]
 
 
 def test_accuracy_compares_the_forecast_made_hours_earlier():

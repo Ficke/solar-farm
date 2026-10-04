@@ -1,20 +1,16 @@
-import type { PlugReport, Window } from "./api";
-import { fmtWhen } from "./time";
+import type { PlugReport } from "./api";
 
 const REASONS: Record<string, string> = {
-  peak: "PG&E peak (4–9 pm), so the grid stays off",
-  safety: "Safety charge after a long time off the grid",
-  index: "Following WattTime's live index because the plan is out of date",
-  fallback: "No plan or live index, so using the 10 am–3 pm fallback",
-  "no-time": "The plug doesn't know the time yet",
-  start: "The plug just started",
+  peak: "Peak hours, 4–9 PM",
+  safety: "Safety charge after 30 hours off",
+  index: "No current plan, following the live index",
+  fallback: "Offline, using 10 AM–3 PM",
+  "no-time": "Plug clock not set yet",
+  start: "Plug starting",
 };
 
-export function explain(plug: PlugReport, windows: Window[], now: number): string {
-  if (plug.reason === "plan") {
-    const w = windows.find(([s, e]) => s <= now && now < e);
-    if (plug.on && w) return `Planned clean window, until ${fmtWhen(w[1], now)}`;
-    return plug.on ? "Planned clean window" : "Outside the planned clean windows";
-  }
+/** Why the plug is in its current state, in a few words. */
+export function explain(plug: PlugReport): string {
+  if (plug.reason === "plan") return plug.on ? "Planned window" : "Outside planned windows";
   return REASONS[plug.reason] ?? plug.reason;
 }
