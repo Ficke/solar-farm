@@ -98,7 +98,7 @@ def test_collect_stores_one_sample_with_every_source():
     assert store.day(SAMPLES, "2026-10-04") == [body]
 
 
-def test_between_five_minute_marks_collect_reads_only_the_jackery():
+def test_collect_stores_only_new_watttime_readings_and_mix_every_5_minutes():
     store = MemoryStore()
     tasks.collect(store, FakeSources(), datetime.fromtimestamp(NOW, UTC))
     mix = store.day(MIX, "2026-10-04")
@@ -134,6 +134,7 @@ def test_replan_failure_does_not_lose_collected_telemetry(monkeypatch):
     def fail(*args):
         raise RuntimeError("planning failed")
 
+    monkeypatch.setattr(tasks, "plan", fail)
     monkeypatch.setattr(tasks, "refresh_charging_plan", fail)
     c, store = make("edge")
     old = {"generated_at": NOW - 600, "windows": []}
@@ -168,9 +169,9 @@ def test_plan_task_feeds_the_plug_without_the_forecast():
 
 def test_grid_mix_is_stored_once_per_row():
     c, store = make("edge")
+    # A reading keeps the last hour; on the half hour the plan fills in the last day.
     c.post("/tasks/collect", headers=AUTH)
-    # A reading keeps the last hour; a plan fills in the last day.
-    assert [r["t"] for r in store.day(MIX, "2026-10-04")] == [NOW - 600]
+    assert [r["t"] for r in store.day(MIX, "2026-10-04")] == [NOW - 600, NOW - 7200]
     c.post("/tasks/plan", headers=AUTH)
     c.post("/tasks/collect", headers=AUTH)
     assert [r["t"] for r in store.day(MIX, "2026-10-04")] == [NOW - 600, NOW - 7200]
@@ -428,3 +429,14 @@ def test_full_days_need_three_hours_of_solar_readings(monkeypatch):
     assert set(seen) == {"2026-10-01", "2026-10-03"}
     points = [(NOW + 60 * i, 100.0) for i in range(181)]
     assert totals.covered_h(points) == 3.0
+
+
+def test_collect_plans_with_a_fresh_forecast_and_keeps_one_every_half_hour():
+    store = MemoryStore()
+    for minute in range(31):
+        t = datetime.fromtimestamp(NOW + 60 * minute, UTC)
+        tasks.collect(store, FakeSources(), t)
+        tasks.plan(store, FakeSources(), Settings(), t, archive=tasks.archive_due(t))
+    plan = store.get_state("plan") or {}
+    assert plan["forecast_at"] == NOW + 30 * 60
+    assert [f["t"] for f in store.day(FORECASTS, "2026-10-04")] == [NOW, NOW + 30 * 60]

@@ -11,7 +11,7 @@ Grid-aware charging for a Jackery Explorer 3000 v2 with a 250 W panel in a San F
   3. Otherwise, grid off for 30 hours (a whole missed day): on for 2 hours, so the battery can't run flat. Then follow any plan less than 3 hours old.
   4. Otherwise WattTime's live index for `CAISO_NORTH`: on at or below the 25th percentile.
   5. No internet: on from 10am to 3pm.
-- **Server** (`server/` and `planner/`, on Google Cloud Run): every 30 minutes it reads WattTime's 24-hour marginal-emissions forecast. With fresh battery telemetry, it plans enough grid time in the cleanest 15-minute blocks before 4 pm to leave the battery full, shortening the final block to whole minutes. It reads the Jackery every minute and replans after each reading using the cached emissions forecast. The plug reads `/plug/plan` and reports its state every minute.
+- **Server** (`server/` and `planner/`, on Google Cloud Run): every minute it reads WattTime's 24-hour marginal-emissions forecast, which WattTime updates every 5 minutes. With fresh battery telemetry, it plans enough grid time in the cleanest 15-minute blocks before 4 pm to leave the battery full, shortening the final block to whole minutes. It reads the Jackery every minute and replans after each reading; if the forecast can't be fetched, it replans with the last one for up to two hours. The plug reads `/plug/plan` and reports its state every minute.
 - **Dashboard** (`web/`): shows windows, planned grid Wh, the solar estimate, and any projected shortfall from full. It labels the fixed-duration fallback when battery telemetry is unavailable.
 
 ## Charging policy
@@ -78,7 +78,7 @@ bun device/sim.js --stale    # same, if the plan stopped updating (fallback rule
 
 The dashboard and the plug's server run on Google Cloud Run. All of it is defined in OpenTofu under [`infra/`](infra/README.md), which also has the one-time setup steps. The server in `server/` runs as two Cloud Run services from one image:
 
-- **solar-edge** (public) serves the plug, which reads `/plug/plan` and posts `/plug/report` each minute with its `X-Plug-Key`. It also serves Cloud Scheduler: `/tasks/collect` every minute records a Jackery reading in Firestore (WattTime and CAISO, which publish every 5 minutes, on every fifth), and `/tasks/plan` every 30 minutes builds the plan.
+- **solar-edge** (public) serves the plug, which reads `/plug/plan` and posts `/plug/report` each minute with its `X-Plug-Key`. It also serves Cloud Scheduler: `/tasks/collect` every minute records the Jackery and any new WattTime reading in Firestore, fetches the forecast and updates the plan. Every 5 minutes it records CAISO's mix; every 30 minutes it keeps a copy of the forecast. `/tasks/plan` refreshes the forecast and plan on demand.
 - **solar-web** (behind Google sign-in) serves the dashboard from `web/` and its API: `/api/now`, `/api/timeline`, `/api/accuracy` and `/api/daily`.
 
 The Deploy workflow runs CI, builds the image and rolls it out on every merge to `main`. If solar-edge's `/health` doesn't answer afterwards, both services go back to the revisions they were serving before. [Renovate](https://docs.renovatebot.com) opens one grouped update PR a week (`renovate.json`), with GitHub Actions pinned to commit SHAs.

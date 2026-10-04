@@ -11,7 +11,7 @@ Everything in the `solar-farm-510518` project is defined here in [OpenTofu](http
 | `solar-edge` (Cloud Run, public) | `/plug/*` for the Shelly plug (checks `X-Plug-Key`) and `/tasks/*` for Cloud Scheduler (checks a Google-signed token). |
 | Firestore `(default)` | Readings, plans and plug reports. Weekly backups and 7 days of point-in-time recovery. |
 | Secret Manager | WattTime and Jackery logins, plus the plug key (generated here). |
-| Cloud Scheduler | `solar-collect` every minute, `solar-plan` at :02 and :32. |
+| Cloud Scheduler | `solar-collect` every minute. |
 | Artifact Registry `solar-farm` | Server images; keeps the 5 newest. |
 | Alert policies | Email when the plug is silent for 10 min, readings stop for 30 min, the plan is over 2 h old, or a scheduled task fails. |
 

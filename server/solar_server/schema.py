@@ -14,7 +14,7 @@ type Window = tuple[int, int]  # [start, end), unix seconds
 
 
 class Sample(BaseModel):
-    """Every minute from the Jackery; WattTime every 5 minutes."""
+    """Every minute from the Jackery; WattTime when it has a new reading."""
 
     t: int
     battery_pct: float | None = None
