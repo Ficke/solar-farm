@@ -61,6 +61,12 @@ resource "google_service_account_iam_member" "deploy_wif" {
 # this account. Its only role is read-only; the JSON key is created by hand and
 # stored in each agent's credential store (for Claude, a "GCP access token" API
 # credential on the cloud environment), so it never lands in state.
+# Created by hand in the console first; this adopts it into state.
+import {
+  to = google_service_account.agent_reader
+  id = "projects/${var.project_id}/serviceAccounts/agent-reader@${var.project_id}.iam.gserviceaccount.com"
+}
+
 resource "google_service_account" "agent_reader" {
   account_id   = "agent-reader"
   display_name = "AI agents: read-only Firestore"
