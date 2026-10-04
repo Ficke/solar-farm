@@ -10,24 +10,29 @@ import math
 from collections import defaultdict
 from datetime import datetime, time, timedelta
 from itertools import pairwise
-from statistics import mean
+from statistics import mean, median
 
 from planner.plan import PACIFIC
 from planner.telemetry import CAPACITY_WH
 
 TIE_MOER = 50  # lb/MWh; forecasts this close count as equally clean
 MIN_SOLAR_WH = 150  # later solar below this is not worth keeping room for
+MIN_CHARGE_W = 200  # less than this into the battery is passthrough, not charging
+MIN_CHARGE_READINGS = 3
 TOLERANCE_WH = 30  # about 1%; smaller floor and full shortfalls are ignored
 
 
 def estimates(
     samples: list[dict], now: int, solar_wh: float, load_w: float, charge_w: float
 ) -> dict:
-    """Seven completed days of solar, one day of load, configured AC power.
+    """Seven completed days of solar, one day of load, a week of AC charging.
 
     Solar days need six hours of coverage between 9am and 5pm; gaps over 15
     minutes are excluded. Until then, use configured daily Wh
     distributed from 9am to 5pm. Load needs six hours of recent coverage.
+    The charge rate is the median grid power going into the battery (AC in
+    less load) over readings of at least MIN_CHARGE_W, once there are
+    MIN_CHARGE_READINGS of them; until then, the configured rate.
     """
     samples = sorted({s["t"]: s for s in samples if s["t"] <= now}.values(), key=lambda s: s["t"])
     today = datetime.fromtimestamp(now, PACIFIC).date()
@@ -73,6 +78,15 @@ def estimates(
             seconds = b["t"] - a["t"]
             load_energy += (max(0, a["output_w"]) + max(0, b["output_w"])) / 2 * seconds
             load_seconds += seconds
+    charging = [
+        s["ac_input_w"] - max(0.0, s.get("output_w") or 0.0)
+        for s in samples
+        if now - 7 * 86400 <= s["t"]
+        and s.get("ac_input_w") is not None
+        and math.isfinite(s["ac_input_w"])
+        and math.isfinite(s.get("output_w") or 0.0)
+    ]
+    charging = [w for w in charging if w >= MIN_CHARGE_W]
     if daily:
         good_day = mean(daily)
         shape = {q: mean(ws) for q, ws in profile.items()}
@@ -84,7 +98,7 @@ def estimates(
         "solar_day_wh": good_day,
         "solar_days": len(daily),
         "load_w": load_energy / load_seconds if load_seconds >= 6 * 3600 else load_w,
-        "charge_w": charge_w,
+        "charge_w": median(charging) if len(charging) >= MIN_CHARGE_READINGS else charge_w,
     }
 
 
@@ -215,6 +229,7 @@ def build_adaptive_plan(
         "signal": "co2_moer",
         "strategy": "adaptive",
         "windows": windows,
+        "battery_pct": battery_pct,
         "target_pct": 100,
         "deadline": deadline,
         "floor_pct": floor_pct,

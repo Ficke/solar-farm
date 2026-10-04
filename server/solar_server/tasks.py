@@ -136,10 +136,7 @@ def plan(store: Store, sources: Sources, settings: Settings, now: datetime) -> d
     store.put_state("plan", p)
     # Keep every plan and forecast, so the dashboard can check the forecast
     # against what happened and later features can look back.
-    store.append(
-        PLANS,
-        {"t": p["generated_at"], "windows": [{"s": s, "e": e} for s, e in p["windows"]]},
-    )
+    store.append(PLANS, plan_record(p))
     if points:
         store.append(
             FORECASTS,
@@ -212,9 +209,30 @@ def refresh_charging_plan(store: Store, settings: Settings, now: datetime) -> No
     p.update(forecast=forecast, forecast_at=old.get("forecast_at", old["generated_at"]))
     p["index_now"] = old.get("index_now")
     store.put_state("plan", p)
-    store.append(
-        PLANS, {"t": p["generated_at"], "windows": [{"s": s, "e": e} for s, e in p["windows"]]}
-    )
+    store.append(PLANS, plan_record(p))
+
+
+# Numbers kept with each stored plan, so its choices can be checked later.
+PLAN_HISTORY_KEYS = (
+    "strategy",
+    "battery_pct",
+    "deadline",
+    "grid_wh",
+    "shortfall_wh",
+    "solar_day_wh",
+    "solar_days",
+    "load_w",
+    "charge_w",
+)
+
+
+def plan_record(p: dict) -> dict:
+    """The stored history row for a plan: its windows and the numbers behind them."""
+    return {
+        "t": p["generated_at"],
+        "windows": [{"s": s, "e": e} for s, e in p["windows"]],
+        **{k: p[k] for k in PLAN_HISTORY_KEYS if k in p},
+    }
 
 
 def plug_plan(store: Store) -> dict | None:

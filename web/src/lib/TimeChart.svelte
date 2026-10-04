@@ -4,6 +4,7 @@
   // with the time and every series; the cursor is synced across charts.
   import uPlot from "uplot";
   import type { Window } from "./api";
+  import { hover } from "./hover.svelte";
   import { AXIS_W, hourTicks, PAD_R } from "./layout";
   import { fmtClock, fmtDayClock, fmtWeekday, localMinutes, peakWindows } from "./time";
 
@@ -116,6 +117,8 @@
       tip = null;
       return;
     }
+    hover.t = u.posToVal(u.cursor.left, "x");
+    hover.from = "chart";
     const t = u.data[0][i];
     tip = {
       x: u.cursor.left + u.over.offsetLeft,
@@ -197,8 +200,20 @@
     over.addEventListener("mouseleave", () => {
       hovering = false;
       tip = null;
+      hover.t = null;
     });
     return () => plot?.destroy();
+  });
+
+  // Follow the pointer on the plan strip; charts already sync with each other.
+  $effect(() => {
+    const { t, from: source } = hover;
+    if (!plot || source !== "plan") return;
+    plot.setCursor(
+      t == null
+        ? { left: -10, top: -10 }
+        : { left: plot.valToPos(t, "x"), top: plot.over.clientHeight / 2 },
+    );
   });
 
   const fmt = (v: number | null, s: Series) =>
