@@ -6,7 +6,7 @@ export const GROUPS: { label: string; color: string; keys: (keyof MixRow)[] }[] 
   { label: "Gas", color: "--mix-gas", keys: ["gas"] },
   { label: "Imports", color: "--mix-imports", keys: ["imports"] },
   { label: "Batteries", color: "--mix-batteries", keys: ["batteries"] },
-  { label: "Solar", color: "--solar", keys: ["solar"] },
+  { label: "Solar", color: "--solar-area", keys: ["solar"] },
   { label: "Wind", color: "--mix-wind", keys: ["wind"] },
   { label: "Hydro", color: "--mix-hydro", keys: ["large_hydro", "small_hydro"] },
   {

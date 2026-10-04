@@ -89,11 +89,16 @@
     onpointermove={move}
     onpointerleave={leave}
   >
+    <defs>
+      <pattern id="peak-hatch" width="6" height="6" patternUnits="userSpaceOnUse">
+        <path d="M-1,7 L7,-1" stroke="var(--peak-hatch)" stroke-width="1.5" />
+      </pattern>
+    </defs>
     <text x={AXIS_W - 8} y="22" text-anchor="end" class="lab">Grid</text>
     <rect x={AXIS_W} y="8" width={Math.max(0, width - AXIS_W - PAD_R)} height="20" rx="4" fill="var(--panel-2)" />
     {#each peakWindows(from, to) as [s, e] (s)}
       {@const [a, b] = clip(s, e)}
-      {#if b > a}<rect x={a} y="8" width={b - a} height="20" fill="var(--peak-band)" />{/if}
+      {#if b > a}<rect x={a} y="8" width={b - a} height="20" fill="url(#peak-hatch)" />{/if}
     {/each}
     {#each windows as [s, e] (s)}
       {#if e > from && s < to}
