@@ -184,7 +184,7 @@
         <p class="n">{now.plan.shortfall_wh} Wh short of full by 4 pm</p>
       {/if}
     {:else if now?.plan?.strategy === "fallback"}
-      <p class="n">Battery telemetry unavailable or stale. Using a fixed-duration grid fallback.</p>
+      <p class="n">Fallback schedule · no battery data</p>
     {/if}
     <PlanView {windows} {forecast} {from} {to} now={tnow} />
   </section>
@@ -194,15 +194,13 @@
     <div class="head">
       <h3>CO₂, lb/MWh</h3>
       <div class="ctl">
-        <span class="stat">
-          {#if acc?.error != null}Average error <b>{acc.error}</b>, forecast made{:else}No past forecasts yet, made{/if}
-        </span>
+        <span class="stat">Forecast error</span>
         <div class="seg" role="group" aria-label="Hours ahead">
           {#each LEADS as h (h)}
             <button aria-pressed={lead === h} onclick={() => pickLead(h)}>{h} h</button>
           {/each}
         </div>
-        <span class="stat">ahead</span>
+        <span class="stat"><b>{acc?.error ?? "–"}</b> lb/MWh</span>
       </div>
     </div>
     <TimeChart

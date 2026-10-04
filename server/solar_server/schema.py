@@ -134,8 +134,9 @@ class Co2Period(BaseModel):
     grid_wh: int  # what the plug drew from the wall
     solar_wh: int
     load_lb: float  # CO2 had the load run straight from the wall
-    grid_lb: float  # CO2 from what the plug actually drew
-    avoided_lb: float  # load_lb - grid_lb
+    grid_lb: float  # CO2 from what the plug drew in the period
+    used_lb: float  # CO2 of the energy the load used, stored grid energy included
+    avoided_lb: float  # load_lb - used_lb
 
 
 class Co2(BaseModel):
