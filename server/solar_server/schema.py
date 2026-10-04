@@ -61,6 +61,14 @@ class MixRow(BaseModel):
     other: float | None = None
 
 
+class PriceRow(BaseModel):
+    """Real-time price at CAISO's north and south trading hubs, $/MWh."""
+
+    t: int
+    np15: float | None = None
+    sp15: float | None = None
+
+
 class Today(BaseModel):
     solar_wh: int
     grid_wh: int
@@ -97,6 +105,7 @@ class Timeline(BaseModel):
     plug: list[StoredPlugReport]
     forecast: list[tuple[int, float]]  # [t, lb/MWh]
     mix: list[MixRow]
+    prices: list[PriceRow]
     windows: list[Window]
 
 

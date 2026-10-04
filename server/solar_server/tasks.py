@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from planner.adaptive import MIN_CHARGE_W, build_adaptive_plan, estimates
 from planner.plan import PACIFIC, build_plan
@@ -12,7 +12,17 @@ from planner.plan import PACIFIC, build_plan
 from solar_server import totals
 from solar_server.config import Settings
 from solar_server.sources import Sources
-from solar_server.store import FORECASTS, MIX, PLANS, PLUG, SAMPLES, Store, day_key, window
+from solar_server.store import (
+    FORECASTS,
+    MIX,
+    PLANS,
+    PLUG,
+    PRICES,
+    SAMPLES,
+    Store,
+    day_key,
+    window,
+)
 from solar_server.totals import integrate_wh
 
 log = logging.getLogger(__name__)
@@ -27,7 +37,7 @@ def collect(store: Store, sources: Sources, now: datetime) -> dict:
 
     WattTime publishes a rate every 5 minutes; it and its percentile are added
     only when a new one has come out. On 5-minute marks CAISO's grid mix for
-    the last hour and today's totals are updated.
+    the last hour, hub prices and today's totals are updated.
 
     Each source is optional; a sample is stored with whatever arrived.
     """
@@ -62,6 +72,7 @@ def collect(store: Store, sources: Sources, now: datetime) -> dict:
         record_sample(store, sample)
     if five:
         store_mix(store, sources, now, since=t - 3600)
+        store_prices(store, sources, now, since=t - 3600)
         try:
             totals.update(store, t)
         except Exception as e:
@@ -135,6 +146,17 @@ def store_mix(store: Store, sources: Sources, now: datetime, since: int) -> None
         store.extend(MIX, [r for r in rows if since <= r["t"] <= t])
 
 
+def store_prices(store: Store, sources: Sources, now: datetime, since: int) -> None:
+    """Real-time hub prices from ``since`` to now; rows already stored are skipped."""
+    t = int(now.timestamp())
+    try:
+        rows = sources.prices(datetime.fromtimestamp(since, UTC), now)
+    except Exception as e:
+        log.warning("caiso prices failed: %s", e)
+        return
+    store.extend(PRICES, [r for r in rows if since <= r["t"] <= t])
+
+
 def archive_due(now: datetime) -> bool:
     """A forecast is kept for good every 30 minutes; the rest only drive the plan."""
     return now.minute % 30 == 0
@@ -146,7 +168,7 @@ def plan(
     """Refresh the emissions forecast and the battery-aware charging plan.
 
     The latest forecast lives in ``state/plan``. With ``archive``, the forecast
-    is also kept in ``forecasts`` and the last day's grid mix is filled in.
+    is also kept in ``forecasts`` and the last day's grid mix and prices are filled in.
     """
     points = sources.forecast(24)
     if not any(now <= t < now + timedelta(hours=24) for t, _ in points) or not all(
@@ -164,8 +186,9 @@ def plan(
     p["forecast"] = [[int(t.timestamp()), round(v, 1)] for t, v in points]
     p["forecast_at"] = int(now.timestamp())
     if archive:
-        # Fill any gaps in the last day's grid mix.
+        # Fill any gaps in the last day's grid mix and prices.
         store_mix(store, sources, now, since=int(now.timestamp()) - 86400)
+        store_prices(store, sources, now, since=int(now.timestamp()) - 86400)
     old = store.get_state("plan") or {}
     store.put_state("plan", p)
     keep_plan(store, old, p)
