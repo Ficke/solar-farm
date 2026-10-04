@@ -10,8 +10,14 @@
   import Segmented from "./lib/Segmented.svelte";
   import { explain } from "./lib/status";
   import TimeChart from "./lib/TimeChart.svelte";
+  import { type Mode, setMode, theme } from "./lib/theme.svelte";
   import { ago, fmtWhen, hours } from "./lib/time";
 
+  const MODES: { value: Mode; label: string }[] = [
+    { value: "system", label: "Auto" },
+    { value: "light", label: "Light" },
+    { value: "dark", label: "Dark" },
+  ];
   const LEADS = [1, 3, 6, 12].map((h) => ({ value: h, label: `${h} h` }));
   // Marginal CO2 is colored by its value, so clean hours read at a glance.
   const CO2_RAMP: [number, string][] = [
@@ -160,11 +166,14 @@
 <main>
   <header>
     <h1><i class="mark" aria-hidden="true"></i>Solar Farm</h1>
-    {#if stale.length}
-      <p class="sub">
-        <span class="dot bad"></span>No data from {stale.map((h) => h.name.toLowerCase()).join(", ")}
-      </p>
-    {/if}
+    <div class="tools">
+      {#if stale.length}
+        <p class="sub">
+          <span class="dot bad"></span>No data from {stale.map((h) => h.name.toLowerCase()).join(", ")}
+        </p>
+      {/if}
+      <Segmented label="Theme" options={MODES} value={theme.mode} onpick={setMode} />
+    </div>
   </header>
 
   {#if error}
@@ -364,10 +373,16 @@
     letter-spacing: -0.005em;
     margin: 0 0 10px;
   }
+  .tools {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
   .sub {
     margin: 0;
     font-size: 13px;
-    color: var(--bad);
+    color: var(--bad-ink);
     display: flex;
     align-items: center;
     gap: 6px;
@@ -385,7 +400,7 @@
     padding: 10px 14px;
     border-radius: 6px;
     background: var(--bad-bg);
-    color: var(--bad);
+    color: var(--bad-ink);
     font-size: 14px;
   }
   .card {
@@ -546,8 +561,8 @@
     box-shadow: inset 0 -2px 0 var(--grid);
   }
   .sw.peak {
-    background: var(--peak-band);
-    box-shadow: inset 0 -2px 0 var(--peak-ink);
+    background: repeating-linear-gradient(-45deg, var(--peak-hatch) 0 1.5px, transparent 1.5px 4px);
+    box-shadow: inset 0 0 0 1px var(--peak-hatch);
   }
   footer {
     display: flex;
@@ -568,7 +583,7 @@
     margin: 0 6px 1px 0;
   }
   footer .stale {
-    color: var(--bad);
+    color: var(--bad-ink);
   }
   footer .stale i {
     background: var(--bad);

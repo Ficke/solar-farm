@@ -91,12 +91,29 @@
   const css = (name: string) =>
     getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
+  // Diagonal hatching for the peak, so it reads apart from plan windows
+  // without relying on hue.
+  function hatch(ctx: CanvasRenderingContext2D, color: string) {
+    const n = Math.round(6 * devicePixelRatio);
+    const tile = document.createElement("canvas");
+    tile.width = tile.height = n;
+    const t = tile.getContext("2d");
+    if (!t) return color;
+    t.strokeStyle = color;
+    t.lineWidth = devicePixelRatio;
+    t.beginPath();
+    t.moveTo(-1, n + 1);
+    t.lineTo(n + 1, -1);
+    t.stroke();
+    return ctx.createPattern(tile, "repeat") ?? color;
+  }
+
   function bands(u: uPlot) {
     if (!shade) return;
     const { ctx } = u;
     // uPlot caches the canvas styles it last set, so hooks restore theirs.
     ctx.save();
-    const paint = (spans: [number, number][], color: string) => {
+    const paint = (spans: [number, number][], color: string | CanvasPattern) => {
       ctx.fillStyle = color;
       for (const [s, e] of spans) {
         const x0 = u.valToPos(Math.max(s, lo), "x", true);
@@ -104,7 +121,7 @@
         if (x1 > x0) ctx.fillRect(x0, u.bbox.top, x1 - x0, u.bbox.height);
       }
     };
-    paint(peakWindows(from, to), css("--peak-band"));
+    paint(peakWindows(from, to), hatch(ctx, css("--peak-hatch")));
     paint(windows, css("--plan-band"));
     ctx.restore();
   }
@@ -231,7 +248,9 @@
             // Only the dashboard's own charts follow each other.
             sync: mode === "inline" ? { key: "timeline" } : undefined,
             y: false,
-            points: { size: 8, width: 2, fill: css("--panel") },
+            // Stacked areas carry their values in the tooltip; dots on each
+            // layer edge would only clutter the stack.
+            points: { show: !series.some((s) => s.area), size: 8, width: 2, fill: css("--panel") },
             drag: { x: mode === "expanded", y: false, setScale: false },
             bind: { dblclick: () => () => null },
           },
@@ -267,8 +286,8 @@
         {},
         ...series.map((s) => ({
           label: s.label,
-          // Stacked areas get a surface-colored edge so adjacent fills separate.
-          stroke: s.ramp ? rampStroke(s.ramp) : s.area ? css("--bg") : css(s.color),
+          // Stacked areas are edged in their own color, so layers meet cleanly.
+          stroke: s.ramp ? rampStroke(s.ramp) : css(s.color),
           fill: s.fill ? css(s.fill) : undefined,
           dash: s.dash,
           width: mini ? 1 : (s.width ?? (s.area ? 1 : 2)),
