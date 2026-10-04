@@ -46,7 +46,7 @@ def build_plan(
 
     windows: list[list[int]] = []
     for start in chosen:
-        s, e = int(start.timestamp()), int((start + block).timestamp())
+        s, e = max(int(now.timestamp()), int(start.timestamp())), int((start + block).timestamp())
         if windows and windows[-1][1] == s:
             windows[-1][1] = e
         else:

@@ -79,6 +79,12 @@ def _edge_routes(app, settings, store, sources, verify, clock) -> None:
     def collect(request: Request) -> dict:
         check_scheduler(request, settings.scheduler_sa, verify)
         sample = tasks.collect(store, sources, now())
+        try:
+            tasks.refresh_charging_plan(store, settings, now())
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "charging replan failed after telemetry collection"
+            )
         health.check(store, int(clock()))
         return sample
 

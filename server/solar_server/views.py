@@ -31,7 +31,25 @@ def now_view(store: Store, now: int) -> dict:
         "sample": latest(sample, "sample", 2 * 3600),
         "plug": latest(plug, "report", 3600),
         "today": {"solar_wh": wh(sample), "grid_wh": wh(plug)},
-        "plan": {k: plan.get(k) for k in ("generated_at", "windows", "index_now")}
+        "plan": {
+            k: v
+            for k, v in plan.items()
+            if k
+            in (
+                "generated_at",
+                "windows",
+                "index_now",
+                "strategy",
+                "target_pct",
+                "floor_pct",
+                "solar_day_wh",
+                "solar_days",
+                "load_w",
+                "charge_w",
+                "grid_wh",
+                "shortfall_wh",
+            )
+        }
         if plan
         else None,
     }

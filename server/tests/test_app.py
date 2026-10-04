@@ -109,6 +109,20 @@ def test_collect_keeps_going_when_a_source_fails():
     assert "moer" not in body and body["battery_pct"] == 81.0
 
 
+def test_replan_failure_does_not_lose_collected_telemetry(monkeypatch):
+    def fail(*args):
+        raise RuntimeError("planning failed")
+
+    monkeypatch.setattr(tasks, "refresh_charging_plan", fail)
+    c, store = make("edge")
+    old = {"generated_at": NOW - 600, "windows": []}
+    store.put_state("plan", old)
+    response = c.post("/tasks/collect", headers=AUTH)
+    assert response.status_code == 200
+    assert store.get_state("sample")["sample"]["battery_pct"] == 81
+    assert store.get_state("plan") == old
+
+
 def test_plan_task_feeds_the_plug_without_the_forecast():
     c, store = make("edge")
     assert c.get("/plug/plan", headers={"X-Plug-Key": "k3y"}).status_code == 503
@@ -119,12 +133,13 @@ def test_plan_task_feeds_the_plug_without_the_forecast():
     assert not any(k.startswith("forecast") for k in plan)
     assert plan["generated_at"] == NOW
     assert plan["index_now"] == 82.0
-    # 4 clean hours, all in the cheap stretch 18 h out
-    assert plan["windows"] == [[NOW + 18 * 3600, NOW + 22 * 3600]]
+    # Without a collected battery reading, use the labelled one-hour fallback.
+    assert plan["strategy"] == "fallback"
+    assert plan["windows"] == [[NOW + 18 * 3600, NOW + 19 * 3600]]
 
     # Every plan and its forecast are kept, not just the latest.
     assert store.day(PLANS, "2026-10-04") == [
-        {"t": NOW, "windows": [{"s": NOW + 18 * 3600, "e": NOW + 22 * 3600}]}
+        {"t": NOW, "windows": [{"s": NOW + 18 * 3600, "e": NOW + 19 * 3600}]}
     ]
     (snap,) = store.day(FORECASTS, "2026-10-04")
     assert snap["t"] == NOW and snap["step"] == 300 and len(snap["values"]) == 288
@@ -145,6 +160,30 @@ def test_grid_mix_is_stored_once_per_row():
         {"t": NOW - 7200, "solar": 0, "gas": 15000},
         {"t": NOW - 600, "solar": 0, "gas": 15000},
     ]
+
+
+def test_collect_then_plan_exposes_adaptive_policy_to_dashboard_and_plug():
+    c, store = make("edge")
+    c.post("/tasks/collect", headers=AUTH)
+    assert c.post("/tasks/plan", headers=AUTH).status_code == 200
+    plan = c.get("/plug/plan", headers={"X-Plug-Key": "k3y"}).json()
+    assert plan["strategy"] == "adaptive"
+    assert plan["target_pct"] == 83.7
+    web, _ = make("web", store=store)
+    assert web.get("/api/now").json()["plan"]["grid_wh"] == plan["grid_wh"]
+
+
+def test_empty_forecast_keeps_previous_plan():
+    class EmptyForecast(FakeSources):
+        def forecast(self, hours, signal="co2_moer"):
+            return []
+
+    store = MemoryStore()
+    old = {"generated_at": NOW - 600, "windows": []}
+    store.put_state("plan", old)
+    with pytest.raises(ValueError, match="unusable emissions forecast"):
+        tasks.plan(store, EmptyForecast(), Settings(), datetime.fromtimestamp(NOW, UTC))
+    assert store.get_state("plan") == old
 
 
 def test_accuracy_compares_the_forecast_made_hours_earlier():
