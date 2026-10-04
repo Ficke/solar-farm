@@ -4,15 +4,27 @@ Grid-aware charging for a Jackery Explorer 3000 v2 with a 250 W panel in a San F
 
 ## How it works
 
-- **Jackery:** Self-powered mode with the outage reserve at about 80%. The grid only charges the battery up to the reserve; the space above it is left for the panel. When the plug cuts power, the Jackery treats it as an outage and runs everything from the battery.
+- **Jackery:** no mode schedule or reserve slider is used to control charging. The server decides how much grid energy is needed and the Shelly controls AC access. Solar stays connected. The Jackery must accept AC charging while the plug is on and keep powering the load when it is off; select settings that allow that in the app. The scheduler assumes 1,700 W of AC input.
 - **Shelly plug** (`device/src/grid-gate.js`): a script on the plug decides every minute whether the grid is on, in this order:
   1. 4pm to 9pm Pacific: always off.
-  2. Grid off for 30 hours (a whole missed day): on for 2 hours, so the battery can't run flat.
-  3. A plan less than 3 hours old: on inside its windows.
+  2. A feasible battery-aware plan less than 15 minutes old: follow its windows, including no grid at all when solar covers demand.
+  3. Otherwise, grid off for 30 hours (a whole missed day): on for 2 hours, so the battery can't run flat. Then follow any plan less than 3 hours old.
   4. Otherwise WattTime's live index for `CAISO_NORTH`: on at or below the 25th percentile.
   5. No internet: on from 10am to 3pm.
-- **Server** (`server/` and `planner/`, on Google Cloud Run): every 30 minutes it reads WattTime's 24-hour marginal-emissions forecast and picks the cleanest 4 hours outside the peak, which the plug reads from `/plug/plan`. Every 5 minutes it records the battery %, solar watts (from Jackery's cloud), grid emissions and CAISO's generation by source, and the plug reports its state every minute.
-- **Dashboard** (`web/`): the private page described below. It also suggests a reserve from two weeks of solar readings; the reserve itself is set by hand in the Jackery app.
+- **Server** (`server/` and `planner/`, on Google Cloud Run): every 30 minutes it reads WattTime's 24-hour marginal-emissions forecast. With fresh battery telemetry, it projects solar and load and selects short top-ups in the cleanest reachable 15-minute blocks outside peak, shortening the final block to whole minutes. It replans after each 5-minute telemetry collection using the cached emissions forecast. The plug reads `/plug/plan` and reports its state every minute.
+- **Dashboard** (`web/`): shows windows, estimated grid Wh, solar headroom, load and charging assumptions, and any projected energy shortfall. It labels the fixed-duration fallback when battery telemetry is unavailable.
+
+## Charging policy
+
+Solar comes first. Initially the planner expects **500 Wh/day**, spread over 9am–5pm Pacific. It learns an average time-of-day solar profile from the **last seven completed days**, leaving room for an 80th-percentile solar day. Days need at least 18 hours of telemetry coverage, including six between 9am and 5pm; gaps over 15 minutes are excluded. Old days, invalid readings and incomplete days do not skew the estimate. With the 3,072 Wh battery, 500 Wh means a grid charging ceiling of about **84%**. That ceiling is enforced by our schedule, not a Jackery reserve setting; at least 10% headroom is always left.
+
+The planner starts with the latest battery percentage, predicts consumption, and adds enough grid energy to keep projected charge above **20%** and finish the forecast horizon with the starting stored energy (capped by the solar ceiling). It does not fill a low battery to 84% just because space is available. If solar covers consumption, it can schedule no grid at all. Before each energy deadline, it chooses the lowest marginal emissions available; it will use an earlier, dirtier slot if the battery cannot safely reach the cleaner one. A shortfall is reported if peak restrictions or charging power make that impossible.
+
+Load is the time-weighted average of the last 24 hours, with a 100 W fallback until there are six hours of valid readings. Charging uses the configured **1,700 W** assumption; noisy or bypass-only AC readings do not change it. The energy model assumes 90% efficiency for input and output. Solar/load summaries are cached for 30 minutes, so five-minute replans normally read just the latest battery state and the cached estimates. Forecast blocks are ranked once per plan. No additional controller or optimization service is needed.
+
+Fresh state of charge corrects the plan every five minutes: unexpectedly high charge cancels unnecessary top-ups; unexpected drain can bring charging forward. A failed replan is logged without discarding a successful telemetry collection. Neither the five-minute telemetry loop nor the plug's one-minute relay loop is an exact hardware charge limit: allow for overshoot, especially if charging speed changes. This is a deadline-aware greedy scheduler, not a guarantee of globally minimum emissions. Learned solar is captured generation, not a weather forecast or a measurement of curtailed potential.
+
+Battery readings older than 15 minutes trigger a labelled **one-hour** clean-grid fallback. Cached emissions forecasts are only reused for two hours. Internet and telemetry failures retain the plug's live-index, daytime and emergency fallbacks; these cannot enforce solar headroom without battery data. Jackery's own battery protection remains active.
 
 ## One-time setup
 
@@ -20,7 +32,7 @@ Grid-aware charging for a Jackery Explorer 3000 v2 with a 250 W panel in a San F
 2. **Jackery cloud (optional, for telemetry):** create a second Jackery account and share the power station to it from the app. Jackery allows one login at a time, so the planner must not use the account on your phone. The access is unofficial (via [socketry](https://github.com/jlopez/socketry)) and read-only; if it breaks, the plan keeps working.
 3. **Repository secrets** (Settings > Secrets and variables > Actions): `WATTTIME_USERNAME`, `WATTTIME_PASSWORD`, and optionally `JACKERY_EMAIL`, `JACKERY_PASSWORD`, `JACKERY_SN`. The Infra workflow copies them into Google Secret Manager.
 4. **Google Cloud:** follow [`infra/README.md`](infra/README.md).
-5. **Jackery app:** Self-powered on, reserve 80%, Quiet Charging on (keeps the charge rate well under the plug's 15 A rating).
+5. **Jackery app:** disable its charging schedule and reserve-based charging limit so AC charging follows the plug. Use a charging speed matching the planner's 1,700 W assumption and within the plug's 15 A rating. Verify that turning the plug off preserves load output and solar charging; exact setting names depend on firmware. The integration is read-only and does not change app settings.
 6. **Plug:** keep it in Wi-Fi mode, reserve its IP address in the router's DHCP settings and note that address.
 
 ## Deploying to the plug
@@ -45,7 +57,7 @@ It also protects the plug:
 
 ## Dashboard
 
-The private dashboard is at https://solar-web-v5whpbqqpq-uw.a.run.app (Google sign-in; only the accounts in the `DASHBOARD_USERS` variable get in). It leads with whether the grid is on, why, and when it next changes, then the plan in one place (a 24-hour strip and a list of windows), WattTime's actual and forecast emissions, CAISO's generation by source, a check of how far off the forecast was 1 to 12 hours ahead, the battery and power history (solar and grid in, load out), CO₂ avoided by day, week or month, the last week's energy, and the suggested reserve. Hover a chart for exact times and values. It refreshes itself every 30 seconds.
+The private dashboard is at https://solar-web-v5whpbqqpq-uw.a.run.app (Google sign-in; only the accounts in the `DASHBOARD_USERS` variable get in). It leads with whether the grid is on, why, and when it next changes, then the plan in one place (a 24-hour strip and a list of windows), WattTime's actual and forecast emissions, CAISO's generation by source, a check of how far off the forecast was 1 to 12 hours ahead, the battery and power history (solar and grid in, load out), CO₂ avoided by day, week or month, the last week's energy, and solar headroom. Hover a chart for exact times and values. It refreshes itself every 30 seconds.
 
 Every reading, grid mix row, plug report, plan and forecast is kept in Firestore, with a weekly backup kept for 14 weeks.
 
@@ -86,6 +98,6 @@ The script must stay ES5: the test suite parses it with `ecmaVersion: 5`.
 
 ## Tuning
 
-- **Reserve:** follow the dashboard's suggestion. Rule of thumb: if the battery hits 100% on sunny afternoons, lower it; if it never gets close, raise it.
+- **Solar and battery:** the planner learns solar headroom automatically. Initial server settings are `SOLAR_DAY_WH=500`, `LOAD_W=100`, `CHARGE_W=1700`, and `BATTERY_FLOOR_PCT=20`. Override these on solar-edge in `infra/run.tf` if needed. Solar and load fallbacks yield to recent measurements; `CHARGE_W` remains the configured charging-speed assumption.
 - **Script settings:** `[tuning]` in `config/device.toml` overrides the script defaults (threshold, peak hours, fallback window); rerun `deploy.py`.
-- **Daily grid window:** add `BUDGET_HOURS` (default 4) to solar-edge's environment in `infra/run.tf`.
+- **Telemetry fallback:** `BUDGET_HOURS` (default 1) controls fixed-duration charging only when battery telemetry is unavailable; it is not the adaptive plan's daily quota.

@@ -20,7 +20,6 @@
   import { ago, fmtWhen, hours } from "./lib/time";
   import WeekBars from "./lib/WeekBars.svelte";
 
-  const RESERVE = 80; // set by hand in the Jackery app
   const LEADS = [1, 3, 6, 12];
 
   let now = $state<Now>();
@@ -81,7 +80,7 @@
 
   const s = $derived(now?.sample ?? null);
   const plug = $derived(now?.plug ?? null);
-  const windows = $derived(tl?.windows ?? now?.plan?.windows ?? []);
+  const windows = $derived(now?.plan?.windows ?? tl?.windows ?? []);
   const forecast = $derived(tl?.forecast ?? []);
   const tnow = $derived(now?.now ?? clock);
   // One time axis for every chart and the plan strip.
@@ -187,6 +186,19 @@
 
   <section class="card" aria-labelledby="plan-h">
     <h2 id="plan-h">Plan</h2>
+    {#if now?.plan?.strategy === "adaptive"}
+      <p class="n">
+        {now.plan.grid_wh} Wh of grid top-ups · target {now.plan.target_pct}% · floor {now.plan.floor_pct}%.
+        Solar estimate {now.plan.solar_day_wh} Wh/day
+        ({now.plan.solar_days ? `${now.plan.solar_days} observed days` : "initial estimate"});
+        load {now.plan.load_w} W, charging {now.plan.charge_w} W.
+      </p>
+      {#if now.plan.shortfall_wh}
+        <p class="n">The available charging windows leave a projected {now.plan.shortfall_wh} Wh shortfall.</p>
+      {/if}
+    {:else if now?.plan?.strategy === "fallback"}
+      <p class="n">Battery telemetry unavailable or stale. Using a fixed-duration grid fallback.</p>
+    {/if}
     <PlanView {windows} {forecast} {from} {to} now={tnow} />
   </section>
 
@@ -253,7 +265,7 @@
       {windows}
       height={110}
       yMax={100}
-      yRule={{ value: RESERVE, label: `Reserve ${RESERVE}%` }}
+      yRule={now?.plan?.target_pct != null ? { value: now.plan.target_pct, label: `Grid target ${now.plan.target_pct}%` } : undefined}
       series={[{ label: "Battery", color: "--accent", unit: "%" }]}
     />
     <h3>Power, W</h3>
@@ -341,11 +353,11 @@
       {/if}
     </section>
     <section class="card" aria-labelledby="res-h">
-      <h2 id="res-h">Reserve</h2>
+      <h2 id="res-h">Solar headroom</h2>
       <dl class="pair">
-        <div><dt>Set</dt><dd>{RESERVE}%</dd></div>
+        <div><dt>Grid target</dt><dd>{now?.plan?.target_pct != null ? `${now.plan.target_pct}%` : "–"}</dd></div>
         <div>
-          <dt>Suggested</dt>
+          <dt>From solar history</dt>
           <dd>{daily?.reserve.reserve_pct != null ? `${daily.reserve.reserve_pct}%` : "–"}</dd>
         </div>
       </dl>

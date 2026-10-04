@@ -2,8 +2,8 @@
 //
 // Turns grid power on only when California's grid is clean, never during the
 // PG&E E-TOU-C peak (4pm to 9pm local), with fallbacks if the plan or the
-// internet goes away. The Jackery (Self-powered mode, reserve slider) decides
-// how much the grid may charge; this script only decides when.
+// internet goes away. The server sizes top-ups from battery and solar telemetry;
+// the plug controls grid access without relying on Jackery charging modes.
 //
 // Written in ES5 style: Shelly scripts have no promises, async, classes or
 // let/const guarantees, and deep nesting of anonymous functions can crash the
@@ -59,6 +59,12 @@ function decide(s, now, localMin, cfg) {
   if (localMin < 0) return { on: false, reason: "no-time" };
   if (localMin >= cfg.peakStart && localMin < cfg.peakEnd) {
     return { on: false, reason: "peak" };
+  }
+  // Healthy solar-only operation can exceed 30 hours without grid power.
+  // Only a recent, feasible battery-aware plan may suppress the time backstop.
+  if (s.plan && s.plan.strategy === "adaptive" && s.plan.shortfall_wh === 0 &&
+      now - s.plan.generated_at >= 0 && now - s.plan.generated_at < 900) {
+    return { on: inWindows(s.plan.windows, now), reason: "plan" };
   }
   if (s.safetyUntil > now || (s.lastOnAt > 0 && now - s.lastOnAt > cfg.safetyOffMax)) {
     return { on: true, reason: "safety" };

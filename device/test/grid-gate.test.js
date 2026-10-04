@@ -76,6 +76,16 @@ test("unknown time keeps the grid off", () => {
   assert.deepEqual({ ...context.decide(freshState(context), NOW, -1, context.CFG) }, { on: false, reason: "no-time" });
 });
 
+test("a recent feasible adaptive plan permits solar-only operation beyond 30 hours", () => {
+  const { context } = load();
+  const plan = { generated_at: NOW - 60, strategy: "adaptive", shortfall_wh: 0, windows: [] };
+  const s = freshState(context, { plan, lastOnAt: NOW - 31 * 3600, safetyUntil: NOW + 600 });
+  assert.deepEqual({ ...context.decide(s, NOW, 720, context.CFG) }, { on: false, reason: "plan" });
+  assert.equal(context.decide(s, NOW + 901, 735, context.CFG).reason, "safety");
+  s.plan.shortfall_wh = 100;
+  assert.equal(context.decide(s, NOW, 720, context.CFG).reason, "safety");
+});
+
 test("startup reads config from KVS, follows the plan and logs a charge session", () => {
   const plan = { generated_at: NOW - 60, windows: [[NOW - 60, NOW + 60]] };
   const h = load({

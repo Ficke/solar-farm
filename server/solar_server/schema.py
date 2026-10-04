@@ -70,6 +70,15 @@ class PlanSummary(BaseModel):
     generated_at: int
     windows: list[Window]
     index_now: float | None = None
+    strategy: Literal["adaptive", "fallback"] | None = None
+    target_pct: float | None = None
+    floor_pct: float | None = None
+    solar_day_wh: int | None = None
+    solar_days: int | None = None
+    load_w: float | None = None
+    charge_w: float | None = None
+    grid_wh: int | None = None
+    shortfall_wh: int | None = None
 
 
 class Now(BaseModel):

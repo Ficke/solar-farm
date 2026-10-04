@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+import math
+from datetime import datetime, timedelta
 
+from planner.adaptive import build_adaptive_plan, estimates
 from planner.plan import PACIFIC, build_plan
 
 from solar_server import totals
 from solar_server.config import Settings
 from solar_server.sources import Sources
-from solar_server.store import FORECASTS, MIX, PLANS, PLUG, SAMPLES, Store, day_key
+from solar_server.store import FORECASTS, MIX, PLANS, PLUG, SAMPLES, Store, day_key, window
 from solar_server.totals import integrate_wh
 
 log = logging.getLogger(__name__)
@@ -116,14 +118,19 @@ def store_mix(store: Store, sources: Sources, now: datetime, since: int) -> None
 
 
 def plan(store: Store, sources: Sources, settings: Settings, now: datetime) -> dict:
-    """Pick tomorrow's cleanest hours and keep the forecast for the dashboard."""
+    """Refresh the emissions forecast and the battery-aware charging plan."""
     points = sources.forecast(24)
-    p = build_plan(points, now, budget_hours=settings.budget_hours, region=settings.region)
+    if not any(now <= t < now + timedelta(hours=24) for t, _ in points) or not all(
+        math.isfinite(v) for _, v in points
+    ):
+        raise ValueError("unusable emissions forecast; keeping the previous plan")
+    p = charging_plan(store, points, settings, now)
     try:
         p["index_now"] = sources.signal_index()
     except Exception as e:
         log.warning("signal-index skipped: %s", e)
     p["forecast"] = [[int(t.timestamp()), round(v, 1)] for t, v in points]
+    p["forecast_at"] = int(now.timestamp())
     # Fill any gaps in the last day's grid mix.
     store_mix(store, sources, now, since=int(now.timestamp()) - 86400)
     store.put_state("plan", p)
@@ -144,6 +151,70 @@ def plan(store: Store, sources: Sources, settings: Settings, now: datetime) -> d
             },
         )
     return p
+
+
+def charging_plan(
+    store: Store, points: list[tuple[datetime, float]], settings: Settings, now: datetime
+) -> dict:
+    """Use recent battery telemetry; otherwise label the fixed-budget fallback."""
+    t = int(now.timestamp())
+    battery = (store.get_state("sample") or {}).get("sample")
+    if battery is None or battery.get("battery_pct") is None:
+        recent = window(store, SAMPLES, t - 900, t)
+        battery = next((s for s in reversed(recent) if s.get("battery_pct") is not None), None)
+    if (
+        battery is None
+        or not 0 <= t - battery["t"] <= 900
+        or not 0 <= battery["battery_pct"] <= 100
+    ):
+        p = build_plan(
+            points,
+            now,
+            budget_hours=settings.budget_hours,
+            block_minutes=15,
+            region=settings.region,
+        )
+        p["strategy"] = "fallback"
+        return p
+    estimate = charging_estimates(store, settings, t)
+    return build_adaptive_plan(
+        points,
+        now,
+        battery["battery_pct"],
+        estimate,
+        floor_pct=settings.floor_pct,
+        region=settings.region,
+    )
+
+
+def charging_estimates(store: Store, settings: Settings, now: int) -> dict:
+    """Read history at most twice an hour; replans normally use one state read."""
+    inputs = [settings.solar_day_wh, settings.load_w, settings.charge_w]
+    cached = store.get_state("charging_estimates") or {}
+    if cached.get("inputs") == inputs and 0 <= now - cached.get("t", 0) < 1800:
+        return cached["estimate"]
+    samples = window(store, SAMPLES, now - 8 * 86400, now)
+    estimate = estimates(samples, now, *inputs)
+    store.put_state("charging_estimates", {"t": now, "inputs": inputs, "estimate": estimate})
+    return estimate
+
+
+def refresh_charging_plan(store: Store, settings: Settings, now: datetime) -> None:
+    """Replan after each 5-minute reading using the cached emissions forecast."""
+    old = store.get_state("plan") or {}
+    forecast = old.get("forecast", [])
+    if not forecast or int(now.timestamp()) - old.get("forecast_at", old["generated_at"]) > 7200:
+        return
+    points = [(datetime.fromtimestamp(t, now.tzinfo), v) for t, v in forecast]
+    if not any(t >= now for t, _ in points):
+        return
+    p = charging_plan(store, points, settings, now)
+    p.update(forecast=forecast, forecast_at=old.get("forecast_at", old["generated_at"]))
+    p["index_now"] = old.get("index_now")
+    store.put_state("plan", p)
+    store.append(
+        PLANS, {"t": p["generated_at"], "windows": [{"s": s, "e": e} for s, e in p["windows"]]}
+    )
 
 
 def plug_plan(store: Store) -> dict | None:
