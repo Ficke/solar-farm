@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
 
+from planner.battery import Battery
 from planner.plan import PACIFIC
 
 from planner import telemetry
@@ -12,8 +13,10 @@ from solar_server.store import FORECASTS, MIX, PLUG, PRICES, SAMPLES, Store, day
 
 
 def now_view(store: Store, now: int) -> dict:
-    """Read live data and today's totals from three state documents."""
+    """Read live data and today's totals from four state documents."""
     sample = store.get_state("sample") or {}
+    estimate = (store.get_state("charging_estimates") or {}).get("estimate") or {}
+    solar_scale = Battery.from_dict(estimate.get("battery")).solar_scale
     plug = store.get_state("plug") or {}
     today = day_key(now)
 
@@ -21,16 +24,16 @@ def now_view(store: Store, now: int) -> dict:
         item = state.get(key)
         return item if item and item["t"] >= now - max_age else None
 
-    def wh(state: dict) -> int:
+    def wh(state: dict, scale: float = 1.0) -> int:
         t = state.get("today")
-        return round(t["wh"]) if t and t["day"] == today else 0
+        return round(t["wh"] * scale) if t and t["day"] == today else 0
 
     plan = store.get_state("plan") or {}
     return {
         "now": now,
         "sample": latest(sample, "sample", 2 * 3600),
         "plug": latest(plug, "report", 3600),
-        "today": {"solar_wh": wh(sample), "grid_wh": wh(plug)},
+        "today": {"solar_wh": wh(sample, solar_scale), "grid_wh": wh(plug)},
         "plan": {
             k: v
             for k, v in plan.items()

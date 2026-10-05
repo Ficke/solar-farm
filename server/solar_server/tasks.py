@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from planner.adaptive import MIN_CHARGE_W, build_adaptive_plan, estimates
+from planner.battery import Battery
 from planner.plan import PACIFIC, build_plan
 
 from solar_server import totals
@@ -316,7 +317,8 @@ def charging_estimates(store: Store, settings: Settings, now: int) -> dict:
         return cached["estimate"]
     samples = window(store, SAMPLES, now - 8 * 86400, now)
     plug = window(store, PLUG, now - 8 * 86400, now)
-    estimate = estimates(samples, now, *inputs, plug=plug)
+    previous = Battery.from_dict((cached.get("estimate") or {}).get("battery"))
+    estimate = estimates(samples, now, *inputs, plug=plug, battery=previous)
     store.put_state("charging_estimates", {"t": now, "inputs": inputs, "estimate": estimate})
     return estimate
 

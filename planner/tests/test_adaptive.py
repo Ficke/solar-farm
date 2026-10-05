@@ -3,6 +3,7 @@ from itertools import pairwise
 
 import pytest
 from planner.adaptive import build_adaptive_plan, estimates
+from planner.battery import AC_CHARGE, DISCHARGE, SOLAR_CHARGE
 from planner.plan import PACIFIC
 from planner.telemetry import CAPACITY_WH
 
@@ -104,7 +105,8 @@ def test_history_learns_solar_and_load_without_extrapolating_gaps():
     # Charge held at 50% with 500 Wh of solar and 1.2 kWh of grid in over the
     # last 24 hours of readings (7 am to midnight): the load drew it all.
     hours = (samples[-1]["t"] - int((NOW - timedelta(days=1)).timestamp())) / 3600
-    assert estimate["load_w"] == pytest.approx((500 + 1200) * 0.9 * 0.9 / hours, rel=0.01)
+    stored = 500 * SOLAR_CHARGE + 1200 * AC_CHARGE
+    assert estimate["load_w"] == pytest.approx(stored * DISCHARGE / hours, rel=0.01)
     assert estimate["charge_w"] == pytest.approx(1160)  # AC in less load, as measured
     assert estimate["solar_profile"][48] == pytest.approx(100)
     sparse = estimates([samples[0], samples[-1]], int(NOW.timestamp()), 500, 100, 1700)

@@ -9,8 +9,8 @@ from datetime import datetime, time, timedelta
 from itertools import pairwise
 from statistics import mean, median
 
+from planner.battery import AC_CHARGE, DISCHARGE, Battery, measure
 from planner.plan import PACIFIC
-from planner.telemetry import CAPACITY_WH
 
 TIE_MOER = 50  # Round emissions to groups of this many lb/MWh.
 MIN_SOLAR_WH = 150  # Reserve headroom when the solar allowance reaches this value.
@@ -18,7 +18,6 @@ MIN_CHARGE_W = 200  # Exclude low-power passthrough readings.
 MIN_CHARGE_READINGS = 3
 RECENT_CHARGE_READINGS = 30  # Favor recent charging speed over older readings.
 TOLERANCE_WH = 30  # Ignore floor and target deficits below about 1%.
-EFFICIENCY = 0.9  # Each way through the battery's charger and inverter.
 TAPER_PCT = 95  # The Jackery slows charging near full; keep those readings out of the rate.
 FULL_PCT = 97  # At or above this, solar input is cut back and says little about the panels.
 
@@ -30,6 +29,7 @@ def estimates(
     load_w: float,
     charge_w: float,
     plug: list[dict] | None = None,
+    battery: Battery | None = None,
 ) -> dict:
     """Estimate solar, load and AC charging from recent telemetry.
 
@@ -41,6 +41,8 @@ def estimates(
     come from the plug's own meter when its reports are given, else from the
     Jackery's AC input. Charging uses the latest 30 qualifying readings within
     a week. Insufficient coverage falls back to the supplied defaults.
+    Capacity and the solar reading's scale are measured from the same
+    readings, keeping ``battery`` where they show nothing new.
     """
     samples = sorted({s["t"]: s for s in samples if s["t"] <= now}.values(), key=lambda s: s["t"])
     today = datetime.fromtimestamp(now, PACIFIC).date()
@@ -81,7 +83,8 @@ def estimates(
                     observed[quarter].append(0.0)  # Night readings are often missing.
     recent = [s for s in samples if now - 86400 <= s["t"] <= now]
     plug = sorted({r["t"]: r for r in plug or [] if r["t"] <= now}.values(), key=lambda r: r["t"])
-    balance = load_from_balance(recent, plug)
+    battery = measure(samples, plug, battery)
+    balance = load_from_balance(recent, plug, battery)
     for a, b in pairwise(recent):
         if (
             a.get("output_w") is not None
@@ -134,6 +137,7 @@ def estimates(
         if load_seconds >= 6 * 3600
         else load_w,
         "charge_w": median(charging) if len(charging) >= MIN_CHARGE_READINGS else charge_w,
+        "battery": battery.to_dict(),
     }
 
 
@@ -141,16 +145,19 @@ def _finite(s: dict, key: str) -> bool:
     return s.get(key) is not None and math.isfinite(s[key])
 
 
-def load_from_balance(samples: list[dict], plug: list[dict]) -> float | None:
+def load_from_balance(
+    samples: list[dict], plug: list[dict], battery: Battery | None = None
+) -> float | None:
     """Average AC load over the samples from energy in and the change in charge.
 
     Over each stretch of readings without a gap over 15 minutes, what went
     into the battery (solar and grid, less charging losses) minus what it
     gained is what the load drew from it, less inverter losses. Grid energy
     is the plug meter's increase when ``plug`` reports are given, else the
-    Jackery's AC input. One percent of charge is 31 Wh, so this needs six
-    hours of readings to be useful.
+    Jackery's AC input. One percent of charge is about 31 Wh, so this needs
+    six hours of readings to be useful.
     """
+    battery = battery or Battery()
     readings = [s for s in samples if _finite(s, "battery_pct")]
     stretches: list[list[dict]] = []
     for s in readings:
@@ -186,12 +193,12 @@ def load_from_balance(samples: list[dict], plug: list[dict]) -> float | None:
                 for x, y in pairwise(run)
                 if _finite(x, "ac_input_w") and _finite(y, "ac_input_w")
             )
-        gained = (run[-1]["battery_pct"] - run[0]["battery_pct"]) / 100 * CAPACITY_WH
-        drawn += (solar + grid) * EFFICIENCY - gained
+        gained = battery.wh(run[-1]["battery_pct"] - run[0]["battery_pct"])
+        drawn += solar * battery.solar_stored + grid * AC_CHARGE - gained
         seconds += b - a
     if seconds < 6 * 3600:
         return None
-    return max(0.0, drawn * EFFICIENCY / (seconds / 3600))
+    return max(0.0, drawn * DISCHARGE / (seconds / 3600))
 
 
 def build_adaptive_plan(
@@ -200,7 +207,6 @@ def build_adaptive_plan(
     battery_pct: float,
     estimate: dict,
     floor_pct: float = 20,
-    efficiency: float = EFFICIENCY,
     region: str = "CAISO_NORTH",
     hold: list[list[int]] | None = None,
 ) -> dict:
@@ -217,8 +223,10 @@ def build_adaptive_plan(
     shortfall.
     """
     tnow = int(now.timestamp())
-    floor = CAPACITY_WH * floor_pct / 100
-    target = CAPACITY_WH
+    battery = Battery.from_dict(estimate.get("battery"))
+    capacity = battery.capacity_wh
+    floor = capacity * floor_pct / 100
+    target = capacity
     deadline = next_deadline(now)
     signals: dict[int, list[float]] = defaultdict(list)
     for t, value in points:
@@ -234,7 +242,7 @@ def build_adaptive_plan(
         s, e = max(tnow, start), min(end, start + 900)
         local = datetime.fromtimestamp(s, PACIFIC)
         hours = (e - s) / 3600
-        solar = profile.get(local.hour * 4 + local.minute // 15, 0.0) * efficiency * hours
+        solar = profile.get(local.hour * 4 + local.minute // 15, 0.0) * battery.solar_stored * hours
         moer = sum(signals[start]) / len(signals[start]) if start in signals else None
         slots.append(
             {
@@ -242,8 +250,8 @@ def build_adaptive_plan(
                 "e": e,
                 "solar": solar,
                 "load": estimate["load_w"] * hours,  # Wh at the outlet
-                "net": solar - estimate["load_w"] / efficiency * hours,
-                "max": estimate["charge_w"] * efficiency * hours,
+                "net": solar - estimate["load_w"] / DISCHARGE * hours,
+                "max": estimate["charge_w"] * AC_CHARGE * hours,
                 "moer": moer,
                 "allowed": moer is not None and not 16 <= local.hour < 21,
             }
@@ -252,7 +260,7 @@ def build_adaptive_plan(
     for i in range(len(slots) - 2, -1, -1):
         later[i] = later[i + 1] + slots[i + 1]["solar"]
     keep = [h / 2 if h / 2 >= MIN_SOLAR_WH else 0.0 for h in later]
-    initial = CAPACITY_WH * battery_pct / 100
+    initial = battery.wh(battery_pct)
     ranked = rank_blocks(slots, held_blocks(slots, hold or [], tnow))
     # Blocks where the plug stays on for the whole block to run the load.
     bypass: set[int] = set()
@@ -264,9 +272,9 @@ def build_adaptive_plan(
         for i, slot in enumerate(slots):
             if i in bypass:
                 # The grid runs the load and charges any room left at full rate.
-                level = min(CAPACITY_WH, level + slot["solar"] + slot["max"])
+                level = min(capacity, level + slot["solar"] + slot["max"])
             else:
-                level = min(CAPACITY_WH, level + slot["net"] + grid[i])
+                level = min(capacity, level + slot["net"] + grid[i])
             out.append(level)
         return out
 
@@ -284,7 +292,7 @@ def build_adaptive_plan(
                 if i <= by:
                     # Only charge that is still stored at ``by`` helps: a block
                     # already followed by a full battery adds nothing.
-                    room = min(CAPACITY_WH - level for level in levels[i : by + 1])
+                    room = min(capacity - level for level in levels[i : by + 1])
                     grid[i] += max(0.0, min(slots[i]["max"] - grid[i], need, room))
 
         for i in range(len(slots)):
@@ -314,11 +322,11 @@ def build_adaptive_plan(
                 or not slot["allowed"]
                 or keep[i] > 0
                 or drain <= 0
-                or before < CAPACITY_WH - TOLERANCE_WH
+                or before < capacity - TOLERANCE_WH
             ):
                 continue
             # The battery Wh used now come back later in the next block the
-            # plan would add, at 1/efficiency grid Wh each.
+            # plan would add, at 1/AC_CHARGE grid Wh each.
             spare = [
                 slots[j]["moer"]
                 for j in ranked
@@ -326,7 +334,7 @@ def build_adaptive_plan(
             ]
             recharge = min(spare, default=math.inf)
             recharge_at[i] = recharge
-            if slot["moer"] * slot["load"] <= recharge * drain / efficiency:
+            if slot["moer"] * slot["load"] <= recharge * drain / AC_CHARGE:
                 added.add(i)
         if not added:
             break
@@ -340,11 +348,11 @@ def build_adaptive_plan(
             before = levels[i - 1] if i else initial
             stored = max(0.0, levels[i] - before - slot["solar"])
             s, e = slot["s"], slot["e"]
-            drawn += slot["load"] + stored / efficiency
+            drawn += slot["load"] + stored / AC_CHARGE
         elif grid[i] > 0.01:
             seconds = min(
                 slot["e"] - slot["s"],
-                math.ceil(grid[i] / (estimate["charge_w"] * efficiency) * 60) * 60,
+                math.ceil(grid[i] / (estimate["charge_w"] * AC_CHARGE) * 60) * 60,
             )
             # A partial window joins the next block's window; otherwise it
             # starts the block so a floor deadline is met.
@@ -352,8 +360,8 @@ def build_adaptive_plan(
                 s, e = slot["e"] - seconds, slot["e"]
             else:
                 s, e = slot["s"], slot["s"] + seconds
-            grid[i] = seconds / 3600 * estimate["charge_w"] * efficiency
-            drawn += grid[i] / efficiency
+            grid[i] = seconds / 3600 * estimate["charge_w"] * AC_CHARGE
+            drawn += grid[i] / AC_CHARGE
         else:
             continue
         if windows and windows[-1][1] == s:
@@ -383,7 +391,7 @@ def build_adaptive_plan(
                 "e": slot["e"],
                 "mode": mode,
                 "moer": slot["moer"],
-                "pct": round(levels[i] / CAPACITY_WH * 100, 1),
+                "pct": round(levels[i] / capacity * 100, 1),
                 "recharge": recharge if recharge is not None and math.isfinite(recharge) else None,
             }
         )

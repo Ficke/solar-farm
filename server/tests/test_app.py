@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
+from planner.battery import SOLAR_CHARGE
 from planner.jackery import Reading
 from solar_server import tasks, totals, views
 from solar_server.app import create_app
@@ -355,7 +356,7 @@ def test_dashboard_api_summarizes_the_day():
             "day": "2026-10-04",
             "solar_wh": 500,
             "grid_wh": 400,
-            "load_wh": 473,
+            "load_wh": 496,
             "battery_peak_pct": 82.0,
         }
     ]
@@ -499,11 +500,11 @@ def test_co2_avoided_doesnt_count_energy_shifted_to_another_day():
 
 def test_solar_adds_energy_without_co2():
     store = MemoryStore()
-    # 300 W of solar for an hour charges an empty battery, which then runs
-    # 243 W of load for an hour, at 1000 lb/MWh.
+    # 300 W of solar for an hour charges an empty battery with 285 Wh, which
+    # then runs 256.5 W of load for an hour, at 1000 lb/MWh.
     for i in range(121):
         t = NOW - 4 * 3600 + i * 60
-        stored = 270 * min(i, 60) / 60 - 270 * max(0, i - 60) / 60
+        stored = 285 * min(i, 60) / 60 - 285 * max(0, i - 60) / 60
         tasks.record_sample(
             store,
             {
@@ -516,8 +517,8 @@ def test_solar_adds_energy_without_co2():
         )
     totals.update(store, NOW)
     d = store.days["2026-10-04"]
-    assert d["load_wh"] == pytest.approx(243, abs=3)
-    assert d["load_lb"] == pytest.approx(0.243, abs=0.003)
+    assert d["load_wh"] == pytest.approx(256.5, abs=3)
+    assert d["load_lb"] == pytest.approx(0.2565, abs=0.003)
     assert d["used_lb"] == 0.0
 
 
@@ -532,6 +533,24 @@ def test_load_while_the_plug_is_on_runs_from_the_grid():
     d = store.days["2026-10-04"]
     assert d["load_wh"] == pytest.approx(200, abs=1)
     assert d["load_lb"] == d["used_lb"] == pytest.approx(0.16, abs=0.001)
+
+
+def test_totals_use_the_measured_capacity_and_solar_scale():
+    store = MemoryStore()
+    battery = {"capacity_wh": 2000.0, "solar_scale": 1.5}
+    store.put_state("charging_estimates", {"estimate": {"battery": battery}})
+    # The sensor reads 100 W for an hour; the panel makes 150 Wh, and the
+    # charge rises by what that stores in a 2,000 Wh battery.
+    for i in range(61):
+        t = NOW - 2 * 3600 + i * 60
+        pct = 150 * SOLAR_CHARGE * i / 60 / 2000 * 100
+        tasks.record_sample(
+            store, {"t": t, "solar_w": 100.0, "battery_pct": pct, "moer": 1000.0, "moer_t": t}
+        )
+    totals.update(store, NOW)
+    d = store.days["2026-10-04"]
+    assert d["solar_wh"] == pytest.approx(150, abs=1)
+    assert d["load_wh"] == pytest.approx(0, abs=1)
 
 
 def test_totals_pick_up_from_the_last_day_updated():
