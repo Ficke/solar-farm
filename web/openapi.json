@@ -654,6 +654,67 @@
         ],
         "title": "Now"
       },
+      "PlanBlock": {
+        "properties": {
+          "s": {
+            "type": "integer",
+            "title": "S"
+          },
+          "e": {
+            "type": "integer",
+            "title": "E"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "charge",
+              "bypass",
+              "solar",
+              "battery",
+              "peak",
+              "none"
+            ],
+            "title": "Mode"
+          },
+          "moer": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Moer"
+          },
+          "pct": {
+            "type": "number",
+            "title": "Pct"
+          },
+          "recharge": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recharge"
+          }
+        },
+        "type": "object",
+        "required": [
+          "s",
+          "e",
+          "mode",
+          "moer",
+          "pct",
+          "recharge"
+        ],
+        "title": "PlanBlock",
+        "description": "One 15-minute block of the plan, clipped to now and the deadline."
+      },
       "PlanSummary": {
         "properties": {
           "generated_at": {
@@ -791,6 +852,14 @@
               }
             ],
             "title": "Bypass Wh"
+          },
+          "blocks": {
+            "items": {
+              "$ref": "#/components/schemas/PlanBlock"
+            },
+            "type": "array",
+            "title": "Blocks",
+            "default": []
           },
           "shortfall_wh": {
             "anyOf": [

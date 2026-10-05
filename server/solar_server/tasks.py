@@ -378,4 +378,5 @@ def plug_plan(store: Store) -> dict | None:
     p = store.get_state("plan")
     if p is None:
         return None
-    return {k: v for k, v in p.items() if not k.startswith("forecast")}
+    # The Shelly parses this on a small heap; the per-block detail is for the dashboard.
+    return {k: v for k, v in p.items() if not k.startswith("forecast") and k != "blocks"}

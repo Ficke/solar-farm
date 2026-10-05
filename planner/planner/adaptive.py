@@ -256,6 +256,7 @@ def build_adaptive_plan(
     ranked = rank_blocks(slots, held_blocks(slots, hold or [], tnow))
     # Blocks where the plug stays on for the whole block to run the load.
     bypass: set[int] = set()
+    recharge_at: dict[int, float] = {}  # rate used in each block's bypass test
 
     def trajectory(grid: list[float]) -> list[float]:
         level = initial
@@ -324,6 +325,7 @@ def build_adaptive_plan(
                 if j > i and j not in bypass and grid[j] < slots[j]["max"] - 0.01
             ]
             recharge = min(spare, default=math.inf)
+            recharge_at[i] = recharge
             if slot["moer"] * slot["load"] <= recharge * drain / efficiency:
                 added.add(i)
         if not added:
@@ -359,6 +361,32 @@ def build_adaptive_plan(
         else:
             windows.append([s, e])
     levels = trajectory(grid)
+    blocks = []
+    for i, slot in enumerate(slots):
+        local = datetime.fromtimestamp(slot["s"], PACIFIC)
+        if slot["moer"] is None:
+            mode = "none"
+        elif 16 <= local.hour < 21:
+            mode = "peak"
+        elif i in bypass:
+            mode = "bypass"
+        elif grid[i] > 0.01:
+            mode = "charge"
+        elif keep[i] > 0:
+            mode = "solar"
+        else:
+            mode = "battery"
+        recharge = recharge_at.get(i)
+        blocks.append(
+            {
+                "s": slot["s"],
+                "e": slot["e"],
+                "mode": mode,
+                "moer": slot["moer"],
+                "pct": round(levels[i] / CAPACITY_WH * 100, 1),
+                "recharge": recharge if recharge is not None and math.isfinite(recharge) else None,
+            }
+        )
     shortfall = (
         max(0.0, floor - TOLERANCE_WH - min(levels), target - TOLERANCE_WH - levels[-1])
         if levels
@@ -380,6 +408,7 @@ def build_adaptive_plan(
         "charge_w": round(estimate["charge_w"], 1),
         "grid_wh": round(drawn),
         "bypass_wh": round(sum(slots[i]["load"] for i in bypass)),
+        "blocks": blocks,
         "shortfall_wh": round(shortfall),
     }
 

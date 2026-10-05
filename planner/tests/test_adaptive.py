@@ -367,3 +367,18 @@ def test_solar_is_learned_only_while_the_battery_has_room():
     # Noon to 5 pm was never seen with room, so it keeps the configured estimate.
     assert estimate["solar_profile"][52] == pytest.approx(500 / 8)
     assert estimate["solar_day_wh"] == pytest.approx(3 * 200 + 5 * 500 / 8, rel=0.02)
+
+
+def test_blocks_explain_each_quarter_hour():
+    points = flat(900, cleaner={12: 0, 13: 0})
+    plan = build_adaptive_plan(points, NOW, 100, inputs(load=200, solar=0))
+    blocks = plan["blocks"]
+    assert blocks[0]["s"] == int(NOW.timestamp()) and blocks[-1]["e"] == plan["deadline"]
+    modes = {datetime.fromtimestamp(b["s"], PACIFIC).hour: b["mode"] for b in blocks}
+    assert modes[8] == "battery" and modes[13] == "charge" and modes[15] == "bypass"
+    # The full battery at 7 am is tested against recharging at 0 and stays off.
+    assert blocks[0]["recharge"] == 0 and blocks[0]["pct"] < 100
+    assert blocks[4]["recharge"] is None  # not full, so not tested
+    assert blocks[-1]["pct"] == 100
+    after_peak = build_adaptive_plan(points, NOW.replace(hour=23, minute=30), 50, inputs())
+    assert after_peak["blocks"][0]["mode"] == "peak"
