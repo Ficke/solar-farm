@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
-from planner.battery import SOLAR_CHARGE
+from planner.battery import AC_CHARGE, DISCHARGE, SOLAR_CHARGE
 from planner.jackery import Reading
 from solar_server import tasks, totals, views
 from solar_server.app import create_app
@@ -520,6 +520,36 @@ def test_solar_adds_energy_without_co2():
     assert d["load_wh"] == pytest.approx(256.5, abs=3)
     assert d["load_lb"] == pytest.approx(0.2565, abs=0.003)
     assert d["used_lb"] == 0.0
+
+
+def test_solar_runs_the_load_directly_without_co2():
+    store = MemoryStore()
+    day = 86400
+    # Oct 3: the plug fills half the battery's charge at 1000 lb/MWh.
+    for i in range(61):
+        t = NOW - day - 5 * 3600 + i * 60
+        pct = 50 + 500 * AC_CHARGE / 3072 * 100 * i / 60
+        tasks.record_sample(store, {"t": t, "battery_pct": pct, "moer": 1000.0, "moer_t": t})
+        tasks.record_plug(store, {"t": t, "on": True, "reason": "plan", "w": 500.0})
+    # Oct 4: solar covers a 200 W load for an hour and the charge holds.
+    end = 50 + 500 * AC_CHARGE / 3072 * 100
+    for i in range(61):
+        t = NOW - 3600 + i * 60
+        tasks.record_sample(
+            store,
+            {
+                "t": t,
+                "battery_pct": end,
+                "solar_w": 200 / DISCHARGE / SOLAR_CHARGE,
+                "moer": 1000.0,
+                "moer_t": t,
+            },
+        )
+    totals.update(store, NOW)
+    d = store.days["2026-10-04"]
+    assert d["load_wh"] == pytest.approx(200, abs=2)
+    assert d["load_lb"] == pytest.approx(0.2, abs=0.002)
+    assert d["used_lb"] == pytest.approx(0.0, abs=0.001)
 
 
 def test_load_while_the_plug_is_on_runs_from_the_grid():

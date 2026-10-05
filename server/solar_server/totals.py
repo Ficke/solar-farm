@@ -120,8 +120,10 @@ def load_co2(
     between readings where the charge changes and spreads each span's load
     evenly over it. While the plug supplies power, the Jackery passes it to
     the load first and charges with the rest; that grid energy counts at its
-    own rate. Pool energy carries the CO2 of the grid energy put in,
-    including charging losses, and the load takes its share when drawn.
+    own rate. Otherwise solar runs the load first, without CO2, and only the
+    rest comes from the battery. Battery energy carries the CO2 of the grid
+    energy put in, including charging losses, and the load takes its share
+    when drawn.
 
     Returns load Wh, its direct-grid CO2 baseline in lb, and the CO2 in lb
     attributed to it; updates ``pool``.
@@ -167,14 +169,16 @@ def load_co2(
         )
         direct_lb = grid_lb * direct / grid_wh if grid_wh > 0 else 0.0
         pool.stored_lb += grid_lb - direct_lb
-        drawn = (load - direct) / DISCHARGE
+        # Solar Wh reaching the inverter run the load before the battery does.
+        need = (load - direct) / DISCHARGE
+        drawn = max(0.0, need - solar_in)
         held = battery.wh(b["battery_pct"]) + drawn
         unknown = min(1.0, pool.unknown_wh / held) if held > 0 else 1.0
         known = held - pool.unknown_wh
         take = pool.stored_lb * min(1.0, drawn * (1 - unknown) / known) if known > 0 else 0.0
         pool.stored_lb -= take
         pool.unknown_wh = max(0.0, pool.unknown_wh - drawn * unknown)
-        neutral_lb = baseline_lb * (load - direct) * unknown / load if load > 0 else 0.0
+        neutral_lb = baseline_lb * drawn * DISCHARGE * unknown / load if load > 0 else 0.0
         load_wh += load
         load_lb += baseline_lb
         used_lb += direct_lb + take + neutral_lb
