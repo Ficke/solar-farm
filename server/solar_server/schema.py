@@ -73,6 +73,17 @@ class Today(BaseModel):
     grid_wh: int
 
 
+class PlanBlock(BaseModel):
+    """One 15-minute block of the plan, clipped to now and the deadline."""
+
+    s: int
+    e: int
+    mode: Literal["charge", "bypass", "solar", "battery", "peak", "none"]
+    moer: float | None  # forecast marginal CO2, lb/MWh
+    pct: float  # projected battery % at the block's end
+    recharge: float | None  # lb/MWh of the block that would refill the battery
+
+
 class PlanSummary(BaseModel):
     generated_at: int
     windows: list[Window]
@@ -86,6 +97,8 @@ class PlanSummary(BaseModel):
     load_w: float | None = None
     charge_w: float | None = None
     grid_wh: int | None = None
+    bypass_wh: int | None = None
+    blocks: list[PlanBlock] = []
     shortfall_wh: int | None = None
     forecast_at: int | None = None
     forecast_until: int | None = None
