@@ -10,7 +10,8 @@ import random
 import time
 from datetime import UTC, datetime
 
-from planner.plan import PACIFIC, build_plan
+from planner.adaptive import build_adaptive_plan
+from planner.plan import PACIFIC
 
 from solar_server import tasks, totals
 from solar_server.app import create_app
@@ -115,18 +116,25 @@ def sample_store(now: int) -> MemoryStore:
     last = now - now % 1800
     forecast = next(f for f in reversed(store.day(FORECASTS, _day(last))) if f["t"] == last)
     points = [[forecast["start"] + i * STEP, v] for i, v in enumerate(forecast["values"])]
-    plan = build_plan(
-        [(datetime.fromtimestamp(t, UTC), v) for t, v in points], datetime.fromtimestamp(now, UTC)
+    estimate = {
+        "solar_profile": {
+            q: 280.0 * math.sin(math.pi * (q / 4 - 7) / 12) if 28 <= q < 76 else 0.0
+            for q in range(96)
+        },
+        "solar_day_wh": 1800,
+        "solar_days": 3,
+        "load_w": 110.0,
+        "charge_w": 1500.0,
+    }
+    plan = build_adaptive_plan(
+        [(datetime.fromtimestamp(t, UTC), v) for t, v in points],
+        datetime.fromtimestamp(now, UTC),
+        round(battery),
+        estimate,
     )
-    windows = plan["windows"]
     store.put_state(
         "plan",
-        {
-            "generated_at": last,
-            "windows": windows,
-            "forecast": points,
-            "index_now": 70,
-        },
+        {**plan, "forecast": points, "forecast_at": last, "index_now": 70},
     )
     return store
 
