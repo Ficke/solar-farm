@@ -1,5 +1,5 @@
 // Control AC access to the Jackery, blocking peak hours before applying plans
-// or safety, live-index and daytime fallbacks. See README.md for rule order.
+// or safety, live-index and daytime fallbacks. See docs/charging.md for rule order.
 // Keep ES5 syntax and named top-level callbacks for Shelly runtime compatibility.
 
 // Peak and fallback bounds use local minutes after midnight; durations use seconds.
