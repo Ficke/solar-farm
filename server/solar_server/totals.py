@@ -1,10 +1,12 @@
 """Aggregate energy and estimated CO2 per Pacific day.
 
-Avoided CO2 is ``load_lb`` (direct grid use at load time) minus ``used_lb``
-(emissions attributed to the battery energy used). Grid draw adds emissions
-at charging time to a pool carried across days; solar adds none. Load removes
-its proportional share, so stored energy counts when used, not when charged.
-Rates use WattTime actuals in lb/MWh; missing rates count toward Wh only.
+Avoided CO2 is ``load_lb`` (the load drawn straight from the grid at the time
+it ran) minus ``used_lb`` (emissions attributed to the energy it actually
+used). Grid energy passed through to the load counts at its own rate. Grid
+energy that charges the battery adds its emissions to a pool carried across
+days; solar adds none. Load drawn from the battery removes its proportional
+share, so stored energy counts when used, not when charged. Rates use
+WattTime actuals in lb/MWh; missing rates count toward Wh only.
 """
 
 from __future__ import annotations
@@ -12,10 +14,11 @@ from __future__ import annotations
 import logging
 from bisect import bisect_right
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import date, timedelta
 from itertools import pairwise
 
-from planner.telemetry import CAPACITY_WH
+from planner.battery import AC_CHARGE, DISCHARGE, Battery
 
 from solar_server.store import PLUG, SAMPLES, Store, day_key, day_keys
 
@@ -25,7 +28,7 @@ log = logging.getLogger(__name__)
 FIRST_DAY = "2026-10-01"
 MAX_GAP = 3600  # Cap each integration interval at one hour.
 RATE_GAP = 1800  # Carry each marginal rate for at most 30 minutes.
-VERSION = 2  # Increment to recompute history from FIRST_DAY.
+VERSION = 3  # Increment to recompute history from FIRST_DAY.
 
 type Rate = Callable[[float], float | None]
 
@@ -69,79 +72,157 @@ def energy(points: list[tuple[int, float]], rate: Rate) -> tuple[float, float]:
     return wh, lb
 
 
-def cumulative(points: list[tuple[int, float]], rate: Rate) -> Callable[[float], float]:
-    """Return cumulative CO2 in lb from the first point to a given time."""
+def cumulative(
+    points: list[tuple[int, float]], rate: Rate
+) -> Callable[[float], tuple[float, float]]:
+    """Return cumulative Wh and CO2 in lb from the first point to a given time."""
     times = [t for t, _ in points]
-    sums = [0.0]
+    sums = [(0.0, 0.0)]
     for a, b in pairwise(points):
-        sums.append(sums[-1] + energy([a, b], rate)[1])
+        wh, lb = energy([a, b], rate)
+        sums.append((sums[-1][0] + wh, sums[-1][1] + lb))
 
-    def at(t: float) -> float:
+    def at(t: float) -> tuple[float, float]:
         i = bisect_right(times, t) - 1
         if i < 0:
-            return 0.0
-        if i >= len(points) - 1:
-            return sums[-1]
+            return 0.0, 0.0
+        if i >= len(points) - 1 or t <= times[i]:
+            return sums[i]
         (t0, w0), (t1, w1) = points[i], points[i + 1]
         w = w0 + (w1 - w0) * (t - t0) / (t1 - t0)
-        return sums[i] + energy([(t0, w0), (int(t), w)], rate)[1] if t > t0 else sums[i]
+        wh, lb = energy([(t0, w0), (int(t), w)], rate)
+        return sums[i][0] + wh, sums[i][1] + lb
 
     return at
 
 
-def used_co2(
-    samples: list[dict], grid_lb_by: Callable[[float], float], stored_lb: float
-) -> tuple[float, float]:
-    """Return load-attributed and remaining battery CO2 in lb.
+@dataclass
+class Pool:
+    """Emissions carried by the energy in the battery.
 
-    Add grid emissions between readings, then withdraw the load's energy share.
+    ``unknown_wh`` is charge of unknown origin, present when readings began.
+    The load drawing it counts as if it ran from the grid at that moment, so
+    it neither adds nor avoids CO2.
     """
-    used = 0.0
-    rows = [s for s in samples if s.get("output_w") is not None]
-    for a, b in pairwise(rows):
-        stored_lb += grid_lb_by(b["t"]) - grid_lb_by(a["t"])
-        out_wh = energy([(a["t"], a["output_w"]), (b["t"], b["output_w"])], lambda _t: None)[0]
-        pct = b.get("battery_pct")
-        held_wh = (pct if pct is not None else 50.0) / 100 * CAPACITY_WH + out_wh
-        take = stored_lb * min(1.0, out_wh / held_wh) if held_wh > 0 else stored_lb
-        used += take
-        stored_lb -= take
-    return used, stored_lb
+
+    stored_lb: float = 0.0
+    unknown_wh: float = 0.0
 
 
-def day_totals(store: Store, day: str, stored_lb: float | None = None) -> dict | None:
-    """Compute daily totals from initial battery emissions in ``stored_lb``.
+def load_co2(
+    samples: list[dict], plug: list[dict], rate: Rate, pool: Pool, battery: Battery
+) -> tuple[float, float, float]:
+    """Estimate the load from the battery's energy balance and attribute its CO2.
 
-    If omitted, estimate initial emissions from the first battery level and rate.
+    The Jackery's output reading lags and misses most draws, so the load is
+    what came in (solar, and grid from the plug's meter) less what the charge
+    gained. Charge readings are whole percent (about 31 Wh), so the balance runs
+    between readings where the charge changes and spreads each span's load
+    evenly over it. While the plug supplies power, the Jackery passes it to
+    the load first and charges with the rest; that grid energy counts at its
+    own rate. Otherwise solar runs the load first, without CO2, and only the
+    rest comes from the battery. Battery energy carries the CO2 of the grid
+    energy put in, including charging losses, and the load takes its share
+    when drawn.
+
+    Returns load Wh, its direct-grid CO2 baseline in lb, and the CO2 in lb
+    attributed to it; updates ``pool``.
     """
+    readings = [s for s in samples if s.get("battery_pct") is not None]
+    if len(readings) < 2:
+        return 0.0, 0.0, 0.0
+    edges = [readings[0]]
+    edges += [b for a, b in pairwise(readings) if b["battery_pct"] != a["battery_pct"]]
+    if edges[-1] is not readings[-1]:
+        edges.append(readings[-1])
+    solar = cumulative(series(samples, "solar_w"), rate)
+    grid_points = series(plug, "w")
+    grid = cumulative(grid_points, rate)
+    # Integrating 1 W while the plug draws power gives hours supplied.
+    supplied = cumulative([(t, 1.0 if w > 0 else 0.0) for t, w in grid_points], rate)
+    rates = [(s["t"], rate(s["t"])) for s in samples]
+    load_wh = load_lb = used_lb = 0.0
+    for a, b in pairwise(edges):
+        t0, t1 = a["t"], b["t"]
+        if t1 <= t0:
+            continue
+        solar_wh = solar(t1)[0] - solar(t0)[0]
+        (g1, g1_lb), (g0, g0_lb) = grid(t1), grid(t0)
+        grid_wh, grid_lb = g1 - g0, g1_lb - g0_lb
+        share = min(1.0, (supplied(t1)[0] - supplied(t0)[0]) * 3600 / (t1 - t0))
+        gained = battery.wh(b["battery_pct"] - a["battery_pct"])
+        solar_in = solar_wh * battery.solar_stored
+        load = (solar_in + grid_wh * AC_CHARGE - gained) / (
+            share * AC_CHARGE + (1 - share) / DISCHARGE
+        )
+        direct = load * share
+        if direct > grid_wh:
+            direct = grid_wh
+            load = grid_wh + (solar_in - gained) * DISCHARGE
+        if load <= 0:
+            # More charge than measured input, usually from a low solar reading.
+            load = direct = 0.0
+        power = load / (t1 - t0)  # Wh per second
+        span = [(t, r) for t, r in rates if t0 <= t <= t1]
+        baseline_lb = sum(
+            power * (u - t) * r / 1e6 for (t, r), (u, _) in pairwise(span) if r is not None
+        )
+        direct_lb = grid_lb * direct / grid_wh if grid_wh > 0 else 0.0
+        pool.stored_lb += grid_lb - direct_lb
+        # Solar Wh reaching the inverter run the load before the battery does.
+        need = (load - direct) / DISCHARGE
+        drawn = max(0.0, need - solar_in)
+        held = battery.wh(b["battery_pct"]) + drawn
+        unknown = min(1.0, pool.unknown_wh / held) if held > 0 else 1.0
+        known = held - pool.unknown_wh
+        take = pool.stored_lb * min(1.0, drawn * (1 - unknown) / known) if known > 0 else 0.0
+        pool.stored_lb -= take
+        pool.unknown_wh = max(0.0, pool.unknown_wh - drawn * unknown)
+        neutral_lb = baseline_lb * drawn * DISCHARGE * unknown / load if load > 0 else 0.0
+        load_wh += load
+        load_lb += baseline_lb
+        used_lb += direct_lb + take + neutral_lb
+    return load_wh, load_lb, used_lb
+
+
+def series(items: list[dict], key: str) -> list[tuple[int, float]]:
+    return [(int(i["t"]), float(i[key])) for i in items if i.get(key) is not None]
+
+
+def day_totals(
+    store: Store, day: str, pool: Pool | None = None, battery: Battery | None = None
+) -> dict | None:
+    """Compute daily totals, starting from the previous day's ``pool``.
+
+    Without one, the first charge reading is of unknown origin. ``battery``
+    gives the measured capacity and solar scale; solar Wh are scaled to the
+    panel's output.
+    """
+    battery = battery or Battery()
     samples = sorted(store.day(SAMPLES, day), key=lambda s: s["t"])
     plug = sorted(store.day(PLUG, day), key=lambda r: r["t"])
     if not samples and not plug:
         return None
     rate = rate_lookup(samples)
-    if stored_lb is None:
+    if pool is None:
         first = next((s for s in samples if s.get("battery_pct") is not None), None)
-        r = rate(first["t"]) if first else None
-        stored_lb = first["battery_pct"] / 100 * CAPACITY_WH * r / 1e6 if first and r else 0.0
-
-    def series(items: list[dict], key: str) -> list[tuple[int, float]]:
-        return [(int(i["t"]), float(i[key])) for i in items if i.get(key) is not None]
+        pool = Pool(unknown_wh=battery.wh(first["battery_pct"]) if first else 0.0)
 
     solar = series(samples, "solar_w")
     grid = series(plug, "w")
-    load_wh, load_lb = energy(series(samples, "output_w"), rate)
     grid_wh, grid_lb = energy(grid, rate)
+    load_wh, load_lb, used_lb = load_co2(samples, plug, rate, pool, battery)
+    # Plug draw before the first or after the last change in charge goes into the battery.
     by = cumulative(grid, rate)
-    used_lb, stored_lb = used_co2(samples, by, stored_lb)
-    # Plug draw before the first or after the last reading goes into the battery too.
-    if samples:
-        stored_lb += by(samples[0]["t"]) + grid_lb - by(samples[-1]["t"])
+    readings = [s["t"] for s in samples if s.get("battery_pct") is not None]
+    if len(readings) >= 2:
+        pool.stored_lb += by(readings[0])[1] + grid_lb - by(readings[-1])[1]
     else:
-        stored_lb += grid_lb
+        pool.stored_lb += grid_lb
     peaks = [float(s["battery_pct"]) for s in samples if s.get("battery_pct") is not None]
     return {
         "day": day,
-        "solar_wh": round(integrate_wh(solar), 1),
+        "solar_wh": round(integrate_wh(solar) * battery.solar_scale, 1),
         "solar_n": len(solar),
         "solar_h": round(covered_h(solar), 2),
         "load_wh": round(load_wh, 1),
@@ -149,7 +230,8 @@ def day_totals(store: Store, day: str, stored_lb: float | None = None) -> dict |
         "load_lb": round(load_lb, 4),
         "grid_lb": round(grid_lb, 4),
         "used_lb": round(used_lb, 4),
-        "stored_lb": round(stored_lb, 6),
+        "stored_lb": round(pool.stored_lb, 6),
+        "unknown_wh": round(pool.unknown_wh, 1),
         "battery_peak_pct": max(peaks) if peaks else None,
     }
 
@@ -166,12 +248,16 @@ def update(store: Store, now: int) -> list[str]:
     days = _days_from(last, today)
     # Pick up the battery's CO2 from the latest day before these.
     before = store.totals(_days_from(FIRST_DAY, days[0])[-8:-1]) if days[0] > FIRST_DAY else []
-    stored_lb = before[-1].get("stored_lb") if before else None
+    pool = None
+    if before:
+        pool = Pool(before[-1].get("stored_lb", 0.0), before[-1].get("unknown_wh", 0.0))
+    estimate = (store.get_state("charging_estimates") or {}).get("estimate") or {}
+    battery = Battery.from_dict(estimate.get("battery"))
     for day in days:
-        totals = day_totals(store, day, stored_lb)
+        totals = day_totals(store, day, pool, battery)
         if totals is not None:
             store.put_total(day, totals)
-            stored_lb = totals["stored_lb"]
+            pool = Pool(totals["stored_lb"], totals["unknown_wh"])
     store.put_state("totals", {"day": today, "v": VERSION})
     return days
 
