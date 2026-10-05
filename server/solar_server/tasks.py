@@ -296,6 +296,7 @@ def charging_plan(
         estimate,
         floor_pct=settings.floor_pct,
         region=settings.region,
+        hold=(store.get_state("plan") or {}).get("windows"),
     )
     # The plug checks this reading's age before allowing peak power at low battery.
     p["battery_at"] = battery["t"]
@@ -317,7 +318,8 @@ def charging_estimates(store: Store, settings: Settings, now: int) -> dict:
     if cached.get("inputs") == inputs and 0 <= now - cached.get("t", 0) < max_age:
         return cached["estimate"]
     samples = window(store, SAMPLES, now - 8 * 86400, now)
-    estimate = estimates(samples, now, *inputs)
+    plug = window(store, PLUG, now - 8 * 86400, now)
+    estimate = estimates(samples, now, *inputs, plug=plug)
     store.put_state("charging_estimates", {"t": now, "inputs": inputs, "estimate": estimate})
     return estimate
 
@@ -352,6 +354,7 @@ PLAN_HISTORY_KEYS = (
     "battery_pct",
     "deadline",
     "grid_wh",
+    "bypass_wh",
     "shortfall_wh",
     "solar_day_wh",
     "solar_days",
@@ -378,4 +381,5 @@ def plug_plan(store: Store) -> dict | None:
     p = store.get_state("plan")
     if p is None:
         return None
-    return {k: v for k, v in p.items() if not k.startswith("forecast")}
+    # The Shelly parses this on a small heap; the per-block detail is for the dashboard.
+    return {k: v for k, v in p.items() if not k.startswith("forecast") and k != "blocks"}

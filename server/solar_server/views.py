@@ -48,6 +48,8 @@ def now_view(store: Store, now: int) -> dict:
                 "load_w",
                 "charge_w",
                 "grid_wh",
+                "bypass_wh",
+                "blocks",
                 "shortfall_wh",
                 "forecast_at",
                 "forecast_until",

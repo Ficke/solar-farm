@@ -159,7 +159,7 @@ def test_plan_task_feeds_the_plug_without_the_forecast():
     assert len(store.get_state("plan")["forecast"]) == 288
 
     plan = c.get("/plug/plan", headers={"X-Plug-Key": "k3y"}).json()
-    assert not any(k.startswith("forecast") for k in plan)
+    assert not any(k.startswith("forecast") or k == "blocks" for k in plan)
     assert plan["generated_at"] == NOW
     assert plan["index_now"] == 82.0
     # Without a collected battery reading, use the labelled one-hour fallback.
