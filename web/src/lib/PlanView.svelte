@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Window } from "./api";
+  import Hint from "./Hint.svelte";
   import { hover } from "./hover.svelte";
   import { AXIS_W, hourTicks, LINE_THIN, PAD_R } from "./layout";
   import { blockAt, fromWindows, KEY, MODES, type PlanBlock, ROUND_TRIP, segments } from "./plan";
@@ -76,10 +77,11 @@
         ? { value: MODES[mode].label, color: `var(--plan-${mode})`, shape: "square" }
         : { value: "Grid off" },
     ];
-    if (co2 != null) rows.push({ value: lb(co2), name: "Forecast" });
+    if (co2 != null) rows.push({ value: lb(co2), name: "CO₂ forecast" });
     if (b?.recharge != null)
-      rows.push({ value: lb(b.recharge / ROUND_TRIP), name: `Recharge ÷ ${ROUND_TRIP}` });
+      rows.push({ value: lb(b.recharge / ROUND_TRIP), name: "Recharge later, with losses" });
     if (b) rows.push({ value: `${Math.round(b.pct)}%`, name: "Battery" });
+    if (mode === "solar") rows.push({ name: "Room kept for solar" });
     return { t, rows };
   });
 
@@ -104,7 +106,6 @@
         <path d="M-1,7 L7,-1" stroke="var(--peak-hatch)" stroke-width="1.5" />
       </pattern>
     </defs>
-    <text x={AXIS_W - 8} y="22" text-anchor="end" class="lab">Plan</text>
     <rect x={AXIS_W} y="8" width={Math.max(0, width - AXIS_W - PAD_R)} height="20" rx="4" fill="var(--panel-2)" />
     {#each peakWindows(from, to) as [s, e] (s)}
       {@const [a, b] = clip(s, e)}
@@ -141,12 +142,15 @@
 
 <ul class="key">
   {#each KEY as m (m)}
-    <li><i class="sw {m}"></i><b>{MODES[m].label}</b><span>{MODES[m].rule}</span></li>
+    <li><i class="sw {m}"></i><Hint text={MODES[m].rule}>{MODES[m].label}</Hint></li>
   {/each}
 </ul>
 
 {#if rows.length}
   <table>
+    <thead>
+      <tr><th>Time</th><th>Length</th><th>Mode</th><th>CO₂</th><th></th></tr>
+    </thead>
     <tbody>
       {#each rows as r (r.s)}
         <tr>
@@ -172,8 +176,7 @@
     width: 100%;
     touch-action: pan-y;
   }
-  .tick,
-  .lab {
+  .tick {
     font: 11px var(--f-sans);
     fill: var(--ink-3);
   }
@@ -188,6 +191,14 @@
     padding: 7px 8px 7px 0;
     border-top: 1px solid var(--rule);
   }
+  th {
+    padding: 0 8px 4px 0;
+    text-align: left;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--ink-3);
+  }
+  td:nth-child(1),
   td:nth-child(2),
   td:nth-child(4) {
     white-space: nowrap;
@@ -211,9 +222,6 @@
     display: flex;
     align-items: center;
     gap: 6px;
-  }
-  .key span {
-    color: var(--ink-3);
   }
   .sw {
     width: 12px;
