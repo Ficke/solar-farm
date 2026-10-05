@@ -86,6 +86,7 @@ class PlanSummary(BaseModel):
     load_w: float | None = None
     charge_w: float | None = None
     grid_wh: int | None = None
+    bypass_wh: int | None = None
     shortfall_wh: int | None = None
     forecast_at: int | None = None
     forecast_until: int | None = None

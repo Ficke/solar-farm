@@ -289,3 +289,81 @@ def test_blocks_without_forecast_are_never_scheduled():
     assert plan["windows"]
     for s, _ in plan["windows"]:
         assert datetime.fromtimestamp(s, PACIFIC).hour != 11
+
+
+def flat(rate, now=NOW, hours=24, cleaner=None):
+    """A forecast at ``rate``, with ``cleaner`` = {Pacific hour: rate} overrides."""
+    out = []
+    for i in range(hours * 12):
+        t = now + timedelta(minutes=i * 5)
+        out.append((t, (cleaner or {}).get(t.astimezone(PACIFIC).hour, rate)))
+    return out
+
+
+def test_full_battery_runs_the_load_from_the_grid_when_that_beats_recharging():
+    # Sunday-like: 1,000 lb/MWh all day, 900 from 1 to 2 pm. Draining the full
+    # battery now means recharging at 900 / 0.81 = 1,111 later, so the load
+    # runs from the grid instead and the battery stays full.
+    plan = build_adaptive_plan(flat(1000, cleaner={13: 900}), NOW, 100, inputs(load=200, solar=0))
+    assert plan["windows"] == [[int(NOW.timestamp()), plan["deadline"]]]
+    assert plan["bypass_wh"] == pytest.approx(200 * 9, rel=0.01)
+    assert plan["shortfall_wh"] == 0
+
+
+def test_battery_runs_the_load_when_a_curtailment_block_will_refill_it():
+    # Grid at 0 from noon to 2 pm: run the load from the battery this morning
+    # and recharge in the clean block rather than buying 900 now. After 2 pm
+    # nothing cleaner is left, so the grid runs the load until 4 pm.
+    plan = build_adaptive_plan(
+        flat(900, cleaner={12: 0, 13: 0}), NOW, 100, inputs(load=200, solar=0)
+    )
+    two = int(NOW.replace(hour=21).timestamp())  # 2 pm Pacific
+    assert plan["windows"][0][0] >= int(NOW.replace(hour=19).timestamp())  # not before noon
+    assert plan["windows"][-1][1] == plan["deadline"]
+    assert plan["bypass_wh"] == pytest.approx(200 * (plan["deadline"] - two) / 3600, rel=0.01)
+    assert plan["shortfall_wh"] == 0
+
+
+def test_no_bypass_while_room_is_kept_for_solar():
+    # Morning with solar still to come: keeping the battery full from the grid
+    # would leave the panels nowhere to go.
+    plan = build_adaptive_plan(flat(1000), NOW, 100, inputs(load=200, solar=2000))
+    assert all(datetime.fromtimestamp(s, PACIFIC).hour >= 9 for s, _ in plan["windows"])
+
+
+def test_held_window_keeps_its_place_unless_clearly_beaten():
+    # 10 am at 480 and 11 am at 500 tie; the later block wins by default.
+    points = flat(900, cleaner={10: 480, 11: 500})
+    estimate = inputs(load=20, solar=0)
+    first = build_adaptive_plan(points, NOW, 85, estimate)
+    assert datetime.fromtimestamp(first["windows"][0][0], PACIFIC).hour == 11
+    # A plan already holding 10 am keeps it within the tie band ...
+    ten = int(NOW.replace(hour=17).timestamp())  # 10 am Pacific
+    held = build_adaptive_plan(points, NOW, 85, estimate, hold=[[ten, ten + 900]])
+    assert datetime.fromtimestamp(held["windows"][0][0], PACIFIC).hour == 10
+    # ... but gives way to a block more than 50 lb/MWh cleaner.
+    cleaner = flat(900, cleaner={10: 480, 11: 420})
+    moved = build_adaptive_plan(cleaner, NOW, 85, estimate, hold=[[ten, ten + 900]])
+    assert datetime.fromtimestamp(moved["windows"][0][0], PACIFIC).hour == 11
+
+
+def test_solar_is_learned_only_while_the_battery_has_room():
+    start = int((NOW - timedelta(days=1, hours=7)).timestamp())  # yesterday midnight
+    samples = []
+    for i in range(288):
+        t = start + i * 300
+        hour = datetime.fromtimestamp(t, PACIFIC).hour
+        full = hour >= 12  # full from noon: solar input cut to 20 W
+        samples.append(
+            {
+                "t": t,
+                "solar_w": (20 if full else 200) if 9 <= hour < 15 else 0,
+                "battery_pct": 100 if full else 80,
+            }
+        )
+    estimate = estimates(samples, int(NOW.timestamp()), 500, 10, 1700)
+    assert estimate["solar_days"] == 1
+    assert estimate["solar_profile"][40] == pytest.approx(200)  # 10 am, with room
+    # Noon to 5 pm was never seen with room, so it keeps the configured estimate.
+    assert estimate["solar_profile"][52] == pytest.approx(500 / 8)
+    assert estimate["solar_day_wh"] == pytest.approx(3 * 200 + 5 * 500 / 8, rel=0.02)

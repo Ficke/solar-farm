@@ -21,15 +21,17 @@ While on, the plug bridges gaps of up to three minutes between planned windows t
 
 ## Charging policy
 
-The planner targets **100% (3,072 Wh) by the next 4 pm Pacific**, with a **20% floor**. It selects the cleanest available 15-minute forecast blocks outside peak hours. Emissions are grouped by rounding to the nearest **50 lb/MWh**; within a group, later blocks win to allow solar to arrive first.
+The planner targets **100% (3,072 Wh) by the next 4 pm Pacific**, with a **20% floor**. It selects the cleanest available 15-minute forecast blocks outside peak hours. Blocks within **50 lb/MWh** of the cleanest remaining block tie; the block in the previous plan's current or next window wins a tie, otherwise the later block wins so solar arrives first. A window therefore moves only for a block more than 50 lb/MWh cleaner.
 
 The current block uses a live marginal rate when it is no more than 15 minutes old. When a live rate of at least **300 lb/MWh** contradicts a zero forecast, the remaining zeros that Pacific day use the recorded rate until a live rate falls below **100 lb/MWh**. Blocks without usable forecast rates are skipped.
 
 Grid charging fills the battery, leaving room for half the estimated later solar only when that allowance reaches **150 Wh**. Additional blocks cover projected floor or deadline deficits above **30 Wh**. Partial windows round up to whole minutes; infeasible plans report a shortfall.
 
+Once the battery is full and no solar room is kept, the plug stays on for whole blocks so the load runs from the grid whenever that emits less than draining the battery: a block qualifies when its rate times the load is no more than the next block the plan would add, times the battery Wh used, divided by 90%. With solar covering the load, the battery is used. On a flat gas-fired day this keeps the plug on for most of the off-peak day; when a curtailment block is coming, the load runs from the battery and the clean block refills it. The plan reports this energy as `bypass_wh`, included in `grid_wh`.
+
 Estimates use recent telemetry:
 
-- **Solar:** the average quarter-hour profile from qualifying days among the last seven completed days. Each needs six hours of coverage between 9 am and 5 pm. The fallback is **500 Wh/day** across those hours.
+- **Solar:** the average quarter-hour profile from qualifying days among the last seven completed days. Each needs six hours of coverage between 9 am and 5 pm. Only intervals with the battery below **97%** count, because a full battery cuts solar input back; a daytime quarter-hour never seen with room keeps the fallback, **500 Wh/day** across 9 am to 5 pm.
 - **Load:** the average over the last 24 hours from the battery's energy balance: solar and grid energy in, less the change in charge. The Jackery's output reading lags by minutes and misses most draws, so it is used only when charge readings are missing. Grid energy comes from the plug's meter. Requires six hours of coverage; otherwise **100 W**. Solar and load exclude gaps over 15 minutes.
 - **Charging:** the median wall power from the latest 30 plug reports in the past week taken while the plug was on and the battery was below 95%, where the Jackery slows down. Each must reach **200 W**; at least three are required, otherwise **1,700 W**.
 

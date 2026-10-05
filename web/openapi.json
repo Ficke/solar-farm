@@ -781,6 +781,17 @@
             ],
             "title": "Grid Wh"
           },
+          "bypass_wh": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bypass Wh"
+          },
           "shortfall_wh": {
             "anyOf": [
               {

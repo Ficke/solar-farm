@@ -296,6 +296,7 @@ def charging_plan(
         estimate,
         floor_pct=settings.floor_pct,
         region=settings.region,
+        hold=(store.get_state("plan") or {}).get("windows"),
     )
 
 
@@ -350,6 +351,7 @@ PLAN_HISTORY_KEYS = (
     "battery_pct",
     "deadline",
     "grid_wh",
+    "bypass_wh",
     "shortfall_wh",
     "solar_day_wh",
     "solar_days",
