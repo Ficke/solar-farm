@@ -14,9 +14,9 @@ from __future__ import annotations
 import logging
 from bisect import bisect_right
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import date, timedelta
 from itertools import pairwise
-from statistics import mean
 
 from planner.adaptive import EFFICIENCY
 from planner.telemetry import CAPACITY_WH
@@ -97,9 +97,22 @@ def cumulative(
     return at
 
 
+@dataclass
+class Battery:
+    """Emissions carried by the energy in the battery.
+
+    ``unknown_wh`` is charge of unknown origin, present when readings began.
+    The load drawing it counts as if it ran from the grid at that moment, so
+    it neither adds nor avoids CO2.
+    """
+
+    stored_lb: float = 0.0
+    unknown_wh: float = 0.0
+
+
 def load_co2(
-    samples: list[dict], plug: list[dict], rate: Rate, stored_lb: float
-) -> tuple[float, float, float, float]:
+    samples: list[dict], plug: list[dict], rate: Rate, battery: Battery
+) -> tuple[float, float, float]:
     """Estimate the load from the battery's energy balance and attribute its CO2.
 
     The Jackery's output reading lags and misses most draws, so the load is
@@ -111,12 +124,12 @@ def load_co2(
     own rate. Battery energy carries the CO2 of the grid energy put in,
     including charging losses, and the load takes its share when drawn.
 
-    Returns load Wh, its direct-grid CO2 baseline, CO2 attributed to it, and
-    the CO2 left in the battery, all in lb except the Wh.
+    Returns load Wh, its direct-grid CO2 baseline in lb, and the CO2 in lb
+    attributed to it; updates ``battery``.
     """
     readings = [s for s in samples if s.get("battery_pct") is not None]
     if len(readings) < 2:
-        return 0.0, 0.0, 0.0, stored_lb
+        return 0.0, 0.0, 0.0
     edges = [readings[0]]
     edges += [b for a, b in pairwise(readings) if b["battery_pct"] != a["battery_pct"]]
     if edges[-1] is not readings[-1]:
@@ -147,54 +160,56 @@ def load_co2(
         if load <= 0:
             # More charge than measured input, usually from a low solar reading.
             load = direct = 0.0
-        direct_lb = grid_lb * direct / grid_wh if grid_wh > 0 else 0.0
-        stored_lb += grid_lb - direct_lb
-        drawn = (load - direct) / EFFICIENCY
-        held = b["battery_pct"] / 100 * CAPACITY_WH + drawn
-        take = stored_lb * min(1.0, drawn / held) if held > 0 else stored_lb
-        stored_lb -= take
-        load_wh += load
-        used_lb += direct_lb + take
         power = load / (t1 - t0)  # Wh per second
         span = [(t, r) for t, r in rates if t0 <= t <= t1]
-        load_lb += sum(
+        baseline_lb = sum(
             power * (u - t) * r / 1e6 for (t, r), (u, _) in pairwise(span) if r is not None
         )
-    return load_wh, load_lb, used_lb, stored_lb
+        direct_lb = grid_lb * direct / grid_wh if grid_wh > 0 else 0.0
+        battery.stored_lb += grid_lb - direct_lb
+        drawn = (load - direct) / EFFICIENCY
+        held = b["battery_pct"] / 100 * CAPACITY_WH + drawn
+        unknown = min(1.0, battery.unknown_wh / held) if held > 0 else 1.0
+        known = held - battery.unknown_wh
+        take = battery.stored_lb * min(1.0, drawn * (1 - unknown) / known) if known > 0 else 0.0
+        battery.stored_lb -= take
+        battery.unknown_wh = max(0.0, battery.unknown_wh - drawn * unknown)
+        neutral_lb = baseline_lb * (load - direct) * unknown / load if load > 0 else 0.0
+        load_wh += load
+        load_lb += baseline_lb
+        used_lb += direct_lb + take + neutral_lb
+    return load_wh, load_lb, used_lb
 
 
 def series(items: list[dict], key: str) -> list[tuple[int, float]]:
     return [(int(i["t"]), float(i[key])) for i in items if i.get(key) is not None]
 
 
-def day_totals(store: Store, day: str, stored_lb: float | None = None) -> dict | None:
-    """Compute daily totals from initial battery emissions in ``stored_lb``.
+def day_totals(store: Store, day: str, battery: Battery | None = None) -> dict | None:
+    """Compute daily totals, starting from the previous day's ``battery``.
 
-    If omitted, price the first battery level at the day's mean rate; an
-    unknown charge never counts as clean.
+    Without one, the first charge reading is of unknown origin.
     """
     samples = sorted(store.day(SAMPLES, day), key=lambda s: s["t"])
     plug = sorted(store.day(PLUG, day), key=lambda r: r["t"])
     if not samples and not plug:
         return None
     rate = rate_lookup(samples)
-    if stored_lb is None:
+    if battery is None:
         first = next((s for s in samples if s.get("battery_pct") is not None), None)
-        moers = [float(s["moer"]) for s in samples if s.get("moer") is not None]
-        r = mean(moers) if moers else 0.0
-        stored_lb = first["battery_pct"] / 100 * CAPACITY_WH * r / 1e6 if first else 0.0
+        battery = Battery(unknown_wh=first["battery_pct"] / 100 * CAPACITY_WH if first else 0.0)
 
     solar = series(samples, "solar_w")
     grid = series(plug, "w")
     grid_wh, grid_lb = energy(grid, rate)
-    load_wh, load_lb, used_lb, stored_lb = load_co2(samples, plug, rate, stored_lb)
+    load_wh, load_lb, used_lb = load_co2(samples, plug, rate, battery)
     # Plug draw before the first or after the last change in charge goes into the battery.
     by = cumulative(grid, rate)
     readings = [s["t"] for s in samples if s.get("battery_pct") is not None]
     if len(readings) >= 2:
-        stored_lb += by(readings[0])[1] + grid_lb - by(readings[-1])[1]
+        battery.stored_lb += by(readings[0])[1] + grid_lb - by(readings[-1])[1]
     else:
-        stored_lb += grid_lb
+        battery.stored_lb += grid_lb
     peaks = [float(s["battery_pct"]) for s in samples if s.get("battery_pct") is not None]
     return {
         "day": day,
@@ -206,7 +221,8 @@ def day_totals(store: Store, day: str, stored_lb: float | None = None) -> dict |
         "load_lb": round(load_lb, 4),
         "grid_lb": round(grid_lb, 4),
         "used_lb": round(used_lb, 4),
-        "stored_lb": round(stored_lb, 6),
+        "stored_lb": round(battery.stored_lb, 6),
+        "unknown_wh": round(battery.unknown_wh, 1),
         "battery_peak_pct": max(peaks) if peaks else None,
     }
 
@@ -223,12 +239,14 @@ def update(store: Store, now: int) -> list[str]:
     days = _days_from(last, today)
     # Pick up the battery's CO2 from the latest day before these.
     before = store.totals(_days_from(FIRST_DAY, days[0])[-8:-1]) if days[0] > FIRST_DAY else []
-    stored_lb = before[-1].get("stored_lb") if before else None
+    battery = None
+    if before:
+        battery = Battery(before[-1].get("stored_lb", 0.0), before[-1].get("unknown_wh", 0.0))
     for day in days:
-        totals = day_totals(store, day, stored_lb)
+        totals = day_totals(store, day, battery)
         if totals is not None:
             store.put_total(day, totals)
-            stored_lb = totals["stored_lb"]
+            battery = Battery(totals["stored_lb"], totals["unknown_wh"])
     store.put_state("totals", {"day": today, "v": VERSION})
     return days
 

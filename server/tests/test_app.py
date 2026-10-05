@@ -1,5 +1,4 @@
 from datetime import UTC, datetime
-from statistics import mean
 
 import pytest
 from fastapi.testclient import TestClient
@@ -453,11 +452,10 @@ def test_co2_avoided_compares_the_load_with_what_the_plug_drew():
     # 400 Wh of the 500 Wh load ran at 1000 lb/MWh; the grid ran at 0.
     assert day["load_lb"] == pytest.approx(0.4, abs=0.002)
     assert day["grid_lb"] == pytest.approx(0.0, abs=0.002)
-    # The battery started at the day's mean rate; the load used a fifth of
-    # the charge it held after the clean hour.
-    held = 0.5 * 3072 + 270
-    start_lb = 0.5 * 3072 * mean([0.0] * 12 + [1000.0] * 49) / 1e6
-    assert day["used_lb"] == pytest.approx(start_lb * 400 / 0.9 / held, abs=0.002)
+    # The starting charge is of unknown origin, so its share of the load
+    # counts at the grid's rate; the clean hour's share avoids it all.
+    unknown = 0.5 * 3072 / (0.5 * 3072 + 270)
+    assert day["used_lb"] == pytest.approx(0.4 * unknown, abs=0.002)
 
     web, _ = make("web", store=store)
     rows = web.get("/api/co2", params={"by": "day", "count": 2}).json()["periods"]
@@ -487,13 +485,16 @@ def test_co2_avoided_doesnt_count_energy_shifted_to_another_day():
     totals.update(store, NOW)
     oct3, oct4 = store.days["2026-10-03"], store.days["2026-10-04"]
     # The plug's CO2 counts when the load uses it, so moving energy at the
-    # same rate saves nothing on either day; losses make it cost more.
+    # same rate saves nothing on either day; losses make it cost more. The
+    # starting charge, of unknown origin, counts at the load's own rate.
     assert oct3["grid_lb"] == pytest.approx(0.4, abs=0.002)
     assert (oct3["load_wh"], oct3["used_lb"]) == (0.0, 0.0)
     assert oct4["load_wh"] == pytest.approx(500.0, abs=1)
     assert oct4["load_lb"] == pytest.approx(0.5, abs=0.002)
-    per_wh = (1.536 + 0.4) / (1536 + 360)
-    assert oct4["used_lb"] == pytest.approx(per_wh * 500 / 0.9, abs=0.005)
+    unknown = 1536 / (1536 + 360)
+    plug_share = 500 / 0.9 * (1 - unknown) / 360 * 0.4
+    assert oct4["used_lb"] == pytest.approx(0.5 * unknown + plug_share, abs=0.005)
+    assert oct4["used_lb"] > oct4["load_lb"]
 
 
 def test_solar_adds_energy_without_co2():
