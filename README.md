@@ -10,7 +10,7 @@ Grid-aware charging for a Jackery Explorer 3000 v2 with a 250 W solar panel in S
 
 The plug applies these rules in order:
 
-1. Unknown local time or 4–9 pm Pacific: off.
+1. Unknown local time: off. 4–9 pm Pacific: off, unless a battery reading less than 10 minutes old shows **10% or less**. The grid then carries the load until the reading reaches **15%**; in bypass the Jackery feeds its outlets from the grid and charges with the remaining input.
 2. A battery-aware plan less than 15 minutes old with no reported shortfall: follow its windows, even if no grid charging is needed.
 3. More than 30 hours without grid power: start a two-hour safety charge, subject to rules 1–2.
 4. Any plan less than three hours old: follow its windows.
@@ -61,7 +61,7 @@ These uv scripts install dependencies on first run. Deployment reads the plug ke
 
 The first deploy enables local authentication as `admin` and saves a generated password in git-ignored `config/device.toml`. It protects credentials and relay control on Wi-Fi; cloud control is unaffected. If the password is lost, disable authentication in the Shelly app and redeploy.
 
-Firmware schedules force the relay off at second 59 of each peak minute and start the script every ten minutes if it has stopped. With the default peak hours, these appear as two “Advanced time” schedules. Custom partial-hour peaks may need more. Disable the watchdog schedule before intentionally stopping the script. Each deploy replaces all single-call relay-off schedules for switch 0 and start schedules for grid-gate, including manually created ones; other schedules remain.
+Firmware schedules force the relay off at second 59 of the first peak minute and of each half hour after it, and start the script every ten minutes if it has stopped. With the default peak hours, these appear as two “Advanced time” schedules. Custom partial-hour peaks may need more. During the low-battery exception, the script turns the relay on with a three-minute firmware flip-back timer and renews it every minute, so the relay turns off if the script stops. Disable the watchdog schedule before intentionally stopping the script. Each deploy replaces all single-call relay-off schedules for switch 0 and start schedules for grid-gate, including manually created ones; other schedules remain.
 
 ## Dashboard and hosting
 
