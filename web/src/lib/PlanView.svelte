@@ -2,7 +2,8 @@
   import type { Window } from "./api";
   import { hover } from "./hover.svelte";
   import { AXIS_W, hourTicks, LINE_THIN, PAD_R } from "./layout";
-  import Tooltip from "./Tooltip.svelte";
+  import { blockAt, fromWindows, KEY, MODES, type PlanBlock, ROUND_TRIP, segments } from "./plan";
+  import Tooltip, { type TipRow } from "./Tooltip.svelte";
   import {
     fmtClock,
     fmtDayClock,
@@ -16,12 +17,14 @@
 
   let {
     windows,
+    blocks,
     forecast,
     from,
     to,
     now,
   }: {
     windows: Window[];
+    blocks: PlanBlock[];
     forecast: [number, number][];
     from: number;
     to: number;
@@ -46,35 +49,44 @@
     hover.from = "plan";
   }
 
-  const tip = $derived.by(() => {
-    const t = hover.t;
-    if (t == null || hover.from !== "plan") return null;
-    const on = windows.some(([s, e]) => t >= s && t < e);
-    const peak = peakWindows(from, to).some(([s, e]) => t >= s && t < e);
+  const segs = $derived(blocks.length ? segments(blocks) : fromWindows(windows));
+  const forecastAt = (t: number) => {
     let co2: number | null = null;
     let best = 600;
     for (const [ft, v] of forecast) {
       if (Math.abs(ft - t) <= best) {
         best = Math.abs(ft - t);
-        co2 = Math.round(v);
+        co2 = v;
       }
     }
-    return { t, state: on ? "Grid on" : peak ? "Peak, grid off" : "Grid off", co2 };
+    return co2;
+  };
+  const lb = (v: number) => `${Math.round(v)} lb/MWh`;
+
+  const tip = $derived.by(() => {
+    const t = hover.t;
+    if (t == null || hover.from !== "plan") return null;
+    const b = blockAt(blocks, t);
+    const peak = peakWindows(from, to).some(([s, e]) => t >= s && t < e);
+    const on = segs.some((g) => MODES[g.mode].on && t >= g.s && t < g.e);
+    const mode = b?.mode ?? (on ? "charge" : peak ? "peak" : null);
+    const co2 = b?.moer ?? forecastAt(t);
+    const rows: TipRow[] = [
+      mode
+        ? { value: MODES[mode].label, color: `var(--plan-${mode})`, shape: "square" }
+        : { value: "Grid off" },
+    ];
+    if (co2 != null) rows.push({ value: lb(co2), name: "Forecast" });
+    if (b?.recharge != null)
+      rows.push({ value: lb(b.recharge / ROUND_TRIP), name: `Recharge ÷ ${ROUND_TRIP}` });
+    if (b) rows.push({ value: `${Math.round(b.pct)}%`, name: "Battery" });
+    return { t, rows };
   });
 
-  const avg = (s: number, e: number) => {
-    const vs = forecast.filter(([t]) => t >= s && t < e).map(([, v]) => v);
-    return vs.length ? Math.round(vs.reduce((a, b) => a + b, 0) / vs.length) : null;
-  };
   const rows = $derived.by(() => {
-    const next = windows.findIndex(([, e]) => e > now);
-    return windows
-      .filter(([, e]) => e > now - 6 * 3600)
-      .map(([s, e]) => {
-        const i = windows.findIndex(([ws]) => ws === s);
-        const state = e <= now ? "Done" : s <= now ? "Now" : i === next ? "Next" : "";
-        return { s, e, state, avg: avg(s, e) };
-      });
+    const on = segs.filter((g) => MODES[g.mode].on && g.e > now);
+    const next = on.find((g) => g.s > now);
+    return on.map((g) => ({ ...g, state: g.s <= now ? "Now" : g === next ? "Next" : "" }));
   });
 </script>
 
@@ -83,7 +95,7 @@
     viewBox="0 0 {width} {H}"
     height={H}
     role="img"
-    aria-label="Grid on times, past and next 24 hours"
+    aria-label="Planned plug states, next 24 hours"
     onpointermove={move}
     onpointerleave={leave}
   >
@@ -92,17 +104,17 @@
         <path d="M-1,7 L7,-1" stroke="var(--peak-hatch)" stroke-width="1.5" />
       </pattern>
     </defs>
-    <text x={AXIS_W - 8} y="22" text-anchor="end" class="lab">Grid</text>
+    <text x={AXIS_W - 8} y="22" text-anchor="end" class="lab">Plan</text>
     <rect x={AXIS_W} y="8" width={Math.max(0, width - AXIS_W - PAD_R)} height="20" rx="4" fill="var(--panel-2)" />
     {#each peakWindows(from, to) as [s, e] (s)}
       {@const [a, b] = clip(s, e)}
       {#if b > a}<rect x={a} y="8" width={b - a} height="20" fill="url(#peak-hatch)" />{/if}
     {/each}
-    {#each windows as [s, e] (s)}
-      {#if e > from && s < to}
-        {@const [a, b] = clip(s, e)}
-        <rect x={a} y="10" width={Math.max(2, b - a)} height="16" rx="3" fill="var(--grid)"
-          ><title>{fmtRange(s, e)}</title></rect
+    {#each segs as g (g.s)}
+      {#if g.e > from && g.s < to && MODES[g.mode].on}
+        {@const [a, b] = clip(g.s, g.e)}
+        <rect x={a} y="10" width={Math.max(2, b - a)} height="16" rx="3" fill="var(--plan-{g.mode})"
+          ><title>{MODES[g.mode].label}, {fmtRange(g.s, g.e)}</title></rect
         >
       {/if}
     {/each}
@@ -122,29 +134,33 @@
       y={36}
       flip={x(tip.t) > width - 200}
       title={fmtDayClock(tip.t)}
-      rows={[
-        { value: tip.state },
-        ...(tip.co2 != null ? [{ value: `${tip.co2} lb/MWh`, name: "Forecast" }] : []),
-      ]}
+      rows={tip.rows}
     />
   {/if}
 </div>
+
+<ul class="key">
+  {#each KEY as m (m)}
+    <li><i class="sw {m}"></i><b>{MODES[m].label}</b><span>{MODES[m].rule}</span></li>
+  {/each}
+</ul>
 
 {#if rows.length}
   <table>
     <tbody>
       {#each rows as r (r.s)}
-        <tr class:done={r.state === "Done"}>
+        <tr>
           <td>{fmtWhen(r.s, now).replace(fmtClock(r.s), "")}{fmtRange(r.s, r.e)}</td>
           <td>{hours(r.e - r.s)}</td>
-          <td>{r.avg == null ? "" : `${r.avg} lb/MWh`}</td>
+          <td>{MODES[r.mode].label}</td>
+          <td>{r.moer == null ? "" : lb(r.moer)}</td>
           <td class="st">{#if r.state}<span class={r.state.toLowerCase()}>{r.state}</span>{/if}</td>
         </tr>
       {/each}
     </tbody>
   </table>
 {:else}
-  <p class="muted">No grid charging planned.</p>
+  <p class="muted">No grid use planned</p>
 {/if}
 
 <style>
@@ -173,11 +189,49 @@
     border-top: 1px solid var(--rule);
   }
   td:nth-child(2),
-  td:nth-child(3) {
+  td:nth-child(4) {
+    white-space: nowrap;
+  }
+  td:nth-child(2),
+  td:nth-child(3),
+  td:nth-child(4) {
     color: var(--ink-2);
   }
-  tr.done td {
+  .key {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 20px;
+    margin: 4px 0 0;
+    padding: 0;
+    list-style: none;
+    font-size: 12px;
+    color: var(--ink-2);
+  }
+  .key li {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .key span {
     color: var(--ink-3);
+  }
+  .sw {
+    width: 12px;
+    height: 10px;
+    border-radius: 2px;
+  }
+  .sw.charge {
+    background: var(--plan-charge);
+  }
+  .sw.bypass {
+    background: var(--plan-bypass);
+  }
+  .sw.battery {
+    background: var(--panel-2);
+  }
+  .sw.peak {
+    background: repeating-linear-gradient(-45deg, var(--peak-hatch) 0 1.5px, transparent 1.5px 4px);
+    box-shadow: inset 0 0 0 1px var(--peak-hatch);
   }
   .st {
     text-align: right;

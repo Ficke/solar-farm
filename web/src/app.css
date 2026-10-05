@@ -22,6 +22,11 @@
   --battery: #16181d;
   --load: #878e99;
   --plan-band: rgba(37, 99, 201, 0.08);
+  --plan-charge: var(--grid);
+  --plan-bypass: #56b4e9;
+  --plan-battery: var(--panel-2);
+  --plan-solar: var(--panel-2);
+  --plan-peak: var(--peak-hatch);
   --peak-hatch: rgba(22, 24, 29, 0.13);
   --co2-clean: #009e73;
   --co2-mid: #8c939e;
@@ -60,6 +65,11 @@
   --battery: #eef0f3;
   --load: #5e6570;
   --plan-band: rgba(74, 138, 230, 0.12);
+  --plan-charge: var(--grid);
+  --plan-bypass: #6cc0f0;
+  --plan-battery: var(--panel-2);
+  --plan-solar: var(--panel-2);
+  --plan-peak: var(--peak-hatch);
   --peak-hatch: rgba(238, 240, 243, 0.12);
   --co2-clean: #14a37a;
   --co2-mid: #8a919c;

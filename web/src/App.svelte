@@ -7,6 +7,7 @@
   import { FUTURE, LINE_THIN, PAST } from "./lib/layout";
   import { GROUPS, stackMix } from "./lib/mix";
   import PlanView from "./lib/PlanView.svelte";
+  import { blockAt } from "./lib/plan";
   import Segmented from "./lib/Segmented.svelte";
   import { explain } from "./lib/status";
   import TimeChart from "./lib/TimeChart.svelte";
@@ -106,6 +107,7 @@
   const s = $derived(now?.sample ?? null);
   const plug = $derived(now?.plug ?? null);
   const windows = $derived(now?.plan?.windows ?? tl?.windows ?? []);
+  const blocks = $derived(now?.plan?.blocks ?? []);
   const forecast = $derived(tl?.forecast ?? []);
   const tnow = $derived(now?.now ?? clock);
   // Keep charts and the plan strip on a shared time axis.
@@ -116,7 +118,7 @@
 
   const headline = $derived.by(() => {
     if (!plug) return { title: "No report from the plug yet", detail: "" };
-    const why = explain(plug);
+    const why = explain(plug, blockAt(blocks, tnow)?.mode);
     const current = windows.find(([st, e]) => st <= tnow && tnow < e);
     if (plug.on) {
       return {
@@ -147,7 +149,15 @@
       (tl?.prices ?? []).map((p) => [p.t, p.sp15]),
     ]),
   );
-  const batteryData = $derived(align([(tl?.samples ?? []).map((p) => [p.t, p.battery_pct])]));
+  const batteryData = $derived(
+    align([
+      (tl?.samples ?? []).map((p) => [p.t, p.battery_pct]),
+      [
+        ...(blocks.length && s ? [[tnow, s.battery_pct] as [number, number | null]] : []),
+        ...blocks.map((b) => [b.e, b.pct] as [number, number]),
+      ],
+    ]),
+  );
   const powerData = $derived(
     align([
       (tl?.samples ?? []).map((p) => [p.t, p.solar_w]),
@@ -222,8 +232,10 @@
     <h2 id="plan-h">Plan</h2>
     {#if now?.plan?.strategy === "adaptive"}
       <p class="n">
-        {now.plan.grid_wh} Wh from the grid · full by 4 pm · solar {now.plan.solar_day_wh} Wh/day
-        ({now.plan.solar_days ? `${now.plan.solar_days}-day average` : "estimate"})
+        Full by 4 PM · floor {now.plan.floor_pct ?? 20}% · {now.plan.grid_wh} Wh from the grid · solar
+        {now.plan.solar_day_wh} Wh/day ({now.plan.solar_days
+          ? `${now.plan.solar_days}-day average`
+          : "estimate"})
       </p>
       {#if now.plan.shortfall_wh}
         <p class="n">{now.plan.shortfall_wh} Wh short of full by 4 pm</p>
@@ -231,7 +243,7 @@
     {:else if now?.plan?.strategy === "fallback"}
       <p class="n">Fallback schedule · no battery data</p>
     {/if}
-    <PlanView {windows} {forecast} {from} {to} now={tnow} />
+    <PlanView {windows} {blocks} {forecast} {from} {to} now={tnow} />
   </section>
 
   <section class="card charts" aria-labelledby="grid-h">
@@ -316,8 +328,11 @@
       {windows}
       height={110}
       yMax={100}
-      yRule={now?.plan?.target_pct != null ? { value: now.plan.target_pct, label: `Grid target ${now.plan.target_pct}%` } : undefined}
-      series={[{ label: "Battery", color: "--battery", unit: "%" }]}
+      yRule={now?.plan?.target_pct != null ? { value: now.plan.target_pct, label: `Target ${now.plan.target_pct}%` } : undefined}
+      series={[
+        { label: "Battery", color: "--battery", unit: "%" },
+        { label: "Plan", color: "--battery", dash: [4, 4], width: LINE_THIN, unit: "%" },
+      ]}
     />
     <h3>Power, W</h3>
     <TimeChart
@@ -336,7 +351,7 @@
       ]}
     />
     <p class="key">
-      <span><i class="sw plan"></i>Planned grid charging</span>
+      <span><i class="sw plan"></i>Planned grid use</span>
       <span><i class="sw peak"></i>Peak, 4–9 PM</span>
     </p>
   </section>
