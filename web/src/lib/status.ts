@@ -3,6 +3,7 @@ import { MODES, type Mode } from "./plan";
 
 const REASONS: Record<string, string> = {
   peak: "Peak hours, 4–9 PM",
+  "peak-low": "Peak, battery ≤ 10%",
   safety: "Safety charge",
   index: "Following live CO₂ index",
   fallback: "Offline schedule, 10 AM–3 PM",
