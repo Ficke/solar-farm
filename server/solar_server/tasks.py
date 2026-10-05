@@ -289,7 +289,7 @@ def charging_plan(
         p["strategy"] = "fallback"
         return p
     estimate = charging_estimates(store, settings, t)
-    return build_adaptive_plan(
+    p = build_adaptive_plan(
         points,
         now,
         battery["battery_pct"],
@@ -298,6 +298,9 @@ def charging_plan(
         region=settings.region,
         hold=(store.get_state("plan") or {}).get("windows"),
     )
+    # The plug checks this reading's age before allowing peak power at low battery.
+    p["battery_at"] = battery["t"]
+    return p
 
 
 ESTIMATES_MAX_AGE = 1800

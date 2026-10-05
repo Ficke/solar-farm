@@ -271,3 +271,32 @@ test("a failed relay change is retried on the next tick", () => {
   h.timers[0].fn();
   assert.equal(h.calls.filter((c) => c.method === "Switch.Set").length, 2);
 });
+
+test("peak allows grid at low battery until the reading reaches 15%", () => {
+  const { context } = load();
+  const plan = (pct, at = NOW - 120) => ({ generated_at: NOW - 60, windows: [], battery_pct: pct, battery_at: at });
+  const peak = context.parseLocalMinutes("18:00");
+  const decide = (s) => ({ ...context.decide(s, NOW, peak, context.CFG) });
+  assert.deepEqual(decide(freshState(context, { plan: plan(11), reason: "peak" })), { on: false, reason: "peak" });
+  assert.deepEqual(decide(freshState(context, { plan: plan(10), reason: "peak" })), { on: true, reason: "peak-low" });
+  assert.equal(decide(freshState(context, { plan: plan(14), on: true, reason: "peak-low" })).on, true);
+  assert.equal(decide(freshState(context, { plan: plan(15), on: true, reason: "peak-low" })).on, false);
+  assert.equal(decide(freshState(context, { plan: plan(5, NOW - 601), reason: "peak" })).on, false);
+  assert.equal(decide(freshState(context, { plan: { generated_at: NOW - 60, windows: [] }, reason: "peak" })).on, false);
+});
+
+test("low-battery peak power renews a firmware flip-back timer and cancels it afterwards", () => {
+  const h = load({ time: "18:00" });
+  const { context, calls, device } = h;
+  context.S.plan = { generated_at: NOW - 60, windows: [], battery_pct: 8, battery_at: NOW - 60 };
+  context.tick();
+  context.tick();
+  const sets = calls.filter((c) => c.method === "Switch.Set");
+  assert.equal(sets.length, 2);
+  for (const c of sets) assert.deepEqual({ ...c.params }, { id: 0, on: true, toggle_after: 180 });
+  assert.equal(device.sw.output, true);
+  device.sys.time = "21:00";
+  context.tick();
+  const last = calls.filter((c) => c.method === "Switch.Set").pop();
+  assert.deepEqual({ ...last.params }, { id: 0, on: false });
+});

@@ -19,7 +19,12 @@ var CFG = {
   indexMaxAge: 900,
   safetyOffMax: 108000,
   safetyHold: 7200,
-  bridge: 180
+  bridge: 180,
+  // During peak, grid may carry the load once the battery is nearly empty.
+  lowOn: 10, // Battery percent at or below which peak power is allowed.
+  lowOff: 15, // Battery percent at which peak power stops again.
+  lowMaxAge: 600, // Maximum battery reading age in seconds.
+  lowHold: 180 // Firmware turns the relay back off if the script stops renewing it.
 };
 
 var S = {
@@ -54,9 +59,20 @@ function planOn(s, now, cfg) {
   return inWindows(w, now) || (s.on === true && inWindows(w, now + cfg.bridge));
 }
 
+// The server's battery reading arrives with each plan and lags the battery
+// by a few minutes, so the exception overshoots lowOff slightly.
+function batteryLow(s, now, cfg) {
+  var p = s.plan;
+  if (!p || typeof p.battery_pct !== "number" || typeof p.battery_at !== "number") return false;
+  if (now - p.battery_at > cfg.lowMaxAge || p.battery_at - now > 60) return false;
+  if (s.reason === "peak-low") return p.battery_pct < cfg.lowOff;
+  return p.battery_pct <= cfg.lowOn;
+}
+
 function decide(s, now, localMin, cfg) {
   if (localMin < 0) return { on: false, reason: "no-time" };
   if (localMin >= cfg.peakStart && localMin < cfg.peakEnd) {
+    if (batteryLow(s, now, cfg)) return { on: true, reason: "peak-low" };
     return { on: false, reason: "peak" };
   }
   // Healthy solar-only operation can exceed 30 hours without grid power.
@@ -144,8 +160,14 @@ function applyDecision(d, now) {
   if (d.reason === "safety" && !(S.safetyUntil > now)) {
     S.safetyUntil = now + CFG.safetyHold;
   }
-  if (d.on !== S.on) {
+  if (d.reason === "peak-low") {
+    // Renew the flip-back timer every tick so peak power ends if the script stops.
+    Shelly.call("Switch.Set", { id: 0, on: true, toggle_after: CFG.lowHold });
+  } else if (d.on !== S.on || S.reason === "peak-low") {
+    // A plain set also cancels a pending flip-back timer.
     Shelly.call("Switch.Set", { id: 0, on: d.on });
+  }
+  if (d.on !== S.on) {
     recordTransition(d.on, now);
     print("grid-gate: grid " + (d.on ? "on" : "off") + " (" + d.reason + ")");
   }

@@ -9,7 +9,7 @@
     uv run tools/deploy.py --dry-run
 
 Read config/device.toml and Secret Manager credentials, with .env overrides.
-Enable local authentication, peak relay-off schedules and a ten-minute watchdog
+Enable local authentication, half-hourly peak relay-off schedules and a ten-minute watchdog
 that starts a stopped script. Dry runs read device state but do not write it.
 """
 
@@ -174,29 +174,27 @@ def ensure_auth(dev: Shelly, info: dict, cfg: dict, cfg_path: Path) -> None:
 
 
 def peak_timespecs(start: int, end: int) -> list[str]:
-    """Return second-59 cron specs for peak minutes in ``[start, end)``.
+    """Return second-59 cron specs that force the relay off during peak.
 
-    Late-minute execution usually lets the script switch off first. Whole-hour
-    peaks need one spec; partial-hour boundaries may need up to three.
+    They fire in the first peak minute and on each half hour after it, so a
+    low-battery exception from the script pauses for at most one minute per
+    half hour. Late-minute execution usually lets the script switch off first.
     """
-    last = end - 1
-    if start > last:
-        return []
-    (h1, m1), (h2, m2) = divmod(start, 60), divmod(last, 60)
-    if h1 == h2:
-        minutes = "*" if (m1, m2) == (0, 59) else str(m1) if m1 == m2 else f"{m1}-{m2}"
-        return [f"59 {minutes} {h1} * * *"]
-    specs = []
-    if m1:
-        specs.append(f"59 {m1}-59 {h1} * * *")
-        h1 += 1
-    full_end = h2 if m2 == 59 else h2 - 1
-    if h1 <= full_end:
-        hours = str(h1) if h1 == full_end else f"{h1}-{full_end}"
-        specs.append(f"59 * {hours} * * *")
-    if m2 < 59:
-        specs.append(f"59 {m2 if m2 == 0 else f'0-{m2}'} {h2} * * *")
-    return specs
+    minutes = [m for m in range(start, end) if m == start or m % 30 == 0]
+    by_hour: dict[int, list[int]] = {}
+    for m in minutes:
+        by_hour.setdefault(m // 60, []).append(m % 60)
+    groups: list[tuple[list[int], list[int]]] = []
+    for hour, mins in by_hour.items():
+        if groups and groups[-1][1] == mins and groups[-1][0][-1] == hour - 1:
+            groups[-1][0].append(hour)
+        else:
+            groups.append(([hour], mins))
+    return [
+        f"59 {','.join(map(str, mins))} "
+        f"{hours[0] if len(hours) == 1 else f'{hours[0]}-{hours[-1]}'} * * *"
+        for hours, mins in groups
+    ]
 
 
 def is_ours(job: dict, script_id: int | None) -> bool:

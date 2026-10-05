@@ -103,15 +103,15 @@ def test_deployment_verification_reports_script_failure(monkeypatch):
         deploy.verify_script(Device(), 1)
 
 
-def test_peak_timespecs_fire_late_in_each_peak_minute():
-    assert deploy.peak_timespecs(960, 1260) == ["59 * 16-20 * * *"]
-    assert deploy.peak_timespecs(960, 1020) == ["59 * 16 * * *"]
-    assert deploy.peak_timespecs(990, 1050) == ["59 30-59 16 * * *", "59 0-29 17 * * *"]
-    assert deploy.peak_timespecs(990, 1200) == [
-        "59 30-59 16 * * *",
-        "59 * 17-19 * * *",
+def test_peak_timespecs_fire_at_peak_start_and_each_half_hour():
+    assert deploy.peak_timespecs(960, 1260) == ["59 0,30 16-20 * * *"]
+    assert deploy.peak_timespecs(960, 1020) == ["59 0,30 16 * * *"]
+    assert deploy.peak_timespecs(990, 1050) == ["59 30 16 * * *", "59 0 17 * * *"]
+    assert deploy.peak_timespecs(975, 1215) == [
+        "59 15,30 16 * * *",
+        "59 0,30 17-19 * * *",
+        "59 0 20 * * *",
     ]
-    assert deploy.peak_timespecs(960, 1215) == ["59 * 16-19 * * *", "59 0-14 20 * * *"]
     assert deploy.peak_timespecs(960, 961) == ["59 0 16 * * *"]
     assert deploy.peak_timespecs(960, 960) == []
 
@@ -209,7 +209,7 @@ def test_deploy_replaces_its_own_schedules_and_keeps_others(monkeypatch):
     deploy.deploy(plug, {"host": "192.0.2.1"}, deploy.Path("unused"))
 
     assert set(plug.jobs) == {7, 8, 9, 10}
-    assert plug.jobs[9]["timespec"] == "59 * 16-20 * * *"
+    assert plug.jobs[9]["timespec"] == "59 0,30 16-20 * * *"
     assert plug.jobs[9]["calls"] == off
     assert plug.jobs[10]["timespec"] == deploy.WATCHDOG_TIMESPEC
     assert plug.jobs[10]["calls"] == restart

@@ -20,6 +20,7 @@ def test_fresh_battery_enables_adaptive_plan_and_stale_battery_uses_fallback():
     plan = tasks.charging_plan(store, POINTS, Settings(load_w=10), NOW)
     assert plan["strategy"] == "adaptive"
     assert plan["target_pct"] == 100
+    assert (plan["battery_pct"], plan["battery_at"]) == (80, T)
     plan = tasks.charging_plan(store, POINTS, Settings(), NOW + timedelta(minutes=16))
     assert plan["strategy"] == "fallback"
 
