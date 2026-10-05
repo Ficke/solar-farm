@@ -314,7 +314,8 @@ def charging_estimates(store: Store, settings: Settings, now: int) -> dict:
     if cached.get("inputs") == inputs and 0 <= now - cached.get("t", 0) < max_age:
         return cached["estimate"]
     samples = window(store, SAMPLES, now - 8 * 86400, now)
-    estimate = estimates(samples, now, *inputs)
+    plug = window(store, PLUG, now - 8 * 86400, now)
+    estimate = estimates(samples, now, *inputs, plug=plug)
     store.put_state("charging_estimates", {"t": now, "inputs": inputs, "estimate": estimate})
     return estimate
 

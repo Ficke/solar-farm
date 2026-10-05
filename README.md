@@ -30,8 +30,8 @@ Grid charging fills the battery, leaving room for half the estimated later solar
 Estimates use recent telemetry:
 
 - **Solar:** the average quarter-hour profile from qualifying days among the last seven completed days. Each needs six hours of coverage between 9 am and 5 pm. The fallback is **500 Wh/day** across those hours.
-- **Load:** a time-weighted average over the last 24 hours, requiring six hours of coverage; otherwise **100 W**. Solar and load exclude gaps over 15 minutes.
-- **Charging:** the median AC input minus load from the latest 30 qualifying readings in the past week. Each must reach **200 W**; at least three are required, otherwise **1,700 W**.
+- **Load:** the average over the last 24 hours from the battery's energy balance: solar and grid energy in, less the change in charge. The Jackery's output reading lags by minutes and misses most draws, so it is used only when charge readings are missing. Grid energy comes from the plug's meter. Requires six hours of coverage; otherwise **100 W**. Solar and load exclude gaps over 15 minutes.
+- **Charging:** the median wall power from the latest 30 plug reports in the past week taken while the plug was on and the battery was below 95%, where the Jackery slows down. Each must reach **200 W**; at least three are required, otherwise **1,700 W**.
 
 The energy model assumes 90% input and output efficiency. Estimates are cached for 30 minutes, or five minutes while AC input minus load reaches 200 W. Fresh battery readings adjust the plan every minute. If forecast retrieval fails, the server can replan with a cached forecast for up to two hours.
 

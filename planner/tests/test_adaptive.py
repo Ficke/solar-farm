@@ -101,7 +101,10 @@ def test_history_learns_solar_and_load_without_extrapolating_gaps():
     estimate = estimates(samples, int(NOW.timestamp()), 500, 100, 1700)
     assert estimate["solar_days"] == 1
     assert estimate["solar_day_wh"] == pytest.approx(500)
-    assert estimate["load_w"] == pytest.approx(40)
+    # Charge held at 50% with 500 Wh of solar and 1.2 kWh of grid in over the
+    # last 24 hours of readings (7 am to midnight): the load drew it all.
+    hours = (samples[-1]["t"] - int((NOW - timedelta(days=1)).timestamp())) / 3600
+    assert estimate["load_w"] == pytest.approx((500 + 1200) * 0.9 * 0.9 / hours, rel=0.01)
     assert estimate["charge_w"] == pytest.approx(1160)  # AC in less load, as measured
     assert estimate["solar_profile"][48] == pytest.approx(100)
     sparse = estimates([samples[0], samples[-1]], int(NOW.timestamp()), 500, 100, 1700)
@@ -182,6 +185,46 @@ def test_invalid_and_duplicate_samples_do_not_distort_estimates():
     estimate = estimates(list(reversed(samples)), int(NOW.timestamp()), 500, 100, 1700)
     assert estimate["solar_day_wh"] == 0
     assert estimate["load_w"] == pytest.approx(40)
+
+
+def test_load_comes_from_the_energy_balance_not_the_output_reading():
+    # Ten hours of the battery falling 10% with no solar or grid, while the
+    # Jackery's output reading shows almost nothing (it lags and undercounts).
+    t = int(NOW.timestamp())
+    samples = [
+        {"t": t - 36000 + i * 60, "battery_pct": 90 - i // 60, "solar_w": 0, "output_w": 0}
+        for i in range(601)
+    ]
+    load = estimates(samples, t, 500, 5, 1700)["load_w"]
+    assert load == pytest.approx(CAPACITY_WH * 0.10 * 0.9 / 10, rel=0.01)  # about 28 W
+
+
+def test_plug_meter_supplies_grid_energy_and_charge_rate():
+    # Six hours: 1 kWh in on the plug's meter while the Jackery's AC reading
+    # shows nothing; the charge rose 25%, so the load drew the rest.
+    t = int(NOW.timestamp())
+    start = t - 6 * 3600
+    samples = [
+        {"t": start + i * 60, "battery_pct": 60 + 25 * i / 360, "solar_w": 0, "ac_input_w": 0}
+        for i in range(361)
+    ]
+    plug = [
+        {
+            "t": start + i * 60,
+            "on": i < 36,
+            "w": 1660.0 if i < 36 else 0.0,
+            "wh": min(i, 36) / 36 * 1000,
+        }
+        for i in range(361)
+    ]
+    plug.append({"t": t + 600, "on": True, "w": 9999.0, "wh": 0.0})  # after now: ignored
+    estimate = estimates(samples, t, 500, 5, 1200, plug=plug)
+    expected = (1000 * 0.9 - CAPACITY_WH * 0.25) * 0.9 / 6
+    assert estimate["load_w"] == pytest.approx(expected, rel=0.01)
+    assert estimate["charge_w"] == pytest.approx(1660)
+    # Near full the Jackery slows down; those readings don't set the rate.
+    full = [dict(s, battery_pct=97) for s in samples]
+    assert estimates(full, t, 500, 5, 1200, plug=plug)["charge_w"] == 1200
 
 
 def test_charge_rate_ignores_passthrough_and_needs_a_few_readings():
