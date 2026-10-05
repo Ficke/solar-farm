@@ -3,6 +3,7 @@
   import { align } from "./lib/align";
   import { type Accuracy, api, type Co2, type Now, type Period, type Timeline } from "./lib/api";
   import { COUNTS } from "./lib/co2";
+  import Hint from "./lib/Hint.svelte";
   import History from "./lib/History.svelte";
   import { FUTURE, LINE_THIN, PAST } from "./lib/layout";
   import { GROUPS, stackMix } from "./lib/mix";
@@ -219,7 +220,9 @@
         <dd class="n">{now ? `${now.today.grid_wh} Wh today` : ""}</dd>
       </div>
       <div>
-        <dt>Marginal CO₂</dt>
+        <dt>
+          <Hint text="CO₂ from the power plants that respond to extra demand right now, Northern California (WattTime).">Grid CO₂</Hint>
+        </dt>
         <dd><b>{s?.moer != null ? Math.round(s.moer) : "–"}</b><small>lb/MWh</small></dd>
         <dd class="n">
           {s?.index != null ? `Cleaner than ${Math.round(100 - s.index)}% of the past month` : ""}
@@ -231,17 +234,38 @@
   <section class="card" aria-labelledby="plan-h">
     <h2 id="plan-h">Plan</h2>
     {#if now?.plan?.strategy === "adaptive"}
-      <p class="n">
-        Full by 4 PM · floor {now.plan.floor_pct ?? 20}% · {now.plan.grid_wh} Wh from the grid · solar
-        {now.plan.solar_day_wh} Wh/day ({now.plan.solar_days
-          ? `${now.plan.solar_days}-day average`
-          : "estimate"})
-      </p>
-      {#if now.plan.shortfall_wh}
-        <p class="n">{now.plan.shortfall_wh} Wh short of full by 4 pm</p>
-      {/if}
+      {@const p = now.plan}
+      <dl class="facts">
+        <div>
+          <dt><Hint text="Charge to full before the 4–9 PM peak, using the cleanest grid hours.">Goal</Hint></dt>
+          <dd>100% by 4 PM</dd>
+        </div>
+        <div>
+          <dt><Hint text="Grid energy the plan puts into the battery before 4 PM.">Grid charge</Hint></dt>
+          <dd>{p.grid_wh} Wh</dd>
+        </div>
+        <div>
+          <dt>
+            <Hint
+              text={`${p.solar_days ? `Average daily solar, last ${p.solar_days === 1 ? "day" : `${p.solar_days} days`}` : "Estimate until solar is measured"}. The plan leaves battery room for solar still to come when it is 300 Wh or more.`}
+              >Solar</Hint
+            >
+          </dt>
+          <dd>{p.solar_day_wh} Wh/day</dd>
+        </div>
+        <div>
+          <dt><Hint text="The plan keeps the battery at or above this level.">Minimum</Hint></dt>
+          <dd>{p.floor_pct ?? 20}%</dd>
+        </div>
+        {#if p.shortfall_wh}
+          <div class="short">
+            <dt><Hint text="Energy the plan can't fit into clean hours before 4 PM.">Short of full</Hint></dt>
+            <dd>{p.shortfall_wh} Wh</dd>
+          </div>
+        {/if}
+      </dl>
     {:else if now?.plan?.strategy === "fallback"}
-      <p class="n">Fallback schedule · no battery data</p>
+      <p class="n">Fixed schedule, no battery data</p>
     {/if}
     <PlanView {windows} {blocks} {forecast} {from} {to} now={tnow} />
   </section>
@@ -251,7 +275,9 @@
     <div class="head">
       <h3>CO₂, lb/MWh</h3>
       <div class="ctl">
-        <span class="stat">Forecast error</span>
+        <span class="stat"
+          ><Hint text="Average gap between actual CO₂ and the forecast made this many hours earlier, last 24 hours.">Forecast error</Hint></span
+        >
         <Segmented label="Hours ahead" options={LEADS} value={lead} onpick={pickLead} />
         <span class="stat"><b>{acc?.error ?? "–"}</b> lb/MWh</span>
       </div>
@@ -266,7 +292,7 @@
       {windows}
       height={180}
       series={[
-        { label: "Marginal", color: "--co2-mid", ramp: CO2_RAMP, unit: "lb/MWh" },
+        { label: "Actual", color: "--co2-mid", ramp: CO2_RAMP, unit: "lb/MWh" },
         {
           label: "Forecast",
           color: "--co2-mid",
@@ -277,10 +303,10 @@
         },
       ]}
     />
-    <h3>Generation by source, all CAISO, GW</h3>
+    <h3>California generation by source, GW</h3>
     <TimeChart
       label="CAISO generation by source, past 24 hours"
-      title="Generation by source, all CAISO, GW"
+      title="California generation by source, GW"
       data={mix.stacked}
       tipData={mix.raw}
       shade={false}
@@ -298,10 +324,10 @@
         digits: 1,
       }))}
     />
-    <h3>Real-time price, $/MWh</h3>
+    <h3>Wholesale price, $/MWh</h3>
     <TimeChart
-      label="Real-time price, north and south, past 24 hours"
-      title="Real-time price, $/MWh"
+      label="Wholesale real-time price, north and south, past 24 hours"
+      title="Wholesale price, $/MWh"
       data={priceData}
       shade={false}
       {from}
@@ -568,6 +594,27 @@
   .n {
     font-size: 13px;
     color: var(--ink-3);
+  }
+  .facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 24px;
+    margin: 0 0 12px;
+    font-size: 13px;
+  }
+  .facts div {
+    display: flex;
+    gap: 6px;
+  }
+  .facts dt {
+    color: var(--ink-3);
+  }
+  .facts dd {
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+  }
+  .facts .short dd {
+    color: var(--bad-ink);
   }
   .key {
     display: flex;

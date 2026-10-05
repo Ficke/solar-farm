@@ -2,6 +2,7 @@
   // Align energy and CO2 columns by period on both charts.
   import type { Co2 } from "./api";
   import { fmtLb, fmtWh, niceTicks, periodLabel, periodName, type Slot, slots } from "./co2";
+  import Hint from "./Hint.svelte";
   import Tooltip, { type TipRow } from "./Tooltip.svelte";
 
   let { co2, now }: { co2: Co2 | undefined; now: number } = $props();
@@ -111,7 +112,10 @@
   </div>
   <div>
     <dt>
-      <i class="sw" style:background={totals.avoided < 0 ? "var(--bad)" : "var(--good)"}></i>{co2Label(totals.avoided)}
+      <i class="sw" style:background={totals.avoided < 0 ? "var(--bad)" : "var(--good)"}></i><Hint
+        text="CO₂ the same load would have caused on the grid at the time it ran, minus CO₂ of the grid energy stored to run it. Solar adds none."
+        >{co2Label(totals.avoided)}</Hint
+      >
     </dt>
     <dd><b>{co2 ? fmtLb(Math.abs(totals.avoided)) : "–"}</b><small>lb</small></dd>
   </div>

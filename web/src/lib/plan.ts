@@ -7,13 +7,29 @@ export type Mode = PlanBlock["mode"];
 export const ROUND_TRIP = 0.81;
 
 export const MODES: Record<Mode, { label: string; rule: string; on: boolean }> = {
-  charge: { label: "Charge", rule: "Cleanest blocks, full by 4 PM", on: true },
-  bypass: { label: "Grid to loads", rule: `CO₂ ≤ recharge ÷ ${ROUND_TRIP}`, on: true },
+  charge: {
+    label: "Charging from grid",
+    rule: "Plug on. Charges in the cleanest grid hours so the battery is full by 4 PM.",
+    on: true,
+  },
+  bypass: {
+    label: "Running on grid",
+    rule: `Plug on, battery full. Devices run on grid power now because it is cleaner than recharging later, after ${Math.round((1 - ROUND_TRIP) * 100)}% charging losses.`,
+    on: true,
+  },
   // Room for solar caps how much the plan charges, not when, so the strip
   // draws it as plug off and only the tooltip names it.
-  solar: { label: "Battery, solar room", rule: "", on: false },
-  battery: { label: "Battery", rule: "Plug off", on: false },
-  peak: { label: "Peak", rule: "4–9 PM, plug off", on: false },
+  solar: { label: "Running on battery", rule: "", on: false },
+  battery: {
+    label: "Running on battery",
+    rule: "Plug off. Devices run on the battery and solar.",
+    on: false,
+  },
+  peak: {
+    label: "Peak, 4–9 PM",
+    rule: "PG&E peak rate. Plug off unless the battery drops to 10%.",
+    on: false,
+  },
   none: { label: "No forecast", rule: "", on: false },
 };
 export const KEY: Mode[] = ["charge", "bypass", "battery", "peak"];

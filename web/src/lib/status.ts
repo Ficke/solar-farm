@@ -3,10 +3,10 @@ import { MODES, type Mode } from "./plan";
 
 const REASONS: Record<string, string> = {
   peak: "Peak hours, 4–9 PM",
-  "peak-low": "Peak, battery ≤ 10%",
+  "peak-low": "Peak, low battery",
   safety: "Safety charge",
-  index: "Following live CO₂ index",
-  fallback: "Offline schedule, 10 AM–3 PM",
+  index: "Following live CO₂",
+  fallback: "Fixed schedule, 10 AM–3 PM",
   "no-time": "Plug clock not set",
   start: "Plug starting",
 };
@@ -15,7 +15,7 @@ const REASONS: Record<string, string> = {
 export function explain(plug: PlugReport, mode?: Mode): string {
   if (plug.reason === "plan") {
     if (mode && MODES[mode].on === plug.on) return MODES[mode].label;
-    return plug.on ? "Planned window" : "Outside planned windows";
+    return plug.on ? "Grid planned" : "No grid planned";
   }
   return REASONS[plug.reason] ?? plug.reason;
 }
