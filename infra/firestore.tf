@@ -25,7 +25,6 @@ locals {
     samples      = "items"
     plug         = "items"
     jackery      = "items"
-    jackery_push = "items"
     plans        = "items"
     forecasts    = "items"
     mix          = "items"

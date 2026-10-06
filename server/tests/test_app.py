@@ -10,7 +10,6 @@ from solar_server.config import Settings
 from solar_server.store import (
     FORECASTS,
     JACKERY,
-    JACKERY_PUSH,
     MIX,
     PLANS,
     PLUG,
@@ -61,14 +60,6 @@ class FakeSources:
         if not self.with_jackery:
             return None
         return Reading(now, 81.0, 120.0, 0.0, 0.0, 90.0, {"rb": 81, "ip": 120, "op": 90})
-
-    def jackery_stats(self, day):
-        if not self.with_jackery:
-            return None
-        return {"/v1/device/stat/today": {"status": 200, "body": '{"code":0,"data":{}}'}}
-
-    def jackery_push(self, seconds):
-        return [{"t": NOW + 1.5, "op": 300}]
 
 
 def verifier(token, audience):
@@ -150,21 +141,6 @@ def test_collect_archives_jackery_properties_only_when_they_change():
     for i in range(3):
         tasks.collect(store, FakeSources(), datetime.fromtimestamp(NOW + 60 * i, UTC))
     assert store.day(JACKERY, "2026-10-04") == [{"t": NOW, "rb": 81, "ip": 120, "op": 90}]
-
-
-def test_collect_probes_jackery_on_first_run_then_hourly():
-    store = MemoryStore()
-    tasks.collect(store, FakeSources(), datetime.fromtimestamp(NOW, UTC))
-    stats = store.get_state("jackery_stats") or {}
-    assert stats["t"] == NOW
-    assert stats["responses"]["/v1/device/stat/today"]["status"] == 200
-    assert stats["push"] == [{"t": NOW + 1.5, "op": 300}]
-    assert store.day(JACKERY_PUSH, "2026-10-04") == stats["push"]
-    tasks.collect(store, FakeSources(), datetime.fromtimestamp(NOW + 60, UTC))
-    assert (store.get_state("jackery_stats") or {})["t"] == NOW
-    t = NOW + 60 * tasks.STATS_MINUTE
-    tasks.collect(store, FakeSources(), datetime.fromtimestamp(t, UTC))
-    assert (store.get_state("jackery_stats") or {})["t"] == t
 
 
 def test_collect_keeps_going_when_a_source_fails():
