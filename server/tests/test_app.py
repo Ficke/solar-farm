@@ -7,7 +7,17 @@ from planner.jackery import Reading
 from solar_server import tasks, totals, views
 from solar_server.app import create_app
 from solar_server.config import Settings
-from solar_server.store import FORECASTS, JACKERY, MIX, PLANS, PLUG, PRICES, SAMPLES, MemoryStore
+from solar_server.store import (
+    FORECASTS,
+    JACKERY,
+    JACKERY_PUSH,
+    MIX,
+    PLANS,
+    PLUG,
+    PRICES,
+    SAMPLES,
+    MemoryStore,
+)
 
 NOW = 1791158400  # This is Sunday, October 4, 2026, at 17:00 Pacific.
 SCHED = "solar-scheduler@p.iam.gserviceaccount.com"
@@ -149,6 +159,7 @@ def test_collect_probes_jackery_on_first_run_then_hourly():
     assert stats["t"] == NOW
     assert stats["responses"]["/v1/device/stat/today"]["status"] == 200
     assert stats["push"] == [{"t": NOW + 1.5, "op": 300}]
+    assert store.day(JACKERY_PUSH, "2026-10-04") == stats["push"]
     tasks.collect(store, FakeSources(), datetime.fromtimestamp(NOW + 60, UTC))
     assert (store.get_state("jackery_stats") or {})["t"] == NOW
     t = NOW + 60 * tasks.STATS_MINUTE
