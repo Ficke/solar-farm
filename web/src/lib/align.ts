@@ -72,3 +72,20 @@ export function bucket(
   }
   return out;
 }
+
+/** Readings further than this from a time, in seconds, don't describe it. */
+export const NEAR = 600;
+
+/** Return the item closest to `t` within `NEAR` seconds. */
+export function nearest<T>(items: T[], t: number, at: (item: T) => number): T | null {
+  let best: T | null = null;
+  let gap = NEAR;
+  for (const item of items) {
+    const d = Math.abs(at(item) - t);
+    if (d <= gap) {
+      best = item;
+      gap = d;
+    }
+  }
+  return best;
+}

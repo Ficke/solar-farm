@@ -1221,13 +1221,6 @@
             },
             "type": "array",
             "title": "Prices"
-          },
-          "windows": {
-            "items": {
-              "$ref": "#/components/schemas/Window"
-            },
-            "type": "array",
-            "title": "Windows"
           }
         },
         "type": "object",
@@ -1238,8 +1231,7 @@
           "plug",
           "forecast",
           "mix",
-          "prices",
-          "windows"
+          "prices"
         ],
         "title": "Timeline"
       },

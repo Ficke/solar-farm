@@ -1,8 +1,9 @@
 import type { PlugReport } from "./api";
 import { MODES, type Mode } from "./plan";
+import { PEAK_HOURS } from "./time";
 
 const REASONS: Record<string, string> = {
-  peak: "Peak hours, 4–9 PM",
+  peak: `Peak hours, ${PEAK_HOURS}`,
   "peak-low": "Peak, low battery",
   safety: "Safety charge",
   index: "Following live CO₂",

@@ -80,7 +80,6 @@ def timeline_view(store: Store, now: int, past_hours: int = 24) -> dict:
         # CAISO sometimes revises a row; the latest stored copy wins.
         "mix": list({i["t"]: i for i in window(store, MIX, since, now)}.values()),
         "prices": list({i["t"]: i for i in window(store, PRICES, since, now)}.values()),
-        "windows": plan.get("windows", []),
     }
 
 

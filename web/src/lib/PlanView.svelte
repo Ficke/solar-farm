@@ -1,18 +1,10 @@
 <script lang="ts">
-  import type { Sample, Window } from "./api";
+  import { nearest } from "./align";
+  import type { Sample } from "./api";
   import Hint from "./Hint.svelte";
   import { hover } from "./hover.svelte";
   import { AXIS_W, hourTicks, LINE_THIN, PAD_R } from "./layout";
-  import {
-    blockAt,
-    fromWindows,
-    KEY,
-    MODES,
-    type PlanBlock,
-    ROUND_TRIP,
-    type Segment,
-    segments,
-  } from "./plan";
+  import { blockAt, KEY, MODES, type PlanBlock, ROUND_TRIP, type Segment, stateAt } from "./plan";
   import Tooltip, { type TipRow } from "./Tooltip.svelte";
   import {
     fmtClock,
@@ -26,7 +18,6 @@
   } from "./time";
 
   let {
-    windows,
     blocks,
     states,
     samples,
@@ -35,7 +26,6 @@
     to,
     now,
   }: {
-    windows: Window[];
     blocks: PlanBlock[];
     /** Past and planned plug states, shared with the chart bands. */
     states: Segment[];
@@ -64,53 +54,28 @@
     hover.from = "plan";
   }
 
-  const segs = $derived(blocks.length ? segments(blocks) : fromWindows(windows));
-  const sampleAt = (t: number) => {
-    let best: Sample | null = null;
-    for (const p of samples) {
-      if (Math.abs(p.t - t) <= 600 && (!best || Math.abs(p.t - t) < Math.abs(best.t - t))) best = p;
-    }
-    return best;
-  };
-  const forecastAt = (t: number) => {
-    let co2: number | null = null;
-    let best = 600;
-    for (const [ft, v] of forecast) {
-      if (Math.abs(ft - t) <= best) {
-        best = Math.abs(ft - t);
-        co2 = v;
-      }
-    }
-    return co2;
-  };
   const lb = (v: number) => `${Math.round(v)} lb/MWh`;
 
   const tip = $derived.by(() => {
     const t = hover.t;
     if (t == null || hover.from !== "plan") return null;
+    const g = stateAt(states, t);
+    const peak = peakWindows(from, to).some(([s, e]) => t >= s && t < e);
+    const mode = g?.mode ?? (t >= now && peak ? "peak" : null);
+    const rows: TipRow[] = [
+      mode
+        ? { value: MODES[mode].label, color: `var(--plan-${mode})`, shape: "square" }
+        : { value: t < now ? "No data" : "Grid off" },
+    ];
     if (t < now) {
-      const g = states.find((g) => t >= g.s && t < g.e);
-      const p = sampleAt(t);
-      const rows: TipRow[] = [
-        g
-          ? { value: MODES[g.mode].label, color: `var(--plan-${g.mode})`, shape: "square" }
-          : { value: "No data" },
-      ];
+      const p = nearest(samples, t, (p) => p.t);
       if (p?.moer != null) rows.push({ value: lb(p.moer), name: "CO₂" });
       if (p?.battery_pct != null)
         rows.push({ value: `${Math.round(p.battery_pct)}%`, name: "Battery" });
       return { t, rows };
     }
     const b = blockAt(blocks, t);
-    const peak = peakWindows(from, to).some(([s, e]) => t >= s && t < e);
-    const on = segs.some((g) => MODES[g.mode].on && t >= g.s && t < g.e);
-    const mode = b?.mode ?? (on ? "charge" : peak ? "peak" : null);
-    const co2 = b?.moer ?? forecastAt(t);
-    const rows: TipRow[] = [
-      mode
-        ? { value: MODES[mode].label, color: `var(--plan-${mode})`, shape: "square" }
-        : { value: "Grid off" },
-    ];
+    const co2 = b?.moer ?? nearest(forecast, t, ([ft]) => ft)?.[1];
     if (co2 != null) rows.push({ value: lb(co2), name: "CO₂ forecast" });
     if (b?.recharge != null)
       rows.push({ value: lb(b.recharge / ROUND_TRIP), name: "Recharge later, with losses" });
@@ -120,7 +85,7 @@
   });
 
   const rows = $derived.by(() => {
-    const on = segs.filter((g) => MODES[g.mode].on && g.e > now);
+    const on = states.filter((g) => MODES[g.mode].on && g.e > now);
     const next = on.find((g) => g.s > now);
     return on.map((g) => ({ ...g, state: g.s <= now ? "Now" : g === next ? "Next" : "" }));
   });
