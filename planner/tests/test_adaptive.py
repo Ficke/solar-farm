@@ -388,3 +388,26 @@ def test_blocks_explain_each_quarter_hour():
     assert blocks[-1]["pct"] == 100
     after_peak = build_adaptive_plan(points, NOW.replace(hour=23, minute=30), 50, inputs())
     assert after_peak["blocks"][0]["mode"] == "peak"
+
+
+def test_load_is_planned_by_time_of_day():
+    # A week where the battery falls 10% from 6 to 7 pm each day and holds otherwise.
+    t = int(NOW.timestamp())
+    samples = []
+    for i in range(7 * 24 * 60):
+        u = t - 7 * 86400 + i * 60
+        local = datetime.fromtimestamp(u, PACIFIC)
+        evening = local.hour == 18
+        drop = local.minute / 6 if evening else (10 if local.hour > 18 else 0)
+        samples.append({"t": u, "battery_pct": float(90 - int(drop)), "solar_w": 0})
+    estimate = estimates(samples, t, 500, 100, 1700)
+    profile = estimate["load_profile"]
+    assert profile[18 * 4 + 1] == pytest.approx(CAPACITY_WH * 0.10 * DISCHARGE, rel=0.15)
+    # Without runtime estimates, the next 1% drop spreads over the night before it.
+    assert profile[3 * 4] < 2
+    plan = build_adaptive_plan(forecast(), NOW, 60, estimate)
+    # The morning before the clean noon hour draws next to nothing.
+    morning = [
+        b["pct"] for b in plan["blocks"] if datetime.fromtimestamp(b["s"], PACIFIC).hour < 11
+    ]
+    assert morning and max(morning) - min(morning) < 1

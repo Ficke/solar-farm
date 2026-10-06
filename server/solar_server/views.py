@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
 
-from planner.battery import Battery
+from planner.battery import Battery, load_points
 from planner.plan import PACIFIC
 
 from planner import telemetry
@@ -77,7 +77,7 @@ def timeline_view(store: Store, now: int, past_hours: int = 24) -> dict:
         "since": since,
         "samples": samples,
         "plug": [{k: r.get(k) for k in ("t", "on", "reason", "w")} for r in plug],
-        "load": totals.load_points(samples, plug, battery),
+        "load": load_points(samples, plug, battery),
         "forecast": [p for p in plan.get("forecast", []) if p[0] >= now - 300],
         # CAISO sometimes revises a row; the latest stored copy wins.
         "mix": list({i["t"]: i for i in window(store, MIX, since, now)}.values()),

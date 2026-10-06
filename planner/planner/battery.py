@@ -22,8 +22,10 @@ from __future__ import annotations
 
 import math
 from bisect import bisect_left, bisect_right
+from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
+from datetime import datetime, tzinfo
 from itertools import pairwise
 
 from planner.telemetry import CAPACITY_WH
@@ -183,6 +185,7 @@ class Flows:
         readings = sorted((s for s in samples if _finite(s, "battery_pct")), key=lambda s: s["t"])
         self.draw = [(s["t"], _draw(s)) for s in readings]
         self.draw_times = [t for t, _ in self.draw]
+        self.fill = [(s["t"], _fill(s)) for s in readings]
 
     def between(self, a: dict, b: dict) -> Balance:
         """Balance energy from reading ``a`` to reading ``b``.
@@ -221,29 +224,30 @@ class Flows:
 
     def timing(self, t0: int, t1: int) -> Callable[[float], float] | None:
         """Return the share of a span's load drawn by each time, or None without estimates."""
-        i = bisect_right(self.draw_times, t0) - 1
-        j = bisect_right(self.draw_times, t1 - 1)
-        steps = self.draw[max(i, 0) : j]
-        if i < 0 or any(w is None for _, w in steps):
+        return _shares(self.draw, self.draw_times, t0, t1)
+
+    def charging(self, a: dict, b: dict, bal: Balance) -> Callable[[float], float] | None:
+        """Return the share of a charging span's load drawn by each time.
+
+        Charge left over hours to full is proportional to the net charge rate,
+        so it times the gain within the span. Between readings, the load is
+        what came in less what was stored. None without estimates.
+        """
+        t0, t1 = a["t"], b["t"]
+        stored = _shares(self.fill, self.draw_times, t0, t1)
+        if stored is None or bal.load <= 0:
             return None
-        cuts = [t0] + [t for t, _ in steps[1:]] + [t1]
+        gained = self.battery.wh(b["battery_pct"] - a["battery_pct"])
+        out = bal.share * AC_CHARGE + (1 - bal.share) / DISCHARGE
+        i, j = bisect_right(self.draw_times, t0), bisect_right(self.draw_times, t1 - 1)
+        cuts = [t0, *self.draw_times[i:j], t1]
         sums = [0.0]
-        for (t, u), (_, w) in zip(pairwise(cuts), steps, strict=True):
-            sums.append(sums[-1] + (w or 0.0) * (u - t))
-        total = sums[-1]
-        if total <= 0:
-            return None
-
-        def done(t: float) -> float:
-            if t <= t0:
-                return 0.0
-            if t >= t1:
-                return 1.0
-            k = bisect_right(cuts, t) - 1
-            w = steps[k][1] or 0.0
-            return (sums[k] + w * (t - cuts[k])) / total
-
-        return done
+        for t, u in pairwise(cuts):
+            came = (self.solar(u)[0] - self.solar(t)[0]) * self.battery.solar_stored + (
+                self.grid(u)[0] - self.grid(t)[0]
+            ) * AC_CHARGE
+            sums.append(sums[-1] + max(0.0, (came - gained * (stored(u) - stored(t))) / out))
+        return _linear(cuts, sums)
 
 
 @dataclass
@@ -269,8 +273,8 @@ def spans(
     Charge readings are whole percent (about 31 Wh), so the balance runs
     between readings where the charge changes. Within each span, the load
     follows the Jackery's runtime estimate: charge divided by hours left is
-    proportional to the draw. Spans without that estimate, or where the plug
-    supplies power, spread the load evenly.
+    proportional to the draw. While charging, its time to full times the gain
+    instead. Spans without either estimate spread the load evenly.
     """
     readings = sorted((s for s in samples if _finite(s, "battery_pct")), key=lambda s: s["t"])
     if len(readings) < 2:
@@ -297,6 +301,8 @@ def spans(
             continue
         bal = flows.between(a, b)
         done = flows.timing(t0, t1) if bal.share == 0 else None
+        if done is None and b["battery_pct"] > a["battery_pct"]:
+            done = flows.charging(a, b, bal)
         out.append(
             Span(
                 t0,
@@ -311,6 +317,34 @@ def spans(
             )
         )
     return out
+
+
+def load_points(samples: list[dict], plug: list[dict], battery: Battery) -> list[tuple[int, float]]:
+    """Return the estimated load in W from each sample to the next."""
+    times = sorted(s["t"] for s in samples)
+    points = []
+    for span in spans(samples, plug, battery):
+        inside = times[bisect_right(times, span.t0) : bisect_left(times, span.t1)]
+        for t, u in pairwise([span.t0, *inside, span.t1]):
+            points.append((t, round(span.load * (span.done(u) - span.done(t)) * 3600 / (u - t), 1)))
+    return points
+
+
+def load_profile(points: list[tuple[int, float]], tz: tzinfo) -> dict[int, float]:
+    """Average load in W for each 15-minute slot of the local day, skipping gaps."""
+    wh: dict[int, float] = defaultdict(float)
+    seconds: dict[int, float] = defaultdict(float)
+    for (t, w), (u, _) in pairwise(points):
+        if u - t > 900:
+            continue  # a gap in readings
+        while t < u:
+            end = min(u, (t // 900 + 1) * 900)
+            local = datetime.fromtimestamp(t, tz)
+            q = local.hour * 4 + local.minute // 15
+            wh[q] += w * (end - t)
+            seconds[q] += end - t
+            t = end
+    return {q: wh[q] / seconds[q] for q in seconds}
 
 
 def average_load_w(samples: list[dict], plug: list[dict], battery: Battery) -> float | None:
@@ -381,6 +415,46 @@ def _draw(sample: dict) -> float | None:
     """Return charge over hours left, proportional to the battery's draw."""
     hours = sample.get("runtime_h")
     return sample["battery_pct"] / hours if hours else None
+
+
+def _fill(sample: dict) -> float | None:
+    """Return charge left over hours to full, proportional to the net charge rate."""
+    hours = sample.get("full_h")
+    return (100 - sample["battery_pct"]) / hours if hours else None
+
+
+def _shares(
+    weights: list[tuple[int, float | None]], times: list[int], t0: int, t1: int
+) -> Callable[[float], float] | None:
+    """Return the share of a span done by each time; each weight holds until the next reading."""
+    i = bisect_right(times, t0) - 1
+    j = bisect_right(times, t1 - 1)
+    steps = weights[max(i, 0) : j]
+    if i < 0 or any(w is None for _, w in steps):
+        return None
+    cuts = [t0] + [t for t, _ in steps[1:]] + [t1]
+    sums = [0.0]
+    for (t, u), (_, w) in zip(pairwise(cuts), steps, strict=True):
+        sums.append(sums[-1] + (w or 0.0) * (u - t))
+    return _linear(cuts, sums)
+
+
+def _linear(cuts: list[int], sums: list[float]) -> Callable[[float], float] | None:
+    """Return the cumulative share at a time, interpolating between cuts; None if all zero."""
+    total = sums[-1]
+    if total <= 0:
+        return None
+
+    def done(t: float) -> float:
+        if t <= cuts[0]:
+            return 0.0
+        if t >= cuts[-1]:
+            return 1.0
+        k = bisect_right(cuts, t) - 1
+        f = (t - cuts[k]) / (cuts[k + 1] - cuts[k])
+        return (sums[k] + (sums[k + 1] - sums[k]) * f) / total
+
+    return done
 
 
 def _finite(s: dict, key: str) -> bool:

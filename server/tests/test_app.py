@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
-from planner.battery import AC_CHARGE, DISCHARGE, SOLAR_CHARGE, Battery
+from planner.battery import AC_CHARGE, DISCHARGE, SOLAR_CHARGE, Battery, load_points
 from planner.jackery import Reading
 from solar_server import tasks, totals, views
 from solar_server.app import create_app
@@ -581,7 +581,7 @@ def test_load_follows_the_runtime_estimate_within_a_charge_step():
     ]
     samples.append({"t": NOW + 1200, "battery_pct": 49.0, "runtime_h": 3.0})
     samples.insert(0, {"t": NOW - 60, "battery_pct": 51.0, "runtime_h": 1.0})
-    points = dict(totals.load_points(samples, [], battery))
+    points = dict(load_points(samples, [], battery))
     drawn = battery.wh(1) * DISCHARGE
     wh = sum(w * 60 for t, w in points.items() if t >= NOW) / 3600
     assert wh == pytest.approx(drawn, abs=0.1)
@@ -590,8 +590,26 @@ def test_load_follows_the_runtime_estimate_within_a_charge_step():
     assert points[NOW + 600] == pytest.approx(drawn / 2 / (15 / 60), rel=0.01)
     # The same rates without estimates spread the load evenly.
     bare = [{k: v for k, v in s.items() if k != "runtime_h"} for s in samples]
-    even = dict(totals.load_points(bare, [], battery))
+    even = dict(load_points(bare, [], battery))
     assert even[NOW] == even[NOW + 600] == pytest.approx(drawn / (20 / 60), rel=0.01)
+
+
+def test_load_follows_the_time_to_full_while_charging():
+    battery = Battery()
+    # Solar reads 300 W for 20 minutes while the charge rises 1%. Time to full
+    # shows the battery charging twice as fast for the first 10, so less load.
+    samples = [
+        {"t": NOW + i * 60, "battery_pct": 50.0, "solar_w": 300.0, "full_h": 50 if i < 10 else 100}
+        for i in range(20)
+    ]
+    samples.append({"t": NOW + 1200, "battery_pct": 51.0, "solar_w": 300.0, "full_h": 100})
+    samples.insert(0, {"t": NOW - 60, "battery_pct": 49.0, "solar_w": 300.0, "full_h": 50})
+    points = dict(load_points(samples, [], battery))
+    came = 300 * battery.solar_stored / 6  # Wh stored per 10 minutes
+    first = (came - battery.wh(1) * 2 / 3) * DISCHARGE
+    second = (came - battery.wh(1) / 3) * DISCHARGE
+    assert points[NOW] == pytest.approx(first * 6, rel=0.01)
+    assert points[NOW + 600] == pytest.approx(second * 6, rel=0.01)
 
 
 def test_load_while_the_plug_is_on_runs_from_the_grid():

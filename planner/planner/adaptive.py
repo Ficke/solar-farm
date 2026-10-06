@@ -9,7 +9,14 @@ from datetime import datetime, time, timedelta
 from itertools import pairwise
 from statistics import mean, median
 
-from planner.battery import AC_CHARGE, DISCHARGE, Battery, average_load_w
+from planner.battery import (
+    AC_CHARGE,
+    DISCHARGE,
+    Battery,
+    average_load_w,
+    load_points,
+    load_profile,
+)
 from planner.plan import PACIFIC
 
 TIE_MOER = 50  # Round emissions to groups of this many lb/MWh.
@@ -33,14 +40,16 @@ def estimates(
 ) -> dict:
     """Estimate solar, load and AC charging from recent telemetry.
 
-    Solar uses qualifying days among the last seven completed days; load uses
-    the last 24 hours. Both require six hours of coverage and exclude gaps
-    over 15 minutes. Load comes from the battery's energy balance (solar and
-    grid in, less the change in charge), because the Jackery's output reading
-    lags and misses most of what is drawn. Grid energy and the charge rate
-    come from the plug's own meter when its reports are given, else from the
-    Jackery's AC input. Charging uses the latest 30 qualifying readings within
-    a week. Insufficient coverage falls back to the supplied defaults.
+    Solar uses qualifying days among the last seven completed days; average
+    load uses the last 24 hours. Both require six hours of coverage and
+    exclude gaps over 15 minutes. ``load_profile`` averages the load in each
+    15-minute slot of the day over the last week. Load comes from the
+    battery's energy balance (solar and grid in, less the change in charge),
+    because the Jackery's output reading lags and misses most of what is drawn.
+    Grid energy and the charge rate come from the plug's own meter when its
+    reports are given, else from the Jackery's AC input. Charging uses the
+    latest 30 qualifying readings within a week. Insufficient coverage falls
+    back to the supplied defaults.
     ``battery`` gives the measured capacity and solar reading scale.
     """
     samples = sorted({s["t"]: s for s in samples if s["t"] <= now}.values(), key=lambda s: s["t"])
@@ -84,6 +93,8 @@ def estimates(
     plug = sorted({r["t"]: r for r in plug or [] if r["t"] <= now}.values(), key=lambda r: r["t"])
     battery = battery or Battery()
     balance = average_load_w(recent, plug, battery)
+    week = [s for s in samples if now - 7 * 86400 <= s["t"]]
+    by_slot = load_profile(load_points(week, plug, battery), PACIFIC)
     for a, b in pairwise(recent):
         if (
             a.get("output_w") is not None
@@ -137,6 +148,7 @@ def estimates(
         else load_w,
         "charge_w": median(charging) if len(charging) >= MIN_CHARGE_READINGS else charge_w,
         "battery": battery.to_dict(),
+        "load_profile": by_slot,
     }
 
 
@@ -180,6 +192,8 @@ def build_adaptive_plan(
     end = min(deadline, max(signals, default=tnow - 900) + 900)
     # State documents use JSON, which turns integer dictionary keys into strings.
     profile = {int(q): w for q, w in estimate["solar_profile"].items()}
+    # Slots never seen use the average load.
+    loads = {int(q): w for q, w in (estimate.get("load_profile") or {}).items()}
     slots: list[dict] = []
     for start in range(tnow // 900 * 900, end, 900):
         s, e = max(tnow, start), min(end, start + 900)
@@ -187,13 +201,14 @@ def build_adaptive_plan(
         hours = (e - s) / 3600
         solar = profile.get(local.hour * 4 + local.minute // 15, 0.0) * battery.solar_stored * hours
         moer = sum(signals[start]) / len(signals[start]) if start in signals else None
+        load_w = loads.get(local.hour * 4 + local.minute // 15, estimate["load_w"])
         slots.append(
             {
                 "s": s,
                 "e": e,
                 "solar": solar,
-                "load": estimate["load_w"] * hours,  # Wh at the outlet
-                "net": solar - estimate["load_w"] / DISCHARGE * hours,
+                "load": load_w * hours,  # Wh at the outlet
+                "net": solar - load_w / DISCHARGE * hours,
                 "max": estimate["charge_w"] * AC_CHARGE * hours,
                 "moer": moer,
                 "allowed": moer is not None and not 16 <= local.hour < 21,

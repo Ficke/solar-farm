@@ -116,17 +116,6 @@ def load_co2(
     return load_wh, load_lb, used_lb
 
 
-def load_points(samples: list[dict], plug: list[dict], battery: Battery) -> list[tuple[int, float]]:
-    """Return the estimated load in W from each sample to the next."""
-    times = [s["t"] for s in samples]
-    points = []
-    for span in spans(samples, plug, battery):
-        cuts = [span.t0] + [t for t in times if span.t0 < t < span.t1] + [span.t1]
-        for t, u in pairwise(cuts):
-            points.append((t, round(span.load * (span.done(u) - span.done(t)) * 3600 / (u - t), 1)))
-    return points
-
-
 def day_totals(
     store: Store, day: str, pool: Pool | None = None, battery: Battery | None = None
 ) -> dict | None:
