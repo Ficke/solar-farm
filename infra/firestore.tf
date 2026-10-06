@@ -22,13 +22,13 @@ resource "google_firestore_backup_schedule" "weekly" {
 # These fields are read as whole documents; disable unused indexes to limit growth.
 locals {
   unindexed = {
-    samples      = "items"
-    plug         = "items"
-    jackery      = "items"
-    plans        = "items"
-    forecasts    = "items"
-    mix          = "items"
-    state        = "data_json"
+    samples   = "items"
+    plug      = "items"
+    jackery   = "items"
+    plans     = "items"
+    forecasts = "items"
+    mix       = "items"
+    state     = "data_json"
   }
 }
 
