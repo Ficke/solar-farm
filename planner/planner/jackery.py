@@ -25,6 +25,7 @@ STAT_QUERIES = (
     ("/v1/device/chargeReport", "sn", False),
 )
 STAT_LIMIT = 60_000  # Characters kept per response, to fit one Firestore document.
+PUSH_LIMIT = 500  # MQTT messages kept per listen.
 
 
 @dataclass
@@ -122,6 +123,26 @@ class Account:
                 except Exception as e:
                     out[path] = {"error": repr(e)[:500]}
         return out
+
+    async def listen(self, seconds: float) -> list[dict]:
+        """Record the MQTT property pushes for this device over ``seconds``; read-only."""
+        import asyncio
+        import time
+
+        device = await self._connect()
+        assert self._client is not None
+        messages: list[dict] = []
+
+        async def on_push(sn: str, props: dict) -> None:
+            if sn == device.sn and len(messages) < PUSH_LIMIT:
+                messages.append({"t": round(time.time(), 1), **scalars(props)})
+
+        subscription = await self._client.subscribe(on_push)
+        try:
+            await asyncio.sleep(seconds)
+        finally:
+            await subscription.stop()
+        return messages
 
 
 def scalars(props: dict) -> dict:
