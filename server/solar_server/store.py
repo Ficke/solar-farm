@@ -16,6 +16,7 @@ from planner.plan import PACIFIC
 SAMPLES = "samples"
 PLUG = "plug"
 JACKERY = "jackery"  # Jackery property maps, stored when any field changes.
+JACKERY_PUSH = "jackery_push"  # Jackery MQTT messages from each probe listen.
 PLANS = "plans"
 FORECASTS = "forecasts"
 MIX = "mix"

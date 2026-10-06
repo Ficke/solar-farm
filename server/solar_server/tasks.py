@@ -18,6 +18,7 @@ from solar_server.sources import Sources
 from solar_server.store import (
     FORECASTS,
     JACKERY,
+    JACKERY_PUSH,
     MIX,
     PLANS,
     PLUG,
@@ -113,6 +114,9 @@ def probe_stats(store: Store, sources: Sources, now: datetime) -> None:
     store.put_state(
         "jackery_stats", {"t": int(now.timestamp()), "responses": responses, "push": push}
     )
+    messages = [m for m in push or [] if "t" in m]
+    if messages:
+        store.extend(JACKERY_PUSH, messages)
 
 
 WATTTIME_KEYS = ("moer", "moer_t", "index")
