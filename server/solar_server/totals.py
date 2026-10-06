@@ -13,12 +13,20 @@ from __future__ import annotations
 
 import logging
 from bisect import bisect_right
-from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, timedelta
 from itertools import pairwise
 
-from planner.battery import AC_CHARGE, DISCHARGE, Battery
+from planner.battery import (
+    DISCHARGE,
+    MAX_GAP,
+    Battery,
+    Rate,
+    integrate_wh,
+    metered,
+    series,
+    spans,
+)
 
 from solar_server.store import PLUG, SAMPLES, Store, day_key, day_keys
 
@@ -26,13 +34,8 @@ log = logging.getLogger(__name__)
 
 # Nothing was recorded before this; the first update fills in every day since.
 FIRST_DAY = "2026-10-01"
-MAX_GAP = 3600  # Cap each integration interval at one hour.
 RATE_GAP = 1800  # Carry each marginal rate for at most 30 minutes.
-VERSION = 4  # Increment to recompute history from FIRST_DAY.
-MIN_SPAN = 600  # Seconds; see spans().
-STEADY = 1.25  # Largest ratio between runtime-based draws in a joined span.
-
-type Rate = Callable[[float], float | None]
+VERSION = 5  # Increment to recompute history from FIRST_DAY.
 
 
 def rate_lookup(samples: list[dict]) -> Rate:
@@ -56,46 +59,6 @@ def rate_lookup(samples: list[dict]) -> Rate:
 def covered_h(points: list[tuple[int, float]]) -> float:
     """Sum coverage hours, capping each gap at ``MAX_GAP`` seconds."""
     return sum(min(t1 - t0, MAX_GAP) for (t0, _), (t1, _) in pairwise(points)) / 3600
-
-
-def integrate_wh(points: list[tuple[int, float]]) -> float:
-    return energy(points, lambda _t: None)[0]
-
-
-def energy(points: list[tuple[int, float]], rate: Rate) -> tuple[float, float]:
-    """Integrate Wh and CO2 in lb, using interval-midpoint rates and capped gaps."""
-    wh = lb = 0.0
-    for (t0, w0), (t1, w1) in pairwise(points):
-        seg = (w0 + w1) / 2 * min(t1 - t0, MAX_GAP) / 3600
-        wh += seg
-        r = rate((t0 + t1) / 2)
-        if r is not None:
-            lb += seg * r / 1e6
-    return wh, lb
-
-
-def cumulative(
-    points: list[tuple[int, float]], rate: Rate
-) -> Callable[[float], tuple[float, float]]:
-    """Return cumulative Wh and CO2 in lb from the first point to a given time."""
-    times = [t for t, _ in points]
-    sums = [(0.0, 0.0)]
-    for a, b in pairwise(points):
-        wh, lb = energy([a, b], rate)
-        sums.append((sums[-1][0] + wh, sums[-1][1] + lb))
-
-    def at(t: float) -> tuple[float, float]:
-        i = bisect_right(times, t) - 1
-        if i < 0:
-            return 0.0, 0.0
-        if i >= len(points) - 1 or t <= times[i]:
-            return sums[i]
-        (t0, w0), (t1, w1) = points[i], points[i + 1]
-        w = w0 + (w1 - w0) * (t - t0) / (t1 - t0)
-        wh, lb = energy([(t0, w0), (int(t), w)], rate)
-        return sums[i][0] + wh, sums[i][1] + lb
-
-    return at
 
 
 @dataclass
@@ -127,7 +90,7 @@ def load_co2(
     """
     rates = [(s["t"], rate(s["t"])) for s in samples]
     load_wh = load_lb = used_lb = 0.0
-    for span in spans(samples, plug, rate, battery):
+    for span in spans(samples, plug, battery, rate):
         load, direct = span.load, span.direct
         points = [(t, r) for t, r in rates if span.t0 <= t <= span.t1]
         baseline_lb = sum(
@@ -153,151 +116,6 @@ def load_co2(
     return load_wh, load_lb, used_lb
 
 
-def load_points(samples: list[dict], plug: list[dict], battery: Battery) -> list[tuple[int, float]]:
-    """Return the estimated load in W from each sample to the next."""
-    times = [s["t"] for s in samples]
-    points = []
-    for span in spans(samples, plug, lambda _t: None, battery):
-        cuts = [span.t0] + [t for t in times if span.t0 < t < span.t1] + [span.t1]
-        for t, u in pairwise(cuts):
-            points.append((t, round(span.load * (span.done(u) - span.done(t)) * 3600 / (u - t), 1)))
-    return points
-
-
-@dataclass
-class Span:
-    """Load between two readings where the charge changed."""
-
-    t0: int
-    t1: int
-    pct: float  # Charge at the end.
-    load: float  # Wh
-    direct: float  # Wh supplied straight from the plug
-    solar_in: float  # Solar Wh stored
-    grid_wh: float
-    grid_lb: float
-    done: Callable[[float], float]  # Share of the load drawn by a given time.
-
-
-def spans(samples: list[dict], plug: list[dict], rate: Rate, battery: Battery) -> list[Span]:
-    """Split the load by whole-percent charge changes, from the energy balance.
-
-    The Jackery's output reading lags and misses most draws, so the load is
-    what came in (solar, and grid from the plug's meter) less what the charge
-    gained. Charge readings are whole percent (about 31 Wh), so the balance runs
-    between readings where the charge changes. Within each span, the load
-    follows the Jackery's runtime estimate: charge divided by hours left is
-    proportional to the draw. Spans without that estimate, or where the plug
-    supplies power, spread the load evenly.
-    """
-    readings = [s for s in samples if s.get("battery_pct") is not None]
-    if len(readings) < 2:
-        return []
-    steps = [readings[0]]
-    steps += [b for a, b in pairwise(readings) if b["battery_pct"] != a["battery_pct"]]
-    if steps[-1] is not readings[-1]:
-        steps.append(readings[-1])
-    solar = cumulative(series(samples, "solar_w"), rate)
-    grid_points = series(plug, "w")
-    grid = cumulative(grid_points, rate)
-    # Integrating 1 W while the plug draws power gives hours supplied.
-    supplied = cumulative([(t, 1.0 if w > 0 else 0.0) for t, w in grid_points], rate)
-    draw = [(s["t"], _draw(s)) for s in readings]
-    times = [t for t, _ in draw]
-
-    def steady(t0: int, t1: int) -> bool:
-        if supplied(t1)[0] != supplied(t0)[0] or _timing(draw, t0, t1) is None:
-            return False
-        i = bisect_right(times, t0) - 1
-        ws = [w for _, w in draw[i : bisect_right(times, t1 - 1)] if w]
-        return bool(ws) and max(ws) <= STEADY * min(ws)
-
-    # Whole-percent steps a minute or two apart alternate between double and
-    # half the real draw. While runtime estimates show a steady draw, join
-    # steps into spans of at least MIN_SPAN.
-    edges = [steps[0]]
-    for k, e in enumerate(steps[1:-1], 1):
-        if e["t"] - edges[-1]["t"] >= MIN_SPAN or not steady(edges[-1]["t"], steps[k + 1]["t"]):
-            edges.append(e)
-    edges.append(steps[-1])
-    out = []
-    for a, b in pairwise(edges):
-        t0, t1 = a["t"], b["t"]
-        if t1 <= t0:
-            continue
-        solar_wh = solar(t1)[0] - solar(t0)[0]
-        (g1, g1_lb), (g0, g0_lb) = grid(t1), grid(t0)
-        grid_wh, grid_lb = g1 - g0, g1_lb - g0_lb
-        share = min(1.0, (supplied(t1)[0] - supplied(t0)[0]) * 3600 / (t1 - t0))
-        gained = battery.wh(b["battery_pct"] - a["battery_pct"])
-        solar_in = solar_wh * battery.solar_stored
-        load = (solar_in + grid_wh * AC_CHARGE - gained) / (
-            share * AC_CHARGE + (1 - share) / DISCHARGE
-        )
-        direct = load * share
-        if direct > grid_wh:
-            direct = grid_wh
-            load = grid_wh + (solar_in - gained) * DISCHARGE
-        if load <= 0:
-            # More charge than measured input, usually from a low solar reading.
-            load = direct = 0.0
-        done = _timing(draw, t0, t1) if share == 0 else None
-        out.append(
-            Span(
-                t0,
-                t1,
-                float(b["battery_pct"]),
-                load,
-                direct,
-                solar_in,
-                grid_wh,
-                grid_lb,
-                done or (lambda t, t0=t0, t1=t1: min(1.0, max(0.0, (t - t0) / (t1 - t0)))),
-            )
-        )
-    return out
-
-
-def _draw(sample: dict) -> float | None:
-    """Return charge over hours left, proportional to the battery's draw."""
-    hours = sample.get("runtime_h")
-    return sample["battery_pct"] / hours if hours else None
-
-
-def _timing(
-    draw: list[tuple[int, float | None]], t0: int, t1: int
-) -> Callable[[float], float] | None:
-    """Return the share of a span's load drawn by each time, or None without estimates."""
-    times = [t for t, _ in draw]
-    i = bisect_right(times, t0) - 1
-    j = bisect_right(times, t1 - 1)
-    steps = draw[max(i, 0) : j]
-    if i < 0 or any(w is None for _, w in steps):
-        return None
-    cuts = [t0] + [t for t, _ in steps[1:]] + [t1]
-    sums = [0.0]
-    for (t, u), (_, w) in zip(pairwise(cuts), steps, strict=True):
-        sums.append(sums[-1] + (w or 0.0) * (u - t))
-    total = sums[-1]
-    if total <= 0:
-        return None
-
-    def done(t: float) -> float:
-        if t <= t0:
-            return 0.0
-        if t >= t1:
-            return 1.0
-        k = bisect_right(cuts, t) - 1
-        w = steps[k][1] or 0.0
-        return (sums[k] + w * (t - cuts[k])) / total
-
-    return done
-
-
-def series(items: list[dict], key: str) -> list[tuple[int, float]]:
-    return [(int(i["t"]), float(i[key])) for i in items if i.get(key) is not None]
-
-
 def day_totals(
     store: Store, day: str, pool: Pool | None = None, battery: Battery | None = None
 ) -> dict | None:
@@ -318,11 +136,10 @@ def day_totals(
         pool = Pool(unknown_wh=battery.wh(first["battery_pct"]) if first else 0.0)
 
     solar = series(samples, "solar_w")
-    grid = series(plug, "w")
-    grid_wh, grid_lb = energy(grid, rate)
+    by = metered(plug, rate)
+    grid_wh, grid_lb = by(plug[-1]["t"]) if plug else (0.0, 0.0)
     load_wh, load_lb, used_lb = load_co2(samples, plug, rate, pool, battery)
     # Plug draw before the first or after the last change in charge goes into the battery.
-    by = cumulative(grid, rate)
     readings = [s["t"] for s in samples if s.get("battery_pct") is not None]
     if len(readings) >= 2:
         pool.stored_lb += by(readings[0])[1] + grid_lb - by(readings[-1])[1]

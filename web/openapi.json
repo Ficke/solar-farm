@@ -1059,6 +1059,17 @@
             ],
             "title": "Runtime H"
           },
+          "full_h": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full H"
+          },
           "moer": {
             "anyOf": [
               {

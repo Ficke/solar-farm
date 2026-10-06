@@ -106,7 +106,10 @@ def test_history_learns_solar_and_load_without_extrapolating_gaps():
     # last 24 hours of readings (7 am to midnight): the load drew it all.
     hours = (samples[-1]["t"] - int((NOW - timedelta(days=1)).timestamp())) / 3600
     stored = 500 * SOLAR_CHARGE + 1200 * AC_CHARGE
-    assert estimate["load_w"] == pytest.approx(stored * DISCHARGE / hours, rel=0.01)
+    # For the hour the grid supplied power, it ran the load at the charger's efficiency.
+    share = 1 / hours
+    out = share * AC_CHARGE + (1 - share) / DISCHARGE
+    assert estimate["load_w"] == pytest.approx(stored / out / hours, rel=0.01)
     assert estimate["charge_w"] == pytest.approx(1160)  # AC in less load, as measured
     assert estimate["solar_profile"][48] == pytest.approx(100)
     sparse = estimates([samples[0], samples[-1]], int(NOW.timestamp()), 500, 100, 1700)
@@ -221,7 +224,8 @@ def test_plug_meter_supplies_grid_energy_and_charge_rate():
     ]
     plug.append({"t": t + 600, "on": True, "w": 9999.0, "wh": 0.0})  # after now: ignored
     estimate = estimates(samples, t, 500, 5, 1200, plug=plug)
-    expected = (1000 * 0.9 - CAPACITY_WH * 0.25) * 0.9 / 6
+    share = 35.5 / 360  # minutes the plug supplied power, of six hours
+    expected = (1000 * 0.9 - CAPACITY_WH * 0.25) / (share * 0.9 + (1 - share) / 0.9) / 6
     assert estimate["load_w"] == pytest.approx(expected, rel=0.01)
     assert estimate["charge_w"] == pytest.approx(1660)
     # Near full the Jackery slows down; those readings don't set the rate.
@@ -384,3 +388,26 @@ def test_blocks_explain_each_quarter_hour():
     assert blocks[-1]["pct"] == 100
     after_peak = build_adaptive_plan(points, NOW.replace(hour=23, minute=30), 50, inputs())
     assert after_peak["blocks"][0]["mode"] == "peak"
+
+
+def test_load_is_planned_by_time_of_day():
+    # A week where the battery falls 10% from 6 to 7 pm each day and holds otherwise.
+    t = int(NOW.timestamp())
+    samples = []
+    for i in range(7 * 24 * 60):
+        u = t - 7 * 86400 + i * 60
+        local = datetime.fromtimestamp(u, PACIFIC)
+        evening = local.hour == 18
+        drop = local.minute / 6 if evening else (10 if local.hour > 18 else 0)
+        samples.append({"t": u, "battery_pct": float(90 - int(drop)), "solar_w": 0})
+    estimate = estimates(samples, t, 500, 100, 1700)
+    profile = estimate["load_profile"]
+    assert profile[18 * 4 + 1] == pytest.approx(CAPACITY_WH * 0.10 * DISCHARGE, rel=0.15)
+    # Without runtime estimates, the next 1% drop spreads over the night before it.
+    assert profile[3 * 4] < 2
+    plan = build_adaptive_plan(forecast(), NOW, 60, estimate)
+    # The morning before the clean noon hour draws next to nothing.
+    morning = [
+        b["pct"] for b in plan["blocks"] if datetime.fromtimestamp(b["s"], PACIFIC).hour < 11
+    ]
+    assert morning and max(morning) - min(morning) < 1

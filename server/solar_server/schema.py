@@ -21,6 +21,7 @@ class Sample(BaseModel):
     ac_input_w: float | None = None
     output_w: float | None = None
     runtime_h: float | None = None  # Jackery's estimate of hours left at the current draw.
+    full_h: float | None = None  # Jackery's estimate of hours to full while charging.
     moer: float | None = None  # WattTime reports marginal CO2 in lb/MWh.
     moer_t: int | None = None
     index: float | None = None  # Lower percentiles indicate cleaner grid power.

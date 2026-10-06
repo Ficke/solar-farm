@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from planner.adaptive import MIN_CHARGE_W, build_adaptive_plan, estimates
-from planner.battery import Battery
+from planner.battery import WINDOW, Battery, integrate_wh, measure
 from planner.jackery import scalars
 from planner.plan import PACIFIC, build_plan
 
@@ -27,7 +27,6 @@ from solar_server.store import (
     day_key,
     window,
 )
-from solar_server.totals import integrate_wh
 
 log = logging.getLogger(__name__)
 
@@ -67,6 +66,7 @@ def collect(store: Store, sources: Sources, now: datetime) -> dict:
                 ac_input_w=_num(r.ac_input_w),
                 output_w=_num(r.output_w),
                 runtime_h=_num(r.runtime_h),
+                full_h=_num(r.full_h),
             )
             record_properties(store, t, r.raw)
     except Exception as e:
@@ -319,6 +319,7 @@ def charging_plan(
 
 ESTIMATES_MAX_AGE = 1800
 ESTIMATES_MAX_AGE_CHARGING = 300  # Detect charging-speed changes sooner.
+BATTERY_MAX_AGE = 6 * 3600
 
 
 def charging_estimates(store: Store, settings: Settings, now: int) -> dict:
@@ -333,10 +334,22 @@ def charging_estimates(store: Store, settings: Settings, now: int) -> dict:
         return cached["estimate"]
     samples = window(store, SAMPLES, now - 8 * 86400, now)
     plug = window(store, PLUG, now - 8 * 86400, now)
-    previous = Battery.from_dict((cached.get("estimate") or {}).get("battery"))
-    estimate = estimates(samples, now, *inputs, plug=plug, battery=previous)
+    battery = battery_estimate(store, now)
+    estimate = estimates(samples, now, *inputs, plug=plug, battery=battery)
     store.put_state("charging_estimates", {"t": now, "inputs": inputs, "estimate": estimate})
     return estimate
+
+
+def battery_estimate(store: Store, now: int) -> Battery:
+    """Measure capacity and the solar scale over 30 days, every six hours."""
+    cached = store.get_state("battery") or {}
+    previous = Battery.from_dict(cached.get("battery"))
+    if 0 <= now - cached.get("t", 0) < BATTERY_MAX_AGE:
+        return previous
+    since = now - WINDOW
+    battery = measure(window(store, SAMPLES, since, now), window(store, PLUG, since, now), previous)
+    store.put_state("battery", {"t": now, "battery": battery.to_dict()})
+    return battery
 
 
 def refresh_charging_plan(store: Store, settings: Settings, now: datetime) -> None:
