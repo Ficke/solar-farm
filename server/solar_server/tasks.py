@@ -9,7 +9,7 @@ from typing import Any
 
 from planner.adaptive import MIN_CHARGE_W, build_adaptive_plan, estimates
 from planner.battery import Battery
-from planner.jackery import scalars, stat_summary
+from planner.jackery import scalars
 from planner.plan import PACIFIC, build_plan
 
 from solar_server import totals
@@ -18,7 +18,6 @@ from solar_server.sources import Sources
 from solar_server.store import (
     FORECASTS,
     JACKERY,
-    JACKERY_PUSH,
     MIX,
     PLANS,
     PLUG,
@@ -67,15 +66,11 @@ def collect(store: Store, sources: Sources, now: datetime) -> dict:
                 solar_w=_num(r.solar_w),
                 ac_input_w=_num(r.ac_input_w),
                 output_w=_num(r.output_w),
+                runtime_h=_num(r.runtime_h),
             )
             record_properties(store, t, r.raw)
     except Exception as e:
         log.warning("jackery failed: %s", e)
-    if now.minute == STATS_MINUTE or "push" not in (store.get_state("jackery_stats") or {}):
-        try:
-            probe_stats(store, sources, now)
-        except Exception as e:
-            log.warning("jackery stats failed: %s", e)
     if len(sample) > 1:
         record_sample(store, sample)
     if five:
@@ -88,10 +83,6 @@ def collect(store: Store, sources: Sources, now: datetime) -> dict:
     return sample
 
 
-STATS_MINUTE = 7  # Probe hourly, and right away when no push listen is saved.
-PUSH_SECONDS = 45  # MQTT listen per probe; Cloud Scheduler allows 120 s per run.
-
-
 def record_properties(store: Store, t: int, raw: dict) -> None:
     """Archive the Jackery property map whenever any field changes."""
     props = scalars(raw)
@@ -99,24 +90,6 @@ def record_properties(store: Store, t: int, raw: dict) -> None:
     if props and props != last.get("props"):
         store.append(JACKERY, {"t": t, **props})
         store.put_state("jackery", {"t": t, "props": props})
-
-
-def probe_stats(store: Store, sources: Sources, now: datetime) -> None:
-    """Save the latest response of each Jackery statistics endpoint for review."""
-    responses = sources.jackery_stats(now.astimezone(PACIFIC).date())
-    if responses is None:
-        return
-    log.info("jackery stats: %s", stat_summary(responses))
-    try:
-        push = sources.jackery_push(PUSH_SECONDS)
-    except Exception as e:
-        push = [{"error": repr(e)[:500]}]
-    store.put_state(
-        "jackery_stats", {"t": int(now.timestamp()), "responses": responses, "push": push}
-    )
-    messages = [m for m in push or [] if "t" in m]
-    if messages:
-        store.extend(JACKERY_PUSH, messages)
 
 
 WATTTIME_KEYS = ("moer", "moer_t", "index")

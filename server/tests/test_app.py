@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
-from planner.battery import AC_CHARGE, DISCHARGE, SOLAR_CHARGE
+from planner.battery import AC_CHARGE, DISCHARGE, SOLAR_CHARGE, Battery
 from planner.jackery import Reading
 from solar_server import tasks, totals, views
 from solar_server.app import create_app
@@ -10,7 +10,6 @@ from solar_server.config import Settings
 from solar_server.store import (
     FORECASTS,
     JACKERY,
-    JACKERY_PUSH,
     MIX,
     PLANS,
     PLUG,
@@ -60,15 +59,7 @@ class FakeSources:
     def jackery(self, now):
         if not self.with_jackery:
             return None
-        return Reading(now, 81.0, 120.0, 0.0, 0.0, 90.0, {"rb": 81, "ip": 120, "op": 90})
-
-    def jackery_stats(self, day):
-        if not self.with_jackery:
-            return None
-        return {"/v1/device/stat/today": {"status": 200, "body": '{"code":0,"data":{}}'}}
-
-    def jackery_push(self, seconds):
-        return [{"t": NOW + 1.5, "op": 300}]
+        return Reading(now, 81.0, 120.0, 0.0, 0.0, 90.0, {"rb": 81, "ip": 120, "op": 90}, 16.2)
 
 
 def verifier(token, audience):
@@ -120,6 +111,7 @@ def test_collect_stores_one_sample_with_every_source():
         "solar_w": 120.0,
         "ac_input_w": 0.0,
         "output_w": 90.0,
+        "runtime_h": 16.2,
     }
     assert store.day(SAMPLES, "2026-10-04") == [body]
 
@@ -135,6 +127,7 @@ def test_collect_stores_only_new_watttime_readings_and_mix_every_5_minutes():
         "solar_w": 120.0,
         "ac_input_w": 0.0,
         "output_w": 90.0,
+        "runtime_h": 16.2,
     }
     assert store.day(MIX, "2026-10-04") == mix
     # The dashboard still shows WattTime's last reading.
@@ -150,21 +143,6 @@ def test_collect_archives_jackery_properties_only_when_they_change():
     for i in range(3):
         tasks.collect(store, FakeSources(), datetime.fromtimestamp(NOW + 60 * i, UTC))
     assert store.day(JACKERY, "2026-10-04") == [{"t": NOW, "rb": 81, "ip": 120, "op": 90}]
-
-
-def test_collect_probes_jackery_on_first_run_then_hourly():
-    store = MemoryStore()
-    tasks.collect(store, FakeSources(), datetime.fromtimestamp(NOW, UTC))
-    stats = store.get_state("jackery_stats") or {}
-    assert stats["t"] == NOW
-    assert stats["responses"]["/v1/device/stat/today"]["status"] == 200
-    assert stats["push"] == [{"t": NOW + 1.5, "op": 300}]
-    assert store.day(JACKERY_PUSH, "2026-10-04") == stats["push"]
-    tasks.collect(store, FakeSources(), datetime.fromtimestamp(NOW + 60, UTC))
-    assert (store.get_state("jackery_stats") or {})["t"] == NOW
-    t = NOW + 60 * tasks.STATS_MINUTE
-    tasks.collect(store, FakeSources(), datetime.fromtimestamp(t, UTC))
-    assert (store.get_state("jackery_stats") or {})["t"] == t
 
 
 def test_collect_keeps_going_when_a_source_fails():
@@ -592,6 +570,28 @@ def test_solar_runs_the_load_directly_without_co2():
     assert d["used_lb"] == pytest.approx(0.0, abs=0.001)
 
 
+def test_load_follows_the_runtime_estimate_within_a_charge_step():
+    battery = Battery()
+    # The charge falls 1% over 20 minutes: a 3x draw for the first 5, then idle-ish.
+    samples = [
+        {"t": NOW + i * 60, "battery_pct": 50.0, "runtime_h": 1.0 if i < 5 else 3.0}
+        for i in range(20)
+    ]
+    samples.append({"t": NOW + 1200, "battery_pct": 49.0, "runtime_h": 3.0})
+    samples.insert(0, {"t": NOW - 60, "battery_pct": 51.0, "runtime_h": 1.0})
+    points = dict(totals.load_points(samples, [], battery))
+    drawn = battery.wh(1) * DISCHARGE
+    wh = sum(w * 60 for t, w in points.items() if t >= NOW) / 3600
+    assert wh == pytest.approx(drawn, abs=0.1)
+    # Weight 50/1 for 5 minutes and 50/3 for 15: 250 vs 250 weight-minutes.
+    assert points[NOW] == pytest.approx(drawn / 2 / (5 / 60), rel=0.01)
+    assert points[NOW + 600] == pytest.approx(drawn / 2 / (15 / 60), rel=0.01)
+    # The same rates without estimates spread the load evenly.
+    bare = [{k: v for k, v in s.items() if k != "runtime_h"} for s in samples]
+    even = dict(totals.load_points(bare, [], battery))
+    assert even[NOW] == even[NOW + 600] == pytest.approx(drawn / (20 / 60), rel=0.01)
+
+
 def test_load_while_the_plug_is_on_runs_from_the_grid():
     store = MemoryStore()
     # A full battery holds its charge while the plug supplies 200 W of load.
@@ -636,7 +636,7 @@ def test_collect_updates_the_daily_totals():
     c, store = make("edge")
     assert c.post("/tasks/collect", headers=AUTH).status_code == 200
     assert store.days["2026-10-04"]["battery_peak_pct"] == 81.0
-    assert store.state["totals"] == {"day": "2026-10-04", "v": 3}
+    assert store.state["totals"] == {"day": "2026-10-04", "v": totals.VERSION}
 
 
 def test_full_days_need_three_hours_of_solar_readings(monkeypatch):
