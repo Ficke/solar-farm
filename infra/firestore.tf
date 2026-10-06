@@ -24,6 +24,7 @@ locals {
   unindexed = {
     samples   = "items"
     plug      = "items"
+    jackery   = "items"
     plans     = "items"
     forecasts = "items"
     mix       = "items"

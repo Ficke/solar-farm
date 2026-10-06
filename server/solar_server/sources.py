@@ -21,6 +21,7 @@ class Sources(Protocol):
     def mix(self, day: date, now: datetime) -> list[dict]: ...
     def prices(self, since: datetime, now: datetime) -> list[dict]: ...
     def jackery(self, now: datetime) -> Reading | None: ...
+    def jackery_stats(self, day: date) -> dict[str, dict] | None: ...
 
 
 @dataclass
@@ -55,10 +56,18 @@ class LiveSources:
     def prices(self, since: datetime, now: datetime) -> list[dict]:
         return caiso.prices(since, now)
 
-    def jackery(self, now: datetime) -> Reading | None:
+    def _account(self) -> Account | None:
         s = self.settings
         if not s.jackery_email:
             return None
         if self._jackery is None:
             self._jackery = Account(s.jackery_email, s.jackery_password, s.jackery_sn or None)
-        return asyncio.run(self._jackery.read(now))
+        return self._jackery
+
+    def jackery(self, now: datetime) -> Reading | None:
+        account = self._account()
+        return None if account is None else asyncio.run(account.read(now))
+
+    def jackery_stats(self, day: date) -> dict[str, dict] | None:
+        account = self._account()
+        return None if account is None else asyncio.run(account.stats(day))

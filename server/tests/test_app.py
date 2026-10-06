@@ -7,7 +7,7 @@ from planner.jackery import Reading
 from solar_server import tasks, totals, views
 from solar_server.app import create_app
 from solar_server.config import Settings
-from solar_server.store import FORECASTS, MIX, PLANS, PLUG, PRICES, SAMPLES, MemoryStore
+from solar_server.store import FORECASTS, JACKERY, MIX, PLANS, PLUG, PRICES, SAMPLES, MemoryStore
 
 NOW = 1791158400  # This is Sunday, October 4, 2026, at 17:00 Pacific.
 SCHED = "solar-scheduler@p.iam.gserviceaccount.com"
@@ -50,7 +50,12 @@ class FakeSources:
     def jackery(self, now):
         if not self.with_jackery:
             return None
-        return Reading(now, 81.0, 120.0, 0.0, 0.0, 90.0, {})
+        return Reading(now, 81.0, 120.0, 0.0, 0.0, 90.0, {"rb": 81, "ip": 120, "op": 90})
+
+    def jackery_stats(self, day):
+        if not self.with_jackery:
+            return None
+        return {"/v1/device/stat/today": {"status": 200, "body": '{"code":0,"data":{}}'}}
 
 
 def verifier(token, audience):
@@ -125,6 +130,24 @@ def test_collect_stores_only_new_watttime_readings_and_mix_every_5_minutes():
     later = datetime.fromtimestamp(NOW - 300 + tasks.WATTTIME_KEEP + 60, UTC)
     tasks.collect(store, FakeSources(), later)
     assert "moer" not in (store.get_state("sample") or {})["sample"]
+
+
+def test_collect_archives_jackery_properties_only_when_they_change():
+    store = MemoryStore()
+    for i in range(3):
+        tasks.collect(store, FakeSources(), datetime.fromtimestamp(NOW + 60 * i, UTC))
+    assert store.day(JACKERY, "2026-10-04") == [{"t": NOW, "rb": 81, "ip": 120, "op": 90}]
+
+
+def test_collect_probes_jackery_statistics_hourly():
+    store = MemoryStore()
+    tasks.collect(store, FakeSources(), datetime.fromtimestamp(NOW, UTC))
+    assert store.get_state("jackery_stats") is None
+    t = NOW + 60 * tasks.STATS_MINUTE
+    tasks.collect(store, FakeSources(), datetime.fromtimestamp(t, UTC))
+    stats = store.get_state("jackery_stats") or {}
+    assert stats["t"] == t
+    assert stats["responses"]["/v1/device/stat/today"]["status"] == 200
 
 
 def test_collect_keeps_going_when_a_source_fails():
