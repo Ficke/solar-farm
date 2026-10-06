@@ -8,7 +8,7 @@
   import { FUTURE, LINE_THIN, PAST } from "./lib/layout";
   import { GROUPS, stackMix } from "./lib/mix";
   import PlanView from "./lib/PlanView.svelte";
-  import { blockAt } from "./lib/plan";
+  import { blockAt, gridSpans } from "./lib/plan";
   import Segmented from "./lib/Segmented.svelte";
   import { explain } from "./lib/status";
   import TimeChart from "./lib/TimeChart.svelte";
@@ -111,6 +111,7 @@
   const blocks = $derived(now?.plan?.blocks ?? []);
   const forecast = $derived(tl?.forecast ?? []);
   const tnow = $derived(now?.now ?? clock);
+  const spans = $derived(gridSpans(tl?.plug ?? [], tl?.samples ?? [], windows, tnow));
   // Keep charts and the plan strip on a shared time axis.
   const base = $derived(tl?.now ?? clock);
   const from = $derived(base - PAST);
@@ -289,7 +290,7 @@
       {from}
       {to}
       now={tnow}
-      {windows}
+      windows={spans}
       height={180}
       series={[
         { label: "Actual", color: "--co2-mid", ramp: CO2_RAMP, unit: "lb/MWh" },
@@ -351,7 +352,7 @@
       {from}
       {to}
       now={tnow}
-      {windows}
+      windows={spans}
       height={110}
       yMax={100}
       yRule={now?.plan?.target_pct != null ? { value: now.plan.target_pct, label: `Target ${now.plan.target_pct}%` } : undefined}
@@ -368,7 +369,7 @@
       {from}
       {to}
       now={tnow}
-      {windows}
+      windows={spans}
       height={110}
       series={[
         { label: "Solar", color: "--solar", fill: "--solar-fill", unit: "W" },
@@ -377,7 +378,7 @@
       ]}
     />
     <p class="key">
-      <span><i class="sw plan"></i>Planned grid use</span>
+      <span><i class="sw plan"></i>Grid use</span>
       <span><i class="sw peak"></i>Peak, 4–9 PM</span>
     </p>
   </section>

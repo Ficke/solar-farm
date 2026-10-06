@@ -101,3 +101,16 @@ export function actual(plug: PlugReport[], samples: Sample[], until: number): Se
   });
   return out;
 }
+
+/** Grid use that happened, then the planned windows from now on. */
+export const gridSpans = (
+  plug: PlugReport[],
+  samples: Sample[],
+  windows: Window[],
+  now: number,
+): Window[] => [
+  ...actual(plug, samples, now)
+    .filter((g) => MODES[g.mode].on)
+    .map((g): Window => [g.s, g.e]),
+  ...windows.filter(([, e]) => e > now).map(([s, e]): Window => [Math.max(s, now), e]),
+];
