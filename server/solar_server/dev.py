@@ -167,5 +167,8 @@ class NoSources:
     def jackery_stats(self, day: object) -> None:
         return None
 
+    def jackery_push(self, seconds: float) -> None:
+        return None
+
 
 app = create_app(Settings(role="web"), sample_store(int(time.time())), NoSources(), clock=time.time)

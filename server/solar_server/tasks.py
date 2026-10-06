@@ -70,7 +70,7 @@ def collect(store: Store, sources: Sources, now: datetime) -> dict:
             record_properties(store, t, r.raw)
     except Exception as e:
         log.warning("jackery failed: %s", e)
-    if now.minute == STATS_MINUTE:
+    if now.minute == STATS_MINUTE or store.get_state("jackery_stats") is None:
         try:
             probe_stats(store, sources, now)
         except Exception as e:
@@ -87,7 +87,8 @@ def collect(store: Store, sources: Sources, now: datetime) -> dict:
     return sample
 
 
-STATS_MINUTE = 7  # Probe hourly, after the cloud's 5-minute refresh at :03.
+STATS_MINUTE = 7  # Probe hourly, and on the first run without a saved probe.
+PUSH_SECONDS = 45  # MQTT listen per probe; Cloud Scheduler allows 120 s per run.
 
 
 def record_properties(store: Store, t: int, raw: dict) -> None:
@@ -105,7 +106,13 @@ def probe_stats(store: Store, sources: Sources, now: datetime) -> None:
     if responses is None:
         return
     log.info("jackery stats: %s", stat_summary(responses))
-    store.put_state("jackery_stats", {"t": int(now.timestamp()), "responses": responses})
+    try:
+        push = sources.jackery_push(PUSH_SECONDS)
+    except Exception as e:
+        push = [{"error": repr(e)[:500]}]
+    store.put_state(
+        "jackery_stats", {"t": int(now.timestamp()), "responses": responses, "push": push}
+    )
 
 
 WATTTIME_KEYS = ("moer", "moer_t", "index")

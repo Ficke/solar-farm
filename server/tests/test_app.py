@@ -57,6 +57,9 @@ class FakeSources:
             return None
         return {"/v1/device/stat/today": {"status": 200, "body": '{"code":0,"data":{}}'}}
 
+    def jackery_push(self, seconds):
+        return [{"t": NOW + 1.5, "op": 300}]
+
 
 def verifier(token, audience):
     if token != "good":
@@ -139,15 +142,18 @@ def test_collect_archives_jackery_properties_only_when_they_change():
     assert store.day(JACKERY, "2026-10-04") == [{"t": NOW, "rb": 81, "ip": 120, "op": 90}]
 
 
-def test_collect_probes_jackery_statistics_hourly():
+def test_collect_probes_jackery_on_first_run_then_hourly():
     store = MemoryStore()
     tasks.collect(store, FakeSources(), datetime.fromtimestamp(NOW, UTC))
-    assert store.get_state("jackery_stats") is None
+    stats = store.get_state("jackery_stats") or {}
+    assert stats["t"] == NOW
+    assert stats["responses"]["/v1/device/stat/today"]["status"] == 200
+    assert stats["push"] == [{"t": NOW + 1.5, "op": 300}]
+    tasks.collect(store, FakeSources(), datetime.fromtimestamp(NOW + 60, UTC))
+    assert (store.get_state("jackery_stats") or {})["t"] == NOW
     t = NOW + 60 * tasks.STATS_MINUTE
     tasks.collect(store, FakeSources(), datetime.fromtimestamp(t, UTC))
-    stats = store.get_state("jackery_stats") or {}
-    assert stats["t"] == t
-    assert stats["responses"]["/v1/device/stat/today"]["status"] == 200
+    assert (store.get_state("jackery_stats") or {})["t"] == t
 
 
 def test_collect_keeps_going_when_a_source_fails():
