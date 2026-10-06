@@ -267,7 +267,7 @@
     {:else if now?.plan?.strategy === "fallback"}
       <p class="n">Fixed schedule, no battery data</p>
     {/if}
-    <PlanView {windows} {blocks} {forecast} {from} {to} now={tnow} />
+    <PlanView {windows} {blocks} plug={tl?.plug ?? []} samples={tl?.samples ?? []} {forecast} {from} {to} now={tnow} />
   </section>
 
   <section class="card charts" aria-labelledby="grid-h">
