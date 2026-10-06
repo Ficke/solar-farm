@@ -9,7 +9,7 @@ from datetime import datetime, time, timedelta
 from itertools import pairwise
 from statistics import mean, median
 
-from planner.battery import AC_CHARGE, DISCHARGE, Battery
+from planner.battery import AC_CHARGE, DISCHARGE, Battery, average_load_w
 from planner.plan import PACIFIC
 
 TIE_MOER = 50  # Round emissions to groups of this many lb/MWh.
@@ -83,7 +83,7 @@ def estimates(
     recent = [s for s in samples if now - 86400 <= s["t"] <= now]
     plug = sorted({r["t"]: r for r in plug or [] if r["t"] <= now}.values(), key=lambda r: r["t"])
     battery = battery or Battery()
-    balance = load_from_balance(recent, plug, battery)
+    balance = average_load_w(recent, plug, battery)
     for a, b in pairwise(recent):
         if (
             a.get("output_w") is not None
@@ -142,62 +142,6 @@ def estimates(
 
 def _finite(s: dict, key: str) -> bool:
     return s.get(key) is not None and math.isfinite(s[key])
-
-
-def load_from_balance(
-    samples: list[dict], plug: list[dict], battery: Battery | None = None
-) -> float | None:
-    """Average AC load over the samples from energy in and the change in charge.
-
-    Over each stretch of readings without a gap over 15 minutes, what went
-    into the battery (solar and grid, less charging losses) minus what it
-    gained is what the load drew from it, less inverter losses. Grid energy
-    is the plug meter's increase when ``plug`` reports are given, else the
-    Jackery's AC input. One percent of charge is about 31 Wh, so this needs
-    six hours of readings to be useful.
-    """
-    battery = battery or Battery()
-    readings = [s for s in samples if _finite(s, "battery_pct")]
-    stretches: list[list[dict]] = []
-    for s in readings:
-        if stretches and 0 < s["t"] - stretches[-1][-1]["t"] <= 900:
-            stretches[-1].append(s)
-        else:
-            stretches.append([s])
-    drawn = seconds = 0.0
-    for run in stretches:
-        if len(run) < 2:
-            continue
-        a, b = run[0]["t"], run[-1]["t"]
-        solar = sum(
-            (max(0.0, x["solar_w"]) + max(0.0, y["solar_w"])) / 2 * (y["t"] - x["t"]) / 3600
-            for x, y in pairwise(run)
-            if _finite(x, "solar_w") and _finite(y, "solar_w")
-        )
-        if plug:
-            grid = 0.0
-            for x, y in pairwise(r for r in plug if a <= r["t"] <= b):
-                if not 0 < y["t"] - x["t"] <= 900:
-                    continue
-                if _finite(x, "wh") and _finite(y, "wh") and y["wh"] >= x["wh"]:
-                    grid += y["wh"] - x["wh"]  # the meter's running total
-                elif _finite(x, "w") and _finite(y, "w"):
-                    grid += (max(0.0, x["w"]) + max(0.0, y["w"])) / 2 * (y["t"] - x["t"]) / 3600
-        else:
-            grid = sum(
-                (max(0.0, x["ac_input_w"]) + max(0.0, y["ac_input_w"]))
-                / 2
-                * (y["t"] - x["t"])
-                / 3600
-                for x, y in pairwise(run)
-                if _finite(x, "ac_input_w") and _finite(y, "ac_input_w")
-            )
-        gained = battery.wh(run[-1]["battery_pct"] - run[0]["battery_pct"])
-        drawn += solar * battery.solar_stored + grid * AC_CHARGE - gained
-        seconds += b - a
-    if seconds < 6 * 3600:
-        return None
-    return max(0.0, drawn * DISCHARGE / (seconds / 3600))
 
 
 def build_adaptive_plan(

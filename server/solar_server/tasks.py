@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from planner.adaptive import MIN_CHARGE_W, build_adaptive_plan, estimates
-from planner.battery import WINDOW, Battery, measure
+from planner.battery import WINDOW, Battery, integrate_wh, measure
 from planner.jackery import scalars
 from planner.plan import PACIFIC, build_plan
 
@@ -27,7 +27,6 @@ from solar_server.store import (
     day_key,
     window,
 )
-from solar_server.totals import integrate_wh
 
 log = logging.getLogger(__name__)
 

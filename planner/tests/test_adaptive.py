@@ -106,7 +106,10 @@ def test_history_learns_solar_and_load_without_extrapolating_gaps():
     # last 24 hours of readings (7 am to midnight): the load drew it all.
     hours = (samples[-1]["t"] - int((NOW - timedelta(days=1)).timestamp())) / 3600
     stored = 500 * SOLAR_CHARGE + 1200 * AC_CHARGE
-    assert estimate["load_w"] == pytest.approx(stored * DISCHARGE / hours, rel=0.01)
+    # For the hour the grid supplied power, it ran the load at the charger's efficiency.
+    share = 1 / hours
+    out = share * AC_CHARGE + (1 - share) / DISCHARGE
+    assert estimate["load_w"] == pytest.approx(stored / out / hours, rel=0.01)
     assert estimate["charge_w"] == pytest.approx(1160)  # AC in less load, as measured
     assert estimate["solar_profile"][48] == pytest.approx(100)
     sparse = estimates([samples[0], samples[-1]], int(NOW.timestamp()), 500, 100, 1700)
@@ -221,7 +224,8 @@ def test_plug_meter_supplies_grid_energy_and_charge_rate():
     ]
     plug.append({"t": t + 600, "on": True, "w": 9999.0, "wh": 0.0})  # after now: ignored
     estimate = estimates(samples, t, 500, 5, 1200, plug=plug)
-    expected = (1000 * 0.9 - CAPACITY_WH * 0.25) * 0.9 / 6
+    share = 35.5 / 360  # minutes the plug supplied power, of six hours
+    expected = (1000 * 0.9 - CAPACITY_WH * 0.25) / (share * 0.9 + (1 - share) / 0.9) / 6
     assert estimate["load_w"] == pytest.approx(expected, rel=0.01)
     assert estimate["charge_w"] == pytest.approx(1660)
     # Near full the Jackery slows down; those readings don't set the rate.
