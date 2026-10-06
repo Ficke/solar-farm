@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
+RUNTIME_UNKNOWN = 999  # `ot` reports tenths of an hour; 999 means no estimate.
+
 
 @dataclass
 class Reading:
@@ -19,6 +21,7 @@ class Reading:
     car_input_w: float | None
     output_w: float | None
     raw: dict
+    runtime_h: float | None = None  # Jackery's estimate of hours left at the current draw.
 
     @property
     def solar_w(self) -> float | None:
@@ -47,6 +50,7 @@ def parse_properties(props: dict, now: datetime) -> Reading:
         car_input_w=num("cip"),
         output_w=num("op"),
         raw=props,
+        runtime_h=None if (ot := num("ot")) is None or ot >= RUNTIME_UNKNOWN else ot / 10,
     )
 
 

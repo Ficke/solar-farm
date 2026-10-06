@@ -68,14 +68,16 @@ def now_view(store: Store, now: int) -> dict:
 def timeline_view(store: Store, now: int, past_hours: int = 24) -> dict:
     since = now - past_hours * 3600
     plan = store.get_state("plan") or {}
+    samples = window(store, SAMPLES, since, now)
+    plug = window(store, PLUG, since, now)
+    estimate = (store.get_state("charging_estimates") or {}).get("estimate") or {}
+    battery = Battery.from_dict(estimate.get("battery"))
     return {
         "now": now,
         "since": since,
-        "samples": window(store, SAMPLES, since, now),
-        "plug": [
-            {k: r.get(k) for k in ("t", "on", "reason", "w")}
-            for r in window(store, PLUG, since, now)
-        ],
+        "samples": samples,
+        "plug": [{k: r.get(k) for k in ("t", "on", "reason", "w")} for r in plug],
+        "load": totals.load_points(samples, plug, battery),
         "forecast": [p for p in plan.get("forecast", []) if p[0] >= now - 300],
         # CAISO sometimes revises a row; the latest stored copy wins.
         "mix": list({i["t"]: i for i in window(store, MIX, since, now)}.values()),

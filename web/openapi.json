@@ -1048,6 +1048,17 @@
             ],
             "title": "Output W"
           },
+          "runtime_h": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runtime H"
+          },
           "moer": {
             "anyOf": [
               {
@@ -1191,6 +1202,23 @@
             "type": "array",
             "title": "Plug"
           },
+          "load": {
+            "items": {
+              "prefixItems": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array",
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": "array",
+            "title": "Load"
+          },
           "forecast": {
             "items": {
               "prefixItems": [
@@ -1229,6 +1257,7 @@
           "since",
           "samples",
           "plug",
+          "load",
           "forecast",
           "mix",
           "prices"

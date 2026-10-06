@@ -66,6 +66,7 @@ def collect(store: Store, sources: Sources, now: datetime) -> dict:
                 solar_w=_num(r.solar_w),
                 ac_input_w=_num(r.ac_input_w),
                 output_w=_num(r.output_w),
+                runtime_h=_num(r.runtime_h),
             )
             record_properties(store, t, r.raw)
     except Exception as e:

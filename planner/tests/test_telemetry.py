@@ -24,6 +24,12 @@ def test_parse_properties_derives_solar():
     assert r.solar_w == 220
 
 
+def test_parse_properties_reads_runtime_hours():
+    assert parse_properties({"ot": 14}, START).runtime_h == 1.4
+    assert parse_properties({"ot": 999}, START).runtime_h is None
+    assert parse_properties({}, START).runtime_h is None
+
+
 def test_scalars_drops_nested_values():
     props = {"properties": {"rb": 72, "acps": 0, "name": "E3000", "packs": [1], "x": {}}}
     assert scalars(props) == {"rb": 72, "acps": 0, "name": "E3000"}

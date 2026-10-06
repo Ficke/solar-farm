@@ -20,6 +20,7 @@ class Sample(BaseModel):
     solar_w: float | None = None
     ac_input_w: float | None = None
     output_w: float | None = None
+    runtime_h: float | None = None  # Jackery's estimate of hours left at the current draw.
     moer: float | None = None  # WattTime reports marginal CO2 in lb/MWh.
     moer_t: int | None = None
     index: float | None = None  # Lower percentiles indicate cleaner grid power.
@@ -119,6 +120,7 @@ class Timeline(BaseModel):
     since: int
     samples: list[Sample]
     plug: list[StoredPlugReport]
+    load: list[tuple[int, float]]  # Pairs contain Unix seconds and W.
     forecast: list[tuple[int, float]]  # Pairs contain Unix seconds and lb/MWh.
     mix: list[MixRow]
     prices: list[PriceRow]

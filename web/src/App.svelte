@@ -165,7 +165,7 @@
     align([
       (tl?.samples ?? []).map((p) => [p.t, p.solar_w]),
       (tl?.plug ?? []).map((p) => [p.t, p.w ?? (p.on ? null : 0)]),
-      (tl?.samples ?? []).map((p) => [p.t, p.output_w]),
+      tl?.load ?? [],
     ]),
   );
 
