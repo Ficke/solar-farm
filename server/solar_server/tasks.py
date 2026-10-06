@@ -70,7 +70,7 @@ def collect(store: Store, sources: Sources, now: datetime) -> dict:
             record_properties(store, t, r.raw)
     except Exception as e:
         log.warning("jackery failed: %s", e)
-    if now.minute == STATS_MINUTE or store.get_state("jackery_stats") is None:
+    if now.minute == STATS_MINUTE or "push" not in (store.get_state("jackery_stats") or {}):
         try:
             probe_stats(store, sources, now)
         except Exception as e:
@@ -87,7 +87,7 @@ def collect(store: Store, sources: Sources, now: datetime) -> dict:
     return sample
 
 
-STATS_MINUTE = 7  # Probe hourly, and on the first run without a saved probe.
+STATS_MINUTE = 7  # Probe hourly, and right away when no push listen is saved.
 PUSH_SECONDS = 45  # MQTT listen per probe; Cloud Scheduler allows 120 s per run.
 
 
