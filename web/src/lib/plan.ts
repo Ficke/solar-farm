@@ -102,15 +102,21 @@ export function actual(plug: PlugReport[], samples: Sample[], until: number): Se
   return out;
 }
 
-/** Grid use that happened, then the planned windows from now on. */
-export const gridSpans = (
+/** Plug states: what ran until now, then the plan. */
+export function states(
   plug: PlugReport[],
   samples: Sample[],
+  blocks: PlanBlock[],
   windows: Window[],
   now: number,
-): Window[] => [
-  ...actual(plug, samples, now)
-    .filter((g) => MODES[g.mode].on)
-    .map((g): Window => [g.s, g.e]),
-  ...windows.filter(([, e]) => e > now).map(([s, e]): Window => [Math.max(s, now), e]),
-];
+): Segment[] {
+  const plan = blocks.length ? segments(blocks) : fromWindows(windows);
+  return [
+    ...actual(plug, samples, now),
+    ...plan.filter((g) => g.e > now).map((g) => ({ ...g, s: Math.max(g.s, now) })),
+  ];
+}
+
+/** Spans with the plug on, for chart bands. */
+export const gridUse = (segs: Segment[]): Window[] =>
+  segs.filter((g) => MODES[g.mode].on).map((g): Window => [g.s, g.e]);

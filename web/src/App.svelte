@@ -8,7 +8,7 @@
   import { FUTURE, LINE_THIN, PAST } from "./lib/layout";
   import { GROUPS, stackMix } from "./lib/mix";
   import PlanView from "./lib/PlanView.svelte";
-  import { blockAt, gridSpans } from "./lib/plan";
+  import { blockAt, gridUse, states } from "./lib/plan";
   import Segmented from "./lib/Segmented.svelte";
   import { explain } from "./lib/status";
   import TimeChart from "./lib/TimeChart.svelte";
@@ -111,7 +111,8 @@
   const blocks = $derived(now?.plan?.blocks ?? []);
   const forecast = $derived(tl?.forecast ?? []);
   const tnow = $derived(now?.now ?? clock);
-  const spans = $derived(gridSpans(tl?.plug ?? [], tl?.samples ?? [], windows, tnow));
+  const plugStates = $derived(states(tl?.plug ?? [], tl?.samples ?? [], blocks, windows, tnow));
+  const spans = $derived(gridUse(plugStates));
   // Keep charts and the plan strip on a shared time axis.
   const base = $derived(tl?.now ?? clock);
   const from = $derived(base - PAST);
@@ -268,7 +269,7 @@
     {:else if now?.plan?.strategy === "fallback"}
       <p class="n">Fixed schedule, no battery data</p>
     {/if}
-    <PlanView {windows} {blocks} plug={tl?.plug ?? []} samples={tl?.samples ?? []} {forecast} {from} {to} now={tnow} />
+    <PlanView {windows} {blocks} states={plugStates} samples={tl?.samples ?? []} {forecast} {from} {to} now={tnow} />
   </section>
 
   <section class="card charts" aria-labelledby="grid-h">

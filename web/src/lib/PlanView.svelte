@@ -1,16 +1,16 @@
 <script lang="ts">
-  import type { PlugReport, Sample, Window } from "./api";
+  import type { Sample, Window } from "./api";
   import Hint from "./Hint.svelte";
   import { hover } from "./hover.svelte";
   import { AXIS_W, hourTicks, LINE_THIN, PAD_R } from "./layout";
   import {
-    actual,
     blockAt,
     fromWindows,
     KEY,
     MODES,
     type PlanBlock,
     ROUND_TRIP,
+    type Segment,
     segments,
   } from "./plan";
   import Tooltip, { type TipRow } from "./Tooltip.svelte";
@@ -28,7 +28,7 @@
   let {
     windows,
     blocks,
-    plug,
+    states,
     samples,
     forecast,
     from,
@@ -37,7 +37,8 @@
   }: {
     windows: Window[];
     blocks: PlanBlock[];
-    plug: PlugReport[];
+    /** Past and planned plug states, shared with the chart bands. */
+    states: Segment[];
     samples: Sample[];
     forecast: [number, number][];
     from: number;
@@ -64,12 +65,6 @@
   }
 
   const segs = $derived(blocks.length ? segments(blocks) : fromWindows(windows));
-  const past = $derived(actual(plug, samples, now));
-  // Past time shows what ran; the plan takes over at now.
-  const drawn = $derived([
-    ...past.map((g) => ({ ...g, e: Math.min(g.e, now) })),
-    ...segs.filter((g) => g.e > now).map((g) => ({ ...g, s: Math.max(g.s, now) })),
-  ]);
   const sampleAt = (t: number) => {
     let best: Sample | null = null;
     for (const p of samples) {
@@ -94,7 +89,7 @@
     const t = hover.t;
     if (t == null || hover.from !== "plan") return null;
     if (t < now) {
-      const g = past.find((g) => t >= g.s && t < g.e);
+      const g = states.find((g) => t >= g.s && t < g.e);
       const p = sampleAt(t);
       const rows: TipRow[] = [
         g
@@ -150,7 +145,7 @@
       {@const [a, b] = clip(s, e)}
       {#if b > a}<rect x={a} y="8" width={b - a} height="20" fill="url(#peak-hatch)" />{/if}
     {/each}
-    {#each drawn as g, i (i)}
+    {#each states as g, i (i)}
       {#if g.e > from && g.s < to && MODES[g.mode].on}
         {@const [a, b] = clip(g.s, g.e)}
         <rect x={a} y="10" width={Math.max(2, b - a)} height="16" rx="3" fill="var(--plan-{g.mode})"
