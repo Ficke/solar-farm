@@ -1,9 +1,18 @@
 <script lang="ts">
-  import type { Window } from "./api";
+  import type { PlugReport, Sample, Window } from "./api";
   import Hint from "./Hint.svelte";
   import { hover } from "./hover.svelte";
   import { AXIS_W, hourTicks, LINE_THIN, PAD_R } from "./layout";
-  import { blockAt, fromWindows, KEY, MODES, type PlanBlock, ROUND_TRIP, segments } from "./plan";
+  import {
+    actual,
+    blockAt,
+    fromWindows,
+    KEY,
+    MODES,
+    type PlanBlock,
+    ROUND_TRIP,
+    segments,
+  } from "./plan";
   import Tooltip, { type TipRow } from "./Tooltip.svelte";
   import {
     fmtClock,
@@ -19,6 +28,8 @@
   let {
     windows,
     blocks,
+    plug,
+    samples,
     forecast,
     from,
     to,
@@ -26,6 +37,8 @@
   }: {
     windows: Window[];
     blocks: PlanBlock[];
+    plug: PlugReport[];
+    samples: Sample[];
     forecast: [number, number][];
     from: number;
     to: number;
@@ -51,6 +64,19 @@
   }
 
   const segs = $derived(blocks.length ? segments(blocks) : fromWindows(windows));
+  const past = $derived(actual(plug, samples, now));
+  // Past time shows what ran; the plan takes over at now.
+  const drawn = $derived([
+    ...past.map((g) => ({ ...g, e: Math.min(g.e, now) })),
+    ...segs.filter((g) => g.e > now).map((g) => ({ ...g, s: Math.max(g.s, now) })),
+  ]);
+  const sampleAt = (t: number) => {
+    let best: Sample | null = null;
+    for (const p of samples) {
+      if (Math.abs(p.t - t) <= 600 && (!best || Math.abs(p.t - t) < Math.abs(best.t - t))) best = p;
+    }
+    return best;
+  };
   const forecastAt = (t: number) => {
     let co2: number | null = null;
     let best = 600;
@@ -67,6 +93,19 @@
   const tip = $derived.by(() => {
     const t = hover.t;
     if (t == null || hover.from !== "plan") return null;
+    if (t < now) {
+      const g = past.find((g) => t >= g.s && t < g.e);
+      const p = sampleAt(t);
+      const rows: TipRow[] = [
+        g
+          ? { value: MODES[g.mode].label, color: `var(--plan-${g.mode})`, shape: "square" }
+          : { value: "No data" },
+      ];
+      if (p?.moer != null) rows.push({ value: lb(p.moer), name: "CO₂" });
+      if (p?.battery_pct != null)
+        rows.push({ value: `${Math.round(p.battery_pct)}%`, name: "Battery" });
+      return { t, rows };
+    }
     const b = blockAt(blocks, t);
     const peak = peakWindows(from, to).some(([s, e]) => t >= s && t < e);
     const on = segs.some((g) => MODES[g.mode].on && t >= g.s && t < g.e);
@@ -97,7 +136,7 @@
     viewBox="0 0 {width} {H}"
     height={H}
     role="img"
-    aria-label="Planned plug states, next 24 hours"
+    aria-label="Plug states, past 24 hours and plan for the next 24"
     onpointermove={move}
     onpointerleave={leave}
   >
@@ -111,7 +150,7 @@
       {@const [a, b] = clip(s, e)}
       {#if b > a}<rect x={a} y="8" width={b - a} height="20" fill="url(#peak-hatch)" />{/if}
     {/each}
-    {#each segs as g (g.s)}
+    {#each drawn as g, i (i)}
       {#if g.e > from && g.s < to && MODES[g.mode].on}
         {@const [a, b] = clip(g.s, g.e)}
         <rect x={a} y="10" width={Math.max(2, b - a)} height="16" rx="3" fill="var(--plan-{g.mode})"
