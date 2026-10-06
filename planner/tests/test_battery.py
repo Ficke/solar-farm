@@ -37,3 +37,22 @@ def test_too_little_charging_keeps_the_previous_measurement():
     samples, plug = charging(2800, 1600, 4)
     previous = Battery(capacity_wh=2900, solar_scale=1.2)
     assert measure(samples, plug, previous) == previous
+
+
+def test_solar_spans_with_reported_output_are_skipped():
+    # A 40 W load for three hours hides part of the panel's output; the output
+    # reading flags it, so only the last five hours count.
+    samples = []
+    for m in range(8 * 60 + 1):
+        load = m < 3 * 60
+        stored = 90 * SOLAR_CHARGE * m / 60 - (40 * min(m, 180) / 60)
+        samples.append(
+            {
+                "t": T0 + m * 60,
+                "battery_pct": 40 + int(stored / 3000 * 100),
+                "solar_w": 60.0,
+                "output_w": 40.0 if load else 0.0,
+            }
+        )
+    battery = measure(samples, [], Battery(capacity_wh=3000))
+    assert battery.solar_scale == pytest.approx(1.5, rel=0.1)

@@ -112,6 +112,7 @@ def test_collect_stores_one_sample_with_every_source():
         "ac_input_w": 0.0,
         "output_w": 90.0,
         "runtime_h": 16.2,
+        "full_h": None,
     }
     assert store.day(SAMPLES, "2026-10-04") == [body]
 
@@ -128,6 +129,7 @@ def test_collect_stores_only_new_watttime_readings_and_mix_every_5_minutes():
         "ac_input_w": 0.0,
         "output_w": 90.0,
         "runtime_h": 16.2,
+        "full_h": None,
     }
     assert store.day(MIX, "2026-10-04") == mix
     # The dashboard still shows WattTime's last reading.
@@ -662,3 +664,17 @@ def test_collect_plans_with_a_fresh_forecast_and_keeps_one_every_half_hour():
     plan = store.get_state("plan") or {}
     assert plan["forecast_at"] == NOW + 30 * 60
     assert [f["t"] for f in store.day(FORECASTS, "2026-10-04")] == [NOW, NOW + 30 * 60]
+
+
+def test_battery_is_measured_over_30_days_and_cached_for_six_hours():
+    store = MemoryStore()
+    # 20 days ago, the plug charged 1,600 W for 40 minutes: 960 Wh stored is 34%.
+    start = NOW - 20 * 86400
+    for m in range(41):
+        t = start + m * 60
+        tasks.record_sample(store, {"t": t, "battery_pct": 40 + int(1440 * m / 60 / 2800 * 100)})
+        tasks.record_plug(store, {"t": t, "on": True, "reason": "plan", "w": 1600.0})
+    battery = tasks.battery_estimate(store, NOW)
+    assert battery.capacity_wh == pytest.approx(2800, rel=0.03)
+    store.put_state("battery", {"t": NOW, "battery": {"capacity_wh": 3000.0}})
+    assert tasks.battery_estimate(store, NOW + 3600).capacity_wh == 3000

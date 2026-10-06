@@ -9,7 +9,7 @@ from datetime import datetime, time, timedelta
 from itertools import pairwise
 from statistics import mean, median
 
-from planner.battery import AC_CHARGE, DISCHARGE, Battery, measure
+from planner.battery import AC_CHARGE, DISCHARGE, Battery
 from planner.plan import PACIFIC
 
 TIE_MOER = 50  # Round emissions to groups of this many lb/MWh.
@@ -41,8 +41,7 @@ def estimates(
     come from the plug's own meter when its reports are given, else from the
     Jackery's AC input. Charging uses the latest 30 qualifying readings within
     a week. Insufficient coverage falls back to the supplied defaults.
-    Capacity and the solar reading's scale are measured from the same
-    readings, keeping ``battery`` where they show nothing new.
+    ``battery`` gives the measured capacity and solar reading scale.
     """
     samples = sorted({s["t"]: s for s in samples if s["t"] <= now}.values(), key=lambda s: s["t"])
     today = datetime.fromtimestamp(now, PACIFIC).date()
@@ -83,7 +82,7 @@ def estimates(
                     observed[quarter].append(0.0)  # Night readings are often missing.
     recent = [s for s in samples if now - 86400 <= s["t"] <= now]
     plug = sorted({r["t"]: r for r in plug or [] if r["t"] <= now}.values(), key=lambda r: r["t"])
-    battery = measure(samples, plug, battery)
+    battery = battery or Battery()
     balance = load_from_balance(recent, plug, battery)
     for a, b in pairwise(recent):
         if (

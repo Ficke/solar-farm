@@ -14,7 +14,7 @@ output, so they are assumed.
 from __future__ import annotations
 
 import math
-from bisect import bisect_right
+from bisect import bisect_left, bisect_right
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from itertools import pairwise
@@ -24,7 +24,11 @@ from planner.telemetry import CAPACITY_WH
 AC_CHARGE = 0.9  # Wh stored per Wh the plug meters.
 SOLAR_CHARGE = 0.95  # Wh stored per Wh the panel makes; the DC charger skips a conversion.
 DISCHARGE = 0.9  # Wh at the outlet per Wh drawn from the battery.
-MIN_GAIN_PCT = 5  # Percent of charge gained before a measurement replaces the default.
+# Percent of charge gained before a measurement replaces the previous one. Each
+# end of a span is known to a minute, about 17 Wh at 1 kW, so short totals are noisy.
+MIN_CAPACITY_PCT = 15
+MIN_SOLAR_PCT = 10
+WINDOW = 30 * 86400  # Readings to measure across; capacity fades over months.
 MIN_CHARGE_W = 200  # Plug power that means the Jackery is charging.
 MIN_SOLAR_W = 10  # Average solar reading for a span to count as sunny.
 FULL_PCT = 97  # At or above this, the Jackery cuts solar input back.
@@ -91,6 +95,8 @@ def measure(samples: list[dict], plug: list[dict], previous: Battery | None = No
             if _finite(s, "solar_w")
         ]
     )
+    # Any output the Jackery reports means load is lowering the solar gain.
+    drawing = sorted(s["t"] for s in samples if _finite(s, "output_w") and s["output_w"] > 0)
     ac_wh = ac_pct = solar_wh = solar_pct = 0.0
     for a, b in pairwise(changes):
         gain = b["battery_pct"] - a["battery_pct"]
@@ -105,15 +111,16 @@ def measure(samples: list[dict], plug: list[dict], previous: Battery | None = No
             grid_wh < 1
             and b["battery_pct"] < FULL_PCT
             and solar_read / (b["t"] - a["t"]) * 3600 >= MIN_SOLAR_W
+            and bisect_left(drawing, a["t"]) == bisect_right(drawing, b["t"])
         ):
             solar_wh += solar_read
             solar_pct += gain
     capacity = previous.capacity_wh
-    if ac_pct >= MIN_GAIN_PCT:
+    if ac_pct >= MIN_CAPACITY_PCT:
         capacity = _clamp(AC_CHARGE * ac_wh / ac_pct * 100, CAPACITY_RANGE)
     scale = previous.solar_scale
-    if solar_pct >= MIN_GAIN_PCT and solar_wh > 0:
-        # Load during these spans lowers the gain, so this can only understate.
+    if solar_pct >= MIN_SOLAR_PCT and solar_wh > 0:
+        # Load the output reading misses lowers the gain, so this can only understate.
         scale = _clamp(capacity * solar_pct / 100 / SOLAR_CHARGE / solar_wh, SCALE_RANGE)
     return Battery(capacity_wh=capacity, solar_scale=scale)
 
