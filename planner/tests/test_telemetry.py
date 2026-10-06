@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
-from planner.jackery import parse_properties
+from planner.jackery import parse_properties, scalars, stat_summary
 
 from planner import telemetry
 
@@ -22,6 +22,20 @@ def test_parse_properties_derives_solar():
     r = parse_properties({"properties": {"rb": 72, "ip": 260, "acip": 40, "op": 55}}, START)
     assert r.battery_pct == 72
     assert r.solar_w == 220
+
+
+def test_scalars_drops_nested_values():
+    props = {"properties": {"rb": 72, "acps": 0, "name": "E3000", "packs": [1], "x": {}}}
+    assert scalars(props) == {"rb": 72, "acps": 0, "name": "E3000"}
+
+
+def test_stat_summary_reports_codes_and_errors():
+    responses = {
+        "/a": {"status": 200, "body": '{"code":0,"msg":"ok"}'},
+        "/b": {"status": 502, "body": "<html>"},
+        "/c": {"error": "TimeoutError()"},
+    }
+    assert stat_summary(responses) == {"/a": "0 ok", "/b": "502", "/c": "TimeoutError()"}
 
 
 def test_daily_solar_and_recommendation():

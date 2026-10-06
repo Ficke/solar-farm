@@ -15,6 +15,7 @@ from planner.plan import PACIFIC
 
 SAMPLES = "samples"
 PLUG = "plug"
+JACKERY = "jackery"  # Jackery property maps, stored when any field changes.
 PLANS = "plans"
 FORECASTS = "forecasts"
 MIX = "mix"
