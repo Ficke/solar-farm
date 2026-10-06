@@ -122,7 +122,6 @@ class Timeline(BaseModel):
     forecast: list[tuple[int, float]]  # Pairs contain Unix seconds and lb/MWh.
     mix: list[MixRow]
     prices: list[PriceRow]
-    windows: list[Window]
 
 
 class Accuracy(BaseModel):

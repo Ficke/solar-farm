@@ -3,7 +3,7 @@
   // Series, yMax, mode or theme changes rebuild the plot.
   import { untrack } from "svelte";
   import uPlot from "uplot";
-  import { bucket, stepFor } from "./align";
+  import { bucket, NEAR, stepFor } from "./align";
   import type { Window } from "./api";
   import ChartDialog from "./ChartDialog.svelte";
   import { hover } from "./hover.svelte";
@@ -186,7 +186,7 @@
         for (let d = 0; d < 30; d++) {
           for (const j of [i - d, i + d]) {
             const v = ys[j];
-            if (v != null && Math.abs(u.data[0][j] - t) <= 600) return v;
+            if (v != null && Math.abs(u.data[0][j] - t) <= NEAR) return v;
           }
         }
         return null;

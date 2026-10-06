@@ -1,6 +1,9 @@
 // Use Pacific time to match the PG&E peak schedule.
 export const TZ = "America/Los_Angeles";
 export const PEAK = { start: 16, end: 21 }; // E-TOU-C, every day
+const h12 = (h: number) => h % 12 || 12;
+/** Peak hours as shown in labels, such as "4–9 PM". */
+export const PEAK_HOURS = `${h12(PEAK.start)}–${h12(PEAK.end)} ${PEAK.end < 12 ? "AM" : "PM"}`;
 
 const clock = new Intl.DateTimeFormat("en-US", {
   timeZone: TZ,

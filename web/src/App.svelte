@@ -8,12 +8,12 @@
   import { FUTURE, LINE_THIN, PAST } from "./lib/layout";
   import { GROUPS, stackMix } from "./lib/mix";
   import PlanView from "./lib/PlanView.svelte";
-  import { blockAt } from "./lib/plan";
+  import { gridUse, MODES as PLAN, stateAt, states } from "./lib/plan";
   import Segmented from "./lib/Segmented.svelte";
   import { explain } from "./lib/status";
   import TimeChart from "./lib/TimeChart.svelte";
   import { type Mode, setMode, theme } from "./lib/theme.svelte";
-  import { ago, fmtWhen, hours } from "./lib/time";
+  import { ago, fmtWhen, hours, PEAK_HOURS } from "./lib/time";
 
   const MODES: { value: Mode; label: string }[] = [
     { value: "system", label: "System" },
@@ -107,10 +107,12 @@
 
   const s = $derived(now?.sample ?? null);
   const plug = $derived(now?.plug ?? null);
-  const windows = $derived(now?.plan?.windows ?? tl?.windows ?? []);
+  const windows = $derived(now?.plan?.windows ?? []);
   const blocks = $derived(now?.plan?.blocks ?? []);
   const forecast = $derived(tl?.forecast ?? []);
   const tnow = $derived(now?.now ?? clock);
+  const plugStates = $derived(states(tl?.plug ?? [], tl?.samples ?? [], blocks, windows, tnow));
+  const spans = $derived(gridUse(plugStates));
   // Keep charts and the plan strip on a shared time axis.
   const base = $derived(tl?.now ?? clock);
   const from = $derived(base - PAST);
@@ -119,15 +121,15 @@
 
   const headline = $derived.by(() => {
     if (!plug) return { title: "No report from the plug yet", detail: "" };
-    const why = explain(plug, blockAt(blocks, tnow)?.mode);
-    const current = windows.find(([st, e]) => st <= tnow && tnow < e);
+    const why = explain(plug, stateAt(plugStates, tnow)?.mode);
+    const current = spans.find(([st, e]) => st <= tnow && tnow < e);
     if (plug.on) {
       return {
         title: current ? `Grid on until ${fmtWhen(current[1], tnow)}` : "Grid on",
         detail: why,
       };
     }
-    const n = windows.find(([st]) => st > tnow);
+    const n = spans.find(([st]) => st > tnow);
     return {
       title: n ? `Grid off until ${fmtWhen(n[0], tnow)}` : "Grid off",
       detail: n ? `${why} · then on for ${hours(n[1] - n[0])}` : why,
@@ -237,7 +239,7 @@
       {@const p = now.plan}
       <dl class="facts">
         <div>
-          <dt><Hint text="Charge to full before the 4–9 PM peak, using the cleanest grid hours.">Goal</Hint></dt>
+          <dt><Hint text={`Charge to full before the ${PEAK_HOURS} peak, using the cleanest grid hours.`}>Goal</Hint></dt>
           <dd>100% by 4 PM</dd>
         </div>
         <div>
@@ -267,7 +269,7 @@
     {:else if now?.plan?.strategy === "fallback"}
       <p class="n">Fixed schedule, no battery data</p>
     {/if}
-    <PlanView {windows} {blocks} plug={tl?.plug ?? []} samples={tl?.samples ?? []} {forecast} {from} {to} now={tnow} />
+    <PlanView {blocks} states={plugStates} samples={tl?.samples ?? []} {forecast} {from} {to} now={tnow} />
   </section>
 
   <section class="card charts" aria-labelledby="grid-h">
@@ -289,7 +291,7 @@
       {from}
       {to}
       now={tnow}
-      {windows}
+      windows={spans}
       height={180}
       series={[
         { label: "Actual", color: "--co2-mid", ramp: CO2_RAMP, unit: "lb/MWh" },
@@ -351,7 +353,7 @@
       {from}
       {to}
       now={tnow}
-      {windows}
+      windows={spans}
       height={110}
       yMax={100}
       yRule={now?.plan?.target_pct != null ? { value: now.plan.target_pct, label: `Target ${now.plan.target_pct}%` } : undefined}
@@ -368,7 +370,7 @@
       {from}
       {to}
       now={tnow}
-      {windows}
+      windows={spans}
       height={110}
       series={[
         { label: "Solar", color: "--solar", fill: "--solar-fill", unit: "W" },
@@ -377,8 +379,8 @@
       ]}
     />
     <p class="key">
-      <span><i class="sw plan"></i>Planned grid use</span>
-      <span><i class="sw peak"></i>Peak, 4–9 PM</span>
+      <span><i class="sw plan"></i>Grid use</span>
+      <span><i class="sw peak"></i>{PLAN.peak.label}</span>
     </p>
   </section>
 

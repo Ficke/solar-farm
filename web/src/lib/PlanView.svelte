@@ -1,18 +1,10 @@
 <script lang="ts">
-  import type { PlugReport, Sample, Window } from "./api";
+  import { nearest } from "./align";
+  import type { Sample } from "./api";
   import Hint from "./Hint.svelte";
   import { hover } from "./hover.svelte";
   import { AXIS_W, hourTicks, LINE_THIN, PAD_R } from "./layout";
-  import {
-    actual,
-    blockAt,
-    fromWindows,
-    KEY,
-    MODES,
-    type PlanBlock,
-    ROUND_TRIP,
-    segments,
-  } from "./plan";
+  import { blockAt, KEY, MODES, type PlanBlock, ROUND_TRIP, type Segment, stateAt } from "./plan";
   import Tooltip, { type TipRow } from "./Tooltip.svelte";
   import {
     fmtClock,
@@ -26,18 +18,17 @@
   } from "./time";
 
   let {
-    windows,
     blocks,
-    plug,
+    states,
     samples,
     forecast,
     from,
     to,
     now,
   }: {
-    windows: Window[];
     blocks: PlanBlock[];
-    plug: PlugReport[];
+    /** Past and planned plug states, shared with the chart bands. */
+    states: Segment[];
     samples: Sample[];
     forecast: [number, number][];
     from: number;
@@ -63,59 +54,28 @@
     hover.from = "plan";
   }
 
-  const segs = $derived(blocks.length ? segments(blocks) : fromWindows(windows));
-  const past = $derived(actual(plug, samples, now));
-  // Past time shows what ran; the plan takes over at now.
-  const drawn = $derived([
-    ...past.map((g) => ({ ...g, e: Math.min(g.e, now) })),
-    ...segs.filter((g) => g.e > now).map((g) => ({ ...g, s: Math.max(g.s, now) })),
-  ]);
-  const sampleAt = (t: number) => {
-    let best: Sample | null = null;
-    for (const p of samples) {
-      if (Math.abs(p.t - t) <= 600 && (!best || Math.abs(p.t - t) < Math.abs(best.t - t))) best = p;
-    }
-    return best;
-  };
-  const forecastAt = (t: number) => {
-    let co2: number | null = null;
-    let best = 600;
-    for (const [ft, v] of forecast) {
-      if (Math.abs(ft - t) <= best) {
-        best = Math.abs(ft - t);
-        co2 = v;
-      }
-    }
-    return co2;
-  };
   const lb = (v: number) => `${Math.round(v)} lb/MWh`;
 
   const tip = $derived.by(() => {
     const t = hover.t;
     if (t == null || hover.from !== "plan") return null;
+    const g = stateAt(states, t);
+    const peak = peakWindows(from, to).some(([s, e]) => t >= s && t < e);
+    const mode = g?.mode ?? (t >= now && peak ? "peak" : null);
+    const rows: TipRow[] = [
+      mode
+        ? { value: MODES[mode].label, color: `var(--plan-${mode})`, shape: "square" }
+        : { value: t < now ? "No data" : "Grid off" },
+    ];
     if (t < now) {
-      const g = past.find((g) => t >= g.s && t < g.e);
-      const p = sampleAt(t);
-      const rows: TipRow[] = [
-        g
-          ? { value: MODES[g.mode].label, color: `var(--plan-${g.mode})`, shape: "square" }
-          : { value: "No data" },
-      ];
+      const p = nearest(samples, t, (p) => p.t);
       if (p?.moer != null) rows.push({ value: lb(p.moer), name: "CO₂" });
       if (p?.battery_pct != null)
         rows.push({ value: `${Math.round(p.battery_pct)}%`, name: "Battery" });
       return { t, rows };
     }
     const b = blockAt(blocks, t);
-    const peak = peakWindows(from, to).some(([s, e]) => t >= s && t < e);
-    const on = segs.some((g) => MODES[g.mode].on && t >= g.s && t < g.e);
-    const mode = b?.mode ?? (on ? "charge" : peak ? "peak" : null);
-    const co2 = b?.moer ?? forecastAt(t);
-    const rows: TipRow[] = [
-      mode
-        ? { value: MODES[mode].label, color: `var(--plan-${mode})`, shape: "square" }
-        : { value: "Grid off" },
-    ];
+    const co2 = b?.moer ?? nearest(forecast, t, ([ft]) => ft)?.[1];
     if (co2 != null) rows.push({ value: lb(co2), name: "CO₂ forecast" });
     if (b?.recharge != null)
       rows.push({ value: lb(b.recharge / ROUND_TRIP), name: "Recharge later, with losses" });
@@ -125,7 +85,7 @@
   });
 
   const rows = $derived.by(() => {
-    const on = segs.filter((g) => MODES[g.mode].on && g.e > now);
+    const on = states.filter((g) => MODES[g.mode].on && g.e > now);
     const next = on.find((g) => g.s > now);
     return on.map((g) => ({ ...g, state: g.s <= now ? "Now" : g === next ? "Next" : "" }));
   });
@@ -150,7 +110,7 @@
       {@const [a, b] = clip(s, e)}
       {#if b > a}<rect x={a} y="8" width={b - a} height="20" fill="url(#peak-hatch)" />{/if}
     {/each}
-    {#each drawn as g, i (i)}
+    {#each states as g, i (i)}
       {#if g.e > from && g.s < to && MODES[g.mode].on}
         {@const [a, b] = clip(g.s, g.e)}
         <rect x={a} y="10" width={Math.max(2, b - a)} height="16" rx="3" fill="var(--plan-{g.mode})"
