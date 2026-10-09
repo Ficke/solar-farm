@@ -13,7 +13,7 @@ battery is full by 4 pm each day.
 
 | Part | Location | Role |
 | --- | --- | --- |
-| Planner | `planner/` | Picks the cleanest 15-minute blocks to charge, from the forecast and recent battery, solar and load data. |
+| Planner | `planner/` | Picks the cleanest 15-minute blocks to charge, from the forecast, the battery level and recent solar data. |
 | Server | `server/` | Every minute, reads the Jackery, fetches the forecast, and replans. Serves the plan to the plug and data to the dashboard. |
 | Plug script | `device/` | Switches the relay every minute according to the plan, with fallbacks if the server is unreachable. |
 | Dashboard | `web/` | Battery, plan, emissions, grid mix and CO₂ history. [Private](https://solar-web-v5whpbqqpq-uw.a.run.app); Google sign-in. |
@@ -57,9 +57,9 @@ to regenerate the dashboard's types.
 
 ## Configuration
 
-- **Server:** `SOLAR_DAY_WH` (default 500), `LOAD_W` (100), `CHARGE_W` (1700)
-  and `BATTERY_FLOOR_PCT` (20) on solar-edge in `infra/run.tf`. Measured
-  values replace the first three once enough telemetry exists.
+- **Server:** `SOLAR_DAY_WH` (default 500), `CHARGE_W` (1700) and
+  `BATTERY_FLOOR_PCT` (20) on solar-edge in `infra/run.tf`. Measured values
+  replace the first two once enough telemetry exists.
 - **Plug:** `[tuning]` in `config/device.toml`, then redeploy.
 
 ## License

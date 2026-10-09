@@ -1,4 +1,4 @@
-"""Build greedy charging plans from observed battery, solar and load data."""
+"""Build greedy charging plans from the battery level, solar and the emissions forecast."""
 
 from __future__ import annotations
 
@@ -9,14 +9,7 @@ from datetime import datetime, time, timedelta
 from itertools import pairwise
 from statistics import mean, median
 
-from planner.battery import (
-    AC_CHARGE,
-    DISCHARGE,
-    Battery,
-    average_load_w,
-    load_points,
-    load_profile,
-)
+from planner.battery import AC_CHARGE, DISCHARGE, Battery
 from planner.plan import PACIFIC
 
 TIE_MOER = 50  # Round emissions to groups of this many lb/MWh.
@@ -33,30 +26,23 @@ def estimates(
     samples: list[dict],
     now: int,
     solar_wh: float,
-    load_w: float,
     charge_w: float,
     plug: list[dict] | None = None,
     battery: Battery | None = None,
 ) -> dict:
-    """Estimate solar, load and AC charging from recent telemetry.
+    """Estimate solar and AC charging from recent telemetry.
 
-    Solar uses qualifying days among the last seven completed days; average
-    load uses the last 24 hours. Both require six hours of coverage and
-    exclude gaps over 15 minutes. ``load_profile`` averages the load in each
-    15-minute slot of the day over the last week. Load comes from the
-    battery's energy balance (solar and grid in, less the change in charge),
-    because the Jackery's output reading lags and misses most of what is drawn.
-    Grid energy and the charge rate come from the plug's own meter when its
-    reports are given, else from the Jackery's AC input. Charging uses the
-    latest 30 qualifying readings within a week. Insufficient coverage falls
-    back to the supplied defaults.
+    Solar uses qualifying days among the last seven completed days with six
+    hours of daytime coverage, excluding gaps over 15 minutes. The charge rate
+    comes from the plug's own meter when its reports are given, else from the
+    Jackery's AC input, and uses the latest 30 qualifying readings within a
+    week. Insufficient coverage falls back to the supplied defaults.
     ``battery`` gives the measured capacity and solar reading scale.
     """
     samples = sorted({s["t"]: s for s in samples if s["t"] <= now}.values(), key=lambda s: s["t"])
     today = datetime.fromtimestamp(now, PACIFIC).date()
     first_day = today - timedelta(days=7)
     solar: dict[str, list[dict]] = defaultdict(list)
-    load_energy = load_seconds = 0.0
     for s in samples:
         day = datetime.fromtimestamp(s["t"], PACIFIC).date()
         if first_day <= day < today and _finite(s, "solar_w"):
@@ -89,23 +75,8 @@ def estimates(
                     observed[quarter].append(energy[quarter] / seconds[quarter])
                 elif not 36 <= quarter < 68:
                     observed[quarter].append(0.0)  # Night readings are often missing.
-    recent = [s for s in samples if now - 86400 <= s["t"] <= now]
     plug = sorted({r["t"]: r for r in plug or [] if r["t"] <= now}.values(), key=lambda r: r["t"])
     battery = battery or Battery()
-    balance = average_load_w(recent, plug, battery)
-    week = [s for s in samples if now - 7 * 86400 <= s["t"]]
-    by_slot = load_profile(load_points(week, plug, battery), PACIFIC)
-    for a, b in pairwise(recent):
-        if (
-            a.get("output_w") is not None
-            and b.get("output_w") is not None
-            and math.isfinite(a["output_w"])
-            and math.isfinite(b["output_w"])
-            and 0 < b["t"] - a["t"] <= 900
-        ):
-            seconds = b["t"] - a["t"]
-            load_energy += (max(0, a["output_w"]) + max(0, b["output_w"])) / 2 * seconds
-            load_seconds += seconds
     if plug:
         # Wall power while the plug is on, away from the slow charge near full.
         times = [s["t"] for s in samples]
@@ -141,14 +112,8 @@ def estimates(
         "solar_profile": shape,
         "solar_day_wh": good_day,
         "solar_days": days,
-        "load_w": balance
-        if balance is not None
-        else load_energy / load_seconds
-        if load_seconds >= 6 * 3600
-        else load_w,
         "charge_w": median(charging) if len(charging) >= MIN_CHARGE_READINGS else charge_w,
         "battery": battery.to_dict(),
-        "load_profile": by_slot,
     }
 
 
@@ -171,11 +136,13 @@ def build_adaptive_plan(
     other tie and the later one wins, so solar arrives first. Blocks in
     ``hold`` (the previous plan's current or next window) win ties, so small
     forecast changes don't move the relay. Room is kept for material later solar at
-    half its estimated output. Once the battery is full and no room is kept,
-    the plug also stays on to run the load from the grid whenever that emits
-    less than draining the battery and recharging it later in the next block
-    the plan would add. Unmet floor or target energy is reported as a
-    shortfall.
+    half its estimated output. The plan projects no load: the battery holds
+    its reported level except for planned solar and grid charge, and each
+    replan starts from the latest reading. Once the battery is full and no
+    room is kept, the plug also stays on, so any load runs from the grid,
+    whenever that emits less than draining the battery and recharging it
+    later in the next block the plan would add. Unmet floor or target energy
+    is reported as a shortfall.
     """
     tnow = int(now.timestamp())
     battery = Battery.from_dict(estimate.get("battery"))
@@ -192,8 +159,6 @@ def build_adaptive_plan(
     end = min(deadline, max(signals, default=tnow - 900) + 900)
     # State documents use JSON, which turns integer dictionary keys into strings.
     profile = {int(q): w for q, w in estimate["solar_profile"].items()}
-    # Slots never seen use the average load.
-    loads = {int(q): w for q, w in (estimate.get("load_profile") or {}).items()}
     slots: list[dict] = []
     for start in range(tnow // 900 * 900, end, 900):
         s, e = max(tnow, start), min(end, start + 900)
@@ -201,14 +166,11 @@ def build_adaptive_plan(
         hours = (e - s) / 3600
         solar = profile.get(local.hour * 4 + local.minute // 15, 0.0) * battery.solar_stored * hours
         moer = sum(signals[start]) / len(signals[start]) if start in signals else None
-        load_w = loads.get(local.hour * 4 + local.minute // 15, estimate["load_w"])
         slots.append(
             {
                 "s": s,
                 "e": e,
                 "solar": solar,
-                "load": load_w * hours,  # Wh at the outlet
-                "net": solar - load_w / DISCHARGE * hours,
                 "max": estimate["charge_w"] * AC_CHARGE * hours,
                 "moer": moer,
                 "allowed": moer is not None and not 16 <= local.hour < 21,
@@ -220,7 +182,7 @@ def build_adaptive_plan(
     keep = [h / 2 if h / 2 >= MIN_SOLAR_WH else 0.0 for h in later]
     initial = battery.wh(battery_pct)
     ranked = rank_blocks(slots, held_blocks(slots, hold or [], tnow))
-    # Blocks where the plug stays on for the whole block to run the load.
+    # Blocks where the plug stays on for the whole block to run any load.
     bypass: set[int] = set()
     recharge_at: dict[int, float] = {}  # rate used in each block's bypass test
 
@@ -229,10 +191,10 @@ def build_adaptive_plan(
         out = []
         for i, slot in enumerate(slots):
             if i in bypass:
-                # The grid runs the load and charges any room left at full rate.
+                # The grid runs any load and charges any room left at full rate.
                 level = min(capacity, level + slot["solar"] + slot["max"])
             else:
-                level = min(capacity, level + slot["net"] + grid[i])
+                level = min(capacity, level + slot["solar"] + grid[i])
             out.append(level)
         return out
 
@@ -259,7 +221,7 @@ def build_adaptive_plan(
         for i in order:
             levels = trajectory(grid)
             before = levels[i - 1] if i else initial
-            room = target - keep[i] - before - slots[i]["net"] - sum(grid[i:])
+            room = target - keep[i] - before - slots[i]["solar"] - sum(grid[i:])
             grid[i] += max(0.0, min(slots[i]["max"] - grid[i], room))
             if grid[i] < slots[i]["max"] - 0.01:
                 break
@@ -273,26 +235,22 @@ def build_adaptive_plan(
         levels = trajectory(grid)
         added = set()
         for i, slot in enumerate(slots):
-            drain = -slot["net"]  # Wh the battery loses running the load
             before = levels[i - 1] if i else initial
             if (
                 i in bypass
                 or not slot["allowed"]
                 or keep[i] > 0
-                or drain <= 0
+                or slot["solar"] > 0
                 or before < capacity - TOLERANCE_WH
             ):
                 continue
-            # The battery Wh used now come back later in the next block the
-            # plan would add, at 1/AC_CHARGE grid Wh each.
-            spare = [
-                slots[j]["moer"]
-                for j in ranked
-                if j > i and j not in bypass and grid[j] < slots[j]["max"] - 0.01
-            ]
+            # Each outlet Wh drawn from the battery now takes 1/DISCHARGE stored
+            # Wh, refilled later in the next block the plan would add at
+            # 1/AC_CHARGE grid Wh each.
+            spare = [slots[j]["moer"] for j in ranked if j > i and grid[j] < slots[j]["max"] - 0.01]
             recharge = min(spare, default=math.inf)
             recharge_at[i] = recharge
-            if slot["moer"] * slot["load"] <= recharge * drain / AC_CHARGE:
+            if slot["moer"] <= recharge / (DISCHARGE * AC_CHARGE):
                 added.add(i)
         if not added:
             break
@@ -306,7 +264,7 @@ def build_adaptive_plan(
             before = levels[i - 1] if i else initial
             stored = max(0.0, levels[i] - before - slot["solar"])
             s, e = slot["s"], slot["e"]
-            drawn += slot["load"] + stored / AC_CHARGE
+            drawn += stored / AC_CHARGE
         elif grid[i] > 0.01:
             seconds = min(
                 slot["e"] - slot["s"],
@@ -370,10 +328,8 @@ def build_adaptive_plan(
         "floor_pct": floor_pct,
         "solar_day_wh": round(estimate["solar_day_wh"]),
         "solar_days": estimate["solar_days"],
-        "load_w": round(estimate["load_w"], 1),
         "charge_w": round(estimate["charge_w"], 1),
         "grid_wh": round(drawn),
-        "bypass_wh": round(sum(slots[i]["load"] for i in bypass)),
         "blocks": blocks,
         "shortfall_wh": round(shortfall),
     }

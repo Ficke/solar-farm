@@ -1,8 +1,8 @@
 """Model the battery: its capacity, the solar reading's scale, and the energy balance.
 
 Every estimate of energy into and out of the battery goes through ``Flows``:
-the planner's average load, the daily totals and CO2, the Power chart's load
-line, and the capacity and solar-scale measurements.
+the daily totals and CO2, the Power chart's load line, and the capacity and
+solar-scale measurements.
 
 The Jackery reports charge in whole percent and solar from its own sensor.
 Its output reading lags and misses most draws, so the load is what came in
@@ -22,10 +22,8 @@ from __future__ import annotations
 
 import math
 from bisect import bisect_left, bisect_right
-from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
-from datetime import datetime, tzinfo
 from itertools import pairwise
 
 from planner.telemetry import CAPACITY_WH
@@ -328,45 +326,6 @@ def load_points(samples: list[dict], plug: list[dict], battery: Battery) -> list
         for t, u in pairwise([span.t0, *inside, span.t1]):
             points.append((t, round(span.load * (span.done(u) - span.done(t)) * 3600 / (u - t), 1)))
     return points
-
-
-def load_profile(points: list[tuple[int, float]], tz: tzinfo) -> dict[int, float]:
-    """Average load in W for each 15-minute slot of the local day, skipping gaps."""
-    wh: dict[int, float] = defaultdict(float)
-    seconds: dict[int, float] = defaultdict(float)
-    for (t, w), (u, _) in pairwise(points):
-        if u - t > 900:
-            continue  # a gap in readings
-        while t < u:
-            end = min(u, (t // 900 + 1) * 900)
-            local = datetime.fromtimestamp(t, tz)
-            q = local.hour * 4 + local.minute // 15
-            wh[q] += w * (end - t)
-            seconds[q] += end - t
-            t = end
-    return {q: wh[q] / seconds[q] for q in seconds}
-
-
-def average_load_w(samples: list[dict], plug: list[dict], battery: Battery) -> float | None:
-    """Average load over the samples, from the balance across each stretch of readings.
-
-    Stretches end at gaps over 15 minutes. One percent of charge is about
-    31 Wh, so this needs six hours of readings to be useful.
-    """
-    readings = sorted((s for s in samples if _finite(s, "battery_pct")), key=lambda s: s["t"])
-    stretches: list[list[dict]] = []
-    for s in readings:
-        if stretches and 0 < s["t"] - stretches[-1][-1]["t"] <= 900:
-            stretches[-1].append(s)
-        else:
-            stretches.append([s])
-    flows = Flows(samples, plug, battery)
-    wh = seconds = 0.0
-    for run in stretches:
-        if len(run) >= 2:
-            wh += flows.between(run[0], run[-1]).load
-            seconds += run[-1]["t"] - run[0]["t"]
-    return wh / (seconds / 3600) if seconds >= 6 * 3600 else None
 
 
 def measure(samples: list[dict], plug: list[dict], previous: Battery | None = None) -> Battery:

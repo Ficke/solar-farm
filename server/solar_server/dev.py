@@ -123,7 +123,6 @@ def sample_store(now: int) -> MemoryStore:
         },
         "solar_day_wh": 1800,
         "solar_days": 3,
-        "load_w": 110.0,
         "charge_w": 1500.0,
     }
     plan = build_adaptive_plan(

@@ -96,10 +96,8 @@ class PlanSummary(BaseModel):
     floor_pct: float | None = None
     solar_day_wh: int | None = None
     solar_days: int | None = None
-    load_w: float | None = None
     charge_w: float | None = None
     grid_wh: int | None = None
-    bypass_wh: int | None = None
     blocks: list[PlanBlock] = []
     shortfall_wh: int | None = None
     forecast_at: int | None = None
