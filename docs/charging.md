@@ -10,10 +10,14 @@ above 20%. It charges in the cleanest 15-minute forecast blocks outside
 150 Wh. Blocks within 50 lb/MWh of the cleanest count as a tie; the block
 already planned wins, otherwise the later one.
 
-Once the battery is full, the plug also stays on, passing grid power to the
-loads, in blocks cleaner than running the loads from the battery and
-recharging later (about 1/0.81 of the replacement block's rate, at 90%
-efficiency each way).
+The plan projects no load: the battery holds its latest reported level apart
+from planned solar and grid charge. Any drain shows up in the next reading
+and the next replan.
+
+Once the battery is full, the plug also stays on, passing grid power to any
+loads, in blocks without expected solar that are cleaner than running the
+loads from the battery and recharging later (about 1/0.81 of the replacement
+block's rate, at 90% efficiency each way).
 
 A live rate under 15 minutes old replaces the forecast for the current block.
 If a live rate of 300 or more contradicts a zero forecast, the day's remaining
@@ -27,7 +31,6 @@ enough data:
 | Estimate | Default |
 | --- | --- |
 | Solar profile (only while the battery is below 97%) | 500 Wh/day, 9 am–5 pm |
-| Load, from energy balance over 24 hours | 100 W |
 | Charge rate, from the plug meter | 1,700 W |
 | Capacity, from plug-metered charging | 3,072 Wh |
 

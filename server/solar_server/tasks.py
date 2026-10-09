@@ -324,7 +324,7 @@ BATTERY_MAX_AGE = 6 * 3600
 
 def charging_estimates(store: Store, settings: Settings, now: int) -> dict:
     """Cache history estimates for 30 minutes, or five while AC charging is detected."""
-    inputs = [settings.solar_day_wh, settings.load_w, settings.charge_w]
+    inputs = [settings.solar_day_wh, settings.charge_w]
     cached = store.get_state("charging_estimates") or {}
     latest = (store.get_state("sample") or {}).get("sample") or {}
     into_battery = (latest.get("ac_input_w") or 0) - max(0.0, latest.get("output_w") or 0)
@@ -382,11 +382,9 @@ PLAN_HISTORY_KEYS = (
     "battery_pct",
     "deadline",
     "grid_wh",
-    "bypass_wh",
     "shortfall_wh",
     "solar_day_wh",
     "solar_days",
-    "load_w",
     "charge_w",
     "forecast_at",
     "forecast_until",

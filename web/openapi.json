@@ -809,17 +809,6 @@
             ],
             "title": "Solar Days"
           },
-          "load_w": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Load W"
-          },
           "charge_w": {
             "anyOf": [
               {
@@ -841,17 +830,6 @@
               }
             ],
             "title": "Grid Wh"
-          },
-          "bypass_wh": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Bypass Wh"
           },
           "blocks": {
             "items": {
