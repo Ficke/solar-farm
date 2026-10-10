@@ -120,6 +120,8 @@ class Timeline(BaseModel):
     samples: list[Sample]
     plug: list[StoredPlugReport]
     load: list[tuple[int, float]]  # Pairs contain Unix seconds and W.
+    # Pairs contain Unix seconds and lb/MWh of CO2 in the battery's known-origin charge.
+    stored_co2: list[tuple[int, float]]
     forecast: list[tuple[int, float]]  # Pairs contain Unix seconds and lb/MWh.
     mix: list[MixRow]
     prices: list[PriceRow]

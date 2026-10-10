@@ -1208,6 +1208,23 @@
             "type": "array",
             "title": "Load"
           },
+          "stored_co2": {
+            "items": {
+              "prefixItems": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array",
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": "array",
+            "title": "Stored Co2"
+          },
           "forecast": {
             "items": {
               "prefixItems": [
@@ -1247,6 +1264,7 @@
           "samples",
           "plug",
           "load",
+          "stored_co2",
           "forecast",
           "mix",
           "prices"
