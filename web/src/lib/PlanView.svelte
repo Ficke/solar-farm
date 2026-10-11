@@ -162,7 +162,7 @@
     </tbody>
   </table>
 {:else}
-  <p class="muted">No grid use planned</p>
+  <p class="muted">No more grid use planned</p>
 {/if}
 
 <style>
