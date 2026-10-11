@@ -8,7 +8,7 @@ type Row = Co2["periods"][number];
 /** Omit `p` for periods with no readings. */
 export type Slot = { start: string; p?: Row };
 
-export const fmtLb = (v: number) => (Math.abs(v) < 10 ? v.toFixed(2) : v.toFixed(1));
+export const fmtMass = (v: number) => (Math.abs(v) < 10 ? v.toFixed(2) : v.toFixed(1));
 
 export function fmtWh(wh: number): [string, string] {
   if (Math.abs(wh) < 1000) return [String(Math.round(wh)), "Wh"];

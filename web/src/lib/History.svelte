@@ -1,9 +1,10 @@
 <script lang="ts">
   // Align energy and CO2 columns by period on both charts.
   import type { Co2 } from "./api";
-  import { fmtLb, fmtWh, niceTicks, periodLabel, periodName, type Slot, slots } from "./co2";
+  import { fmtMass, fmtWh, niceTicks, periodLabel, periodName, type Slot, slots } from "./co2";
   import Hint from "./Hint.svelte";
   import Tooltip, { type TipRow } from "./Tooltip.svelte";
+  import { kg } from "./units";
 
   let { co2, now }: { co2: Co2 | undefined; now: number } = $props();
   let width = $state(400);
@@ -42,8 +43,8 @@
     let up = 0;
     let down = 0;
     const xs = [
-      { lb: p.solar_lb, color: "var(--solar-area)" },
-      { lb: p.shift_lb, color: "var(--grid)" },
+      { lb: kg(p.solar_lb), color: "var(--solar-area)" },
+      { lb: kg(p.shift_lb), color: "var(--grid)" },
     ]
       .filter((x) => x.lb !== 0)
       .map((x) => {
@@ -63,7 +64,7 @@
   });
   const cLo = $derived(cTicks[0] ?? 0);
   const cHi = $derived(cTicks.at(-1) ?? 1);
-  const cy = (lb: number) => PAD.t + ((cHi - lb) / (cHi - cLo)) * (CH - LABELS - PAD.t - PAD.b);
+  const cy = (v: number) => PAD.t + ((cHi - v) / (cHi - cLo)) * (CH - LABELS - PAD.t - PAD.b);
 
   const fmtTick = (v: number) => String(+v.toFixed(3));
 
@@ -73,9 +74,9 @@
     solar: fmtWh(sum("solar_wh")),
     grid: fmtWh(sum("grid_wh")),
     load: fmtWh(sum("load_wh")),
-    avoided: sum("avoided_lb"),
-    solarLb: sum("solar_lb"),
-    shiftLb: sum("shift_lb"),
+    avoided: kg(sum("avoided_lb")),
+    solarKg: kg(sum("solar_lb")),
+    shiftKg: kg(sum("shift_lb")),
   });
 
   const tip = $derived<Slot | null>(hovered != null ? (cols[hovered] ?? null) : null);
@@ -101,8 +102,8 @@
     const d = y1 < y0 ? r : -r;
     return `M${x},${y0}V${y1 + d}Q${x},${y1} ${x + r},${y1}H${x + bw - r}Q${x + bw},${y1} ${x + bw},${y1 + d}V${y0}Z`;
   }
-  const co2Label = (lb: number) => (lb < 0 ? "CO₂ added" : "CO₂ avoided");
-  const signed = (lb: number) => (lb < 0 ? `−${fmtLb(-lb)}` : fmtLb(lb));
+  const co2Label = (v: number) => (v < 0 ? "CO₂ added" : "CO₂ avoided");
+  const signed = (v: number) => (v < 0 ? `−${fmtMass(-v)}` : fmtMass(v));
   const span = (wh: [string, string]) => `${wh[0]} ${wh[1]}`;
 
   function tipRows({ p }: Slot): TipRow[] {
@@ -112,11 +113,11 @@
       { color: "--grid", value: span(fmtWh(p.grid_wh)), name: "Grid" },
       { color: "--load", value: span(fmtWh(p.load_wh)), name: "Load" },
       {
-        value: `${fmtLb(Math.abs(p.avoided_lb))} lb`,
+        value: `${fmtMass(Math.abs(kg(p.avoided_lb)))} kg`,
         name: co2Label(p.avoided_lb),
       },
-      { color: "--solar-area", value: `${signed(p.solar_lb)} lb`, name: "From solar" },
-      { color: "--grid", value: `${signed(p.shift_lb)} lb`, name: "From load shifting" },
+      { color: "--solar-area", value: `${signed(kg(p.solar_lb))} kg`, name: "From solar" },
+      { color: "--grid", value: `${signed(kg(p.shift_lb))} kg`, name: "From load shifting" },
     ];
   }
 </script>
@@ -141,9 +142,9 @@
         >{co2Label(totals.avoided)}</Hint
       >
     </dt>
-    <dd><b>{co2 ? fmtLb(Math.abs(totals.avoided)) : "–"}</b><small>lb</small></dd>
+    <dd><b>{co2 ? fmtMass(Math.abs(totals.avoided)) : "–"}</b><small>kg</small></dd>
     {#if co2}
-      <dd class="split">Solar {fmtLb(totals.solarLb)} · Shifting {signed(totals.shiftLb)}</dd>
+      <dd class="split">Solar {fmtMass(totals.solarKg)} · Shifting {signed(totals.shiftKg)}</dd>
     {/if}
   </div>
 </dl>
@@ -178,7 +179,7 @@
   </svg>
 
   <h3 class="legend">
-    CO₂ avoided, lb
+    CO₂ avoided, kg
     <span><i class="sw" style:background="var(--solar-area)"></i>Solar</span>
     <span><i class="sw" style:background="var(--grid)"></i>Load shifting</span>
   </h3>

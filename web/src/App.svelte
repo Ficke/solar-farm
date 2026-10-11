@@ -14,6 +14,7 @@
   import TimeChart from "./lib/TimeChart.svelte";
   import { type Mode, setMode, theme } from "./lib/theme.svelte";
   import { ago, fmtWhen, hours, PEAK_HOURS } from "./lib/time";
+  import { RATE, rate } from "./lib/units";
 
   const MODES: { value: Mode; label: string }[] = [
     { value: "system", label: "System" },
@@ -22,9 +23,9 @@
   ];
   const LEADS = [1, 3, 6, 12].map((h) => ({ value: h, label: `${h} h` }));
   const CO2_RAMP: [number, string][] = [
-    [250, "--co2-clean"],
-    [550, "--co2-mid"],
-    [850, "--co2-dirty"],
+    [115, "--co2-clean"],
+    [250, "--co2-mid"],
+    [385, "--co2-dirty"],
   ];
   // The stored rate holds until the charge changes, which can take hours.
   const STORED_GAP = 24 * 3600;
@@ -140,18 +141,21 @@
   const emissionsData = $derived(
     align(
       [
-        (tl?.samples ?? []).map((p) => [p.moer_t ?? p.t, p.moer]),
+        (tl?.samples ?? []).map((p) => [p.moer_t ?? p.t, p.moer == null ? p.moer : rate(p.moer)]),
         [
-          ...(acc?.points ?? []).map(([t, , f]) => [t, f] as [number, number | null]),
-          ...forecast.map(([t, v]) => [t, v] as [number, number]),
+          ...(acc?.points ?? []).map(
+            ([t, , f]) => [t, f == null ? f : rate(f)] as [number, number | null],
+          ),
+          ...forecast.map(([t, v]) => [t, rate(v)] as [number, number]),
         ],
-        tl?.stored_co2 ?? [],
+        (tl?.stored_co2 ?? []).map(([t, v]) => [t, rate(v)] as [number, number]),
       ],
       [15 * 60, 15 * 60, STORED_GAP],
     ),
   );
-  const stored = $derived(tl?.stored_co2.at(-1)?.[1]);
-  const grid = $derived(s?.moer != null ? Math.round(s.moer) : null);
+  const lastStored = $derived(tl?.stored_co2.at(-1)?.[1]);
+  const stored = $derived(lastStored != null ? Math.round(rate(lastStored)) : null);
+  const grid = $derived(s?.moer != null ? Math.round(rate(s.moer)) : null);
   // Devices run on the grid while the plug is on, otherwise on the battery.
   const inUse = $derived.by(() => {
     const onGrid = headline.mode ? PLAN[headline.mode].on : !!plug?.on;
@@ -246,7 +250,7 @@
         <dt>
           <Hint text={co2Hint}>CO₂ in use</Hint>
         </dt>
-        <dd><b>{inUse.value ?? "–"}</b><small>lb/MWh</small></dd>
+        <dd><b>{inUse.value ?? "–"}</b><small>{RATE}</small></dd>
         <dd class="n">{inUse.detail}</dd>
       </div>
     </dl>
@@ -275,18 +279,18 @@
   <section class="card charts" aria-labelledby="grid-h">
     <h2 id="grid-h">Grid</h2>
     <div class="head">
-      <h3>CO₂, lb/MWh</h3>
+      <h3>CO₂, {RATE}</h3>
       <div class="ctl">
         <span class="stat"
           ><Hint text="Average gap between actual CO₂ and the forecast made this many hours earlier, last 24 hours.">Forecast error</Hint></span
         >
         <Segmented label="Hours ahead" options={LEADS} value={lead} onpick={pickLead} />
-        <span class="stat"><b>{acc?.error ?? "–"}</b> lb/MWh</span>
+        <span class="stat"><b>{acc?.error != null ? Math.round(rate(acc.error)) : "–"}</b> {RATE}</span>
       </div>
     </div>
     <TimeChart
       label="Marginal CO2, past 24 hours and forecast, and battery CO2"
-      title="CO₂, lb/MWh"
+      title={`CO₂, ${RATE}`}
       data={emissionsData}
       {from}
       {to}
@@ -294,16 +298,16 @@
       windows={spans}
       height={180}
       series={[
-        { label: "Actual", color: "--co2-mid", ramp: CO2_RAMP, unit: "lb/MWh" },
+        { label: "Actual", color: "--co2-mid", ramp: CO2_RAMP, unit: RATE },
         {
           label: "Forecast",
           color: "--co2-mid",
           ramp: CO2_RAMP,
           dash: [4, 4],
           width: LINE_THIN,
-          unit: "lb/MWh",
+          unit: RATE,
         },
-        { label: "Battery", color: "--battery", unit: "lb/MWh" },
+        { label: "Battery", color: "--battery", unit: RATE, hold: true },
       ]}
     />
     <h3>California generation by source, GW</h3>
@@ -357,7 +361,6 @@
       windows={spans}
       height={110}
       yMax={100}
-      yRule={now?.plan?.target_pct != null ? { value: now.plan.target_pct, label: `Target ${now.plan.target_pct}%` } : undefined}
       series={[
         { label: "Battery", color: "--battery", unit: "%" },
         { label: "Plan", color: "--battery", dash: [4, 4], width: LINE_THIN, unit: "%" },

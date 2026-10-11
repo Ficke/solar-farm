@@ -16,6 +16,7 @@
     localMinutes,
     peakWindows,
   } from "./time";
+  import { fmtRate } from "./units";
 
   let {
     blocks,
@@ -54,8 +55,6 @@
     hover.from = "plan";
   }
 
-  const lb = (v: number) => `${Math.round(v)} lb/MWh`;
-
   const tip = $derived.by(() => {
     const t = hover.t;
     if (t == null || hover.from !== "plan") return null;
@@ -69,16 +68,16 @@
     ];
     if (t < now) {
       const p = nearest(samples, t, (p) => p.t);
-      if (p?.moer != null) rows.push({ value: lb(p.moer), name: "CO₂" });
+      if (p?.moer != null) rows.push({ value: fmtRate(p.moer), name: "CO₂" });
       if (p?.battery_pct != null)
         rows.push({ value: `${Math.round(p.battery_pct)}%`, name: "Battery" });
       return { t, rows };
     }
     const b = blockAt(blocks, t);
     const co2 = b?.moer ?? nearest(forecast, t, ([ft]) => ft)?.[1];
-    if (co2 != null) rows.push({ value: lb(co2), name: "CO₂ forecast" });
+    if (co2 != null) rows.push({ value: fmtRate(co2), name: "CO₂ forecast" });
     if (b?.recharge != null)
-      rows.push({ value: lb(b.recharge / ROUND_TRIP), name: "Recharge later, with losses" });
+      rows.push({ value: fmtRate(b.recharge / ROUND_TRIP), name: "Recharge later, with losses" });
     if (b) rows.push({ value: `${Math.round(b.pct)}%`, name: "Battery" });
     if (mode === "solar") rows.push({ name: "Room kept for solar" });
     return { t, rows };
@@ -155,7 +154,7 @@
           <td>{fmtWhen(r.s, now).replace(fmtClock(r.s), "")}{fmtRange(r.s, r.e)}</td>
           <td>{hours(r.e - r.s)}</td>
           <td>{MODES[r.mode].label}</td>
-          <td>{r.moer == null ? "" : lb(r.moer)}</td>
+          <td>{r.moer == null ? "" : fmtRate(r.moer)}</td>
           <td class="st">{#if r.state}<span class={r.state.toLowerCase()}>{r.state}</span>{/if}</td>
         </tr>
       {/each}

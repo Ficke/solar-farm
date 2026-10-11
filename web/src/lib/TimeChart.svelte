@@ -22,6 +22,8 @@
     /** Color the line with [value, CSS token] stops ordered low to high. */
     ramp?: [number, string][];
     width?: number;
+    /** Hold each value until the next, as a step line; the tooltip shows the value held. */
+    hold?: boolean;
     unit: string;
     digits?: number;
   }
@@ -35,7 +37,6 @@
     windows = [],
     height = 160,
     yMax,
-    yRule,
     label,
     tipData,
     shade = true,
@@ -52,7 +53,6 @@
     windows?: Window[];
     height?: number;
     yMax?: number;
-    yRule?: { value: number; label: string };
     label: string;
     /** Supply tooltip values separately from drawn values, such as stacked totals. */
     tipData?: (number | null | undefined)[][];
@@ -139,28 +139,6 @@
         ctx.fillText("Now", x + 4 * dpr, u.bbox.top + 2 * dpr);
       }
     }
-    if (yRule && mode !== "overview") {
-      const y = Math.round(u.valToPos(yRule.value, "y", true));
-      ctx.strokeStyle = css("--ink-3");
-      ctx.lineWidth = LINE_THIN * dpr;
-      ctx.setLineDash([2 * dpr, 3 * dpr]);
-      ctx.beginPath();
-      ctx.moveTo(u.bbox.left, y);
-      ctx.lineTo(u.bbox.left + u.bbox.width, y);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillStyle = css("--ink-2");
-      ctx.font = `${11 * dpr}px ${css("--f-sans")}`;
-      ctx.textAlign = "left";
-      const below = y - u.bbox.top < 16 * dpr;
-      ctx.textAlign = "right";
-      ctx.textBaseline = below ? "top" : "bottom";
-      ctx.fillText(
-        yRule.label,
-        u.bbox.left + u.bbox.width - 6 * dpr,
-        below ? y + 3 * dpr : y - 3 * dpr,
-      );
-    }
     ctx.restore();
   }
 
@@ -183,6 +161,11 @@
       values: series.map((_, k) => {
         // Show the nearest real value, since series are sampled at different rates.
         const ys = (tipShown ?? u.data)[k + 1];
+        if (series[k].hold) {
+          if (t > now) return null;
+          for (let j = i; j >= 0; j--) if (ys[j] !== undefined) return ys[j] ?? null;
+          return null;
+        }
         for (let d = 0; d < 30; d++) {
           for (const j of [i - d, i + d]) {
             const v = ys[j];
@@ -280,6 +263,7 @@
           dash: s.dash,
           width: mini ? LINE_THIN : (s.width ?? (s.area ? LINE_THIN : LINE)),
           spanGaps: false,
+          ...(s.hold && { paths: uPlot.paths.stepped?.({ align: 1 }) }),
           points: { show: false },
         })),
       ],
@@ -329,11 +313,10 @@
     );
   });
 
-  // The now line, bands and target rule are drawn in hooks; repaint when they move.
+  // The now line, and bands are drawn in hooks; repaint when they move.
   $effect(() => {
     now;
     windows;
-    yRule;
     shade;
     untrack(() => plot?.redraw(false));
   });
@@ -420,7 +403,7 @@
 {#if open && title}
   <ChartDialog
     {title}
-    chart={{ data, series, from, to, now, windows, yMax, yRule, label, tipData, shade }}
+    chart={{ data, series, from, to, now, windows, yMax, label, tipData, shade }}
     onclose={() => (open = false)}
   />
 {/if}
