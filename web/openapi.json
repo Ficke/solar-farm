@@ -1058,6 +1058,17 @@
             ],
             "title": "Full H"
           },
+          "outlets_on": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outlets On"
+          },
           "moer": {
             "anyOf": [
               {

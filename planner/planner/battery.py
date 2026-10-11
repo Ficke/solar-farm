@@ -184,6 +184,11 @@ class Flows:
         self.draw = [(s["t"], _draw(s)) for s in readings]
         self.draw_times = [t for t, _ in self.draw]
         self.fill = [(s["t"], _fill(s)) for s in readings]
+        switched = sorted(
+            (s["t"], s["outlets_on"]) for s in samples if s.get("outlets_on") is not None
+        )
+        self.switch_times = [t for t, _ in switched]
+        self.switched = [on for _, on in switched]
 
     def between(self, a: dict, b: dict) -> Balance:
         """Balance energy from reading ``a`` to reading ``b``.
@@ -207,8 +212,9 @@ class Flows:
         if direct > grid_wh:
             direct = grid_wh
             load = grid_wh + (solar_in - gained) * DISCHARGE
-        if load <= 0:
-            # More charge than measured input, usually from a low solar reading.
+        if load <= 0 or self.outlets_off(t0, t1):
+            # More charge than measured input, usually from a low solar reading,
+            # or nothing to power: the rest is charging losses.
             load = direct = 0.0
         return Balance(load, direct, solar_read, solar_in, grid_wh, grid_lb, share)
 
@@ -219,6 +225,12 @@ class Flows:
         i = bisect_right(self.draw_times, t0) - 1
         ws = [w for _, w in self.draw[i : bisect_right(self.draw_times, t1 - 1)] if w]
         return bool(ws) and max(ws) <= STEADY * min(ws)
+
+    def outlets_off(self, t0: int, t1: int) -> bool:
+        """Whether the Jackery reported its outlets switched off the whole time."""
+        i = bisect_right(self.switch_times, t0) - 1
+        j = bisect_right(self.switch_times, t1)
+        return i >= 0 and not any(self.switched[i:j])
 
     def plugged(self, t0: int, t1: int) -> bool:
         """Whether the plug supplied power the whole time."""
@@ -342,7 +354,7 @@ def measure(samples: list[dict], plug: list[dict], previous: Battery | None = No
     flows = Flows(samples, reports, previous)
     # Any output the Jackery reports means load is lowering the solar gain.
     drawing = sorted(s["t"] for s in samples if _finite(s, "output_w") and s["output_w"] > 0)
-    ac_wh = ac_pct = solar_wh = solar_pct = 0.0
+    ac_in = ac_pct = solar_wh = solar_pct = 0.0
     for a, b in pairwise(changes):
         gain = b["battery_pct"] - a["battery_pct"]
         if gain <= 0 or not 0 < b["t"] - a["t"] <= MAX_SPAN:
@@ -354,7 +366,8 @@ def measure(samples: list[dict], plug: list[dict], previous: Battery | None = No
             and all(r["w"] >= MIN_CHARGE_W for r in inside)
             and bal.solar_read < 0.1 * bal.grid_wh
         ):
-            ac_wh += bal.grid_wh
+            # Count the little solar stored alongside, or no-load charging shows a load.
+            ac_in += bal.grid_wh * AC_CHARGE + bal.solar_in
             ac_pct += gain
         elif (
             bal.grid_wh < 1
@@ -366,7 +379,7 @@ def measure(samples: list[dict], plug: list[dict], previous: Battery | None = No
             solar_pct += gain
     capacity = previous.capacity_wh
     if ac_pct >= MIN_CAPACITY_PCT:
-        capacity = _clamp(AC_CHARGE * ac_wh / ac_pct * 100, CAPACITY_RANGE)
+        capacity = _clamp(ac_in / ac_pct * 100, CAPACITY_RANGE)
     scale = previous.solar_scale
     if solar_pct >= MIN_SOLAR_PCT and solar_wh > 0:
         # Load the output reading misses lowers the gain, so this can only understate.

@@ -30,6 +30,13 @@ def test_parse_properties_reads_runtime_hours():
     assert parse_properties({}, START).runtime_h is None
 
 
+def test_parse_properties_reads_the_outlet_switches():
+    assert parse_properties({"oac": 0, "odc": 0}, START).outlets_on is False
+    assert parse_properties({"oac": 0, "odc": 1}, START).outlets_on is True
+    assert parse_properties({"oac": 1}, START).outlets_on is True
+    assert parse_properties({}, START).outlets_on is None
+
+
 def test_scalars_drops_nested_values():
     props = {"properties": {"rb": 72, "acps": 0, "name": "E3000", "packs": [1], "x": {}}}
     assert scalars(props) == {"rb": 72, "acps": 0, "name": "E3000"}
