@@ -518,6 +518,38 @@ def test_co2_avoided_doesnt_count_energy_shifted_to_another_day():
     assert oct4["used_lb"] > oct4["load_lb"]
 
 
+def test_stored_co2_averages_the_charge_with_losses():
+    store = MemoryStore()
+    # 300 W of solar for an hour stores 285 Wh without CO2. The plug then
+    # charges 400 Wh at 1000 lb/MWh, which stores 360 Wh.
+    for i in range(121):
+        t = NOW - 3 * 3600 + i * 60
+        solar = 285 * min(i, 60) / 60
+        grid = 360 * max(0, i - 60) / 60
+        tasks.record_sample(
+            store,
+            {
+                "t": t,
+                "solar_w": 300.0 if i <= 60 else 0.0,
+                "battery_pct": (solar + grid) / 3072 * 100,
+                "moer": 1000.0,
+                "moer_t": t,
+            },
+        )
+        if i >= 60:
+            tasks.record_plug(store, {"t": t, "on": True, "reason": "plan", "w": 400.0})
+    totals.update(store, NOW)
+    points = store.days["2026-10-04"]["stored_co2"]
+    # Solar alone carries no CO2; 0.4 lb over 645 Wh averages 620 lb/MWh.
+    assert points[0]["lb_mwh"] == 0
+    assert points[-1] == {"t": NOW - 3600, "lb_mwh": pytest.approx(0.4e6 / 645, abs=8)}
+    web, _ = make("web", store=store)
+    tl = web.get("/api/timeline", params={"past_hours": 2}).json()
+    assert tl["stored_co2"][-1] == [NOW - 3600, points[-1]["lb_mwh"]]
+    # The line starts from the last value before the window.
+    assert tl["stored_co2"][0][0] <= NOW - 7200 < tl["stored_co2"][1][0]
+
+
 def test_solar_adds_energy_without_co2():
     store = MemoryStore()
     # 300 W of solar for an hour charges an empty battery with 285 Wh, which

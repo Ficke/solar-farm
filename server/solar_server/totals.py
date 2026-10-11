@@ -35,7 +35,8 @@ log = logging.getLogger(__name__)
 # Nothing was recorded before this; the first update fills in every day since.
 FIRST_DAY = "2026-10-01"
 RATE_GAP = 1800  # Carry each marginal rate for at most 30 minutes.
-VERSION = 5  # Increment to recompute history from FIRST_DAY.
+VERSION = 6  # Increment to recompute history from FIRST_DAY.
+MIN_KNOWN_WH = 30  # About 1% of charge; below this the stored rate is noise.
 
 
 def rate_lookup(samples: list[dict]) -> Rate:
@@ -73,9 +74,19 @@ class Pool:
     stored_lb: float = 0.0
     unknown_wh: float = 0.0
 
+    def lb_mwh(self, held_wh: float) -> float | None:
+        """Return the CO2 in lb/MWh of the known-origin charge in ``held_wh``."""
+        known = held_wh - self.unknown_wh
+        return self.stored_lb / known * 1e6 if known >= MIN_KNOWN_WH else None
+
 
 def load_co2(
-    samples: list[dict], plug: list[dict], rate: Rate, pool: Pool, battery: Battery
+    samples: list[dict],
+    plug: list[dict],
+    rate: Rate,
+    pool: Pool,
+    battery: Battery,
+    trace: list[dict] | None = None,
 ) -> tuple[float, float, float]:
     """Estimate the load from the battery's energy balance and attribute its CO2.
 
@@ -86,7 +97,8 @@ def load_co2(
     including charging losses, and the load takes its share when drawn.
 
     Returns load Wh, its direct-grid CO2 baseline in lb, and the CO2 in lb
-    attributed to it; updates ``pool``.
+    attributed to it; updates ``pool``. Appends the stored charge's CO2 rate
+    at the end of each span to ``trace``.
     """
     rates = [(s["t"], rate(s["t"])) for s in samples]
     load_wh = load_lb = used_lb = 0.0
@@ -113,6 +125,9 @@ def load_co2(
         load_wh += load
         load_lb += baseline_lb
         used_lb += direct_lb + take + neutral_lb
+        stored = pool.lb_mwh(battery.wh(span.pct))
+        if trace is not None and stored is not None:
+            trace.append({"t": span.t1, "lb_mwh": round(stored)})
     return load_wh, load_lb, used_lb
 
 
@@ -138,7 +153,8 @@ def day_totals(
     solar = series(samples, "solar_w")
     by = metered(plug, rate)
     grid_wh, grid_lb = by(plug[-1]["t"]) if plug else (0.0, 0.0)
-    load_wh, load_lb, used_lb = load_co2(samples, plug, rate, pool, battery)
+    stored_co2: list[dict] = []
+    load_wh, load_lb, used_lb = load_co2(samples, plug, rate, pool, battery, stored_co2)
     # Plug draw before the first or after the last change in charge goes into the battery.
     readings = [s["t"] for s in samples if s.get("battery_pct") is not None]
     if len(readings) >= 2:
@@ -158,6 +174,7 @@ def day_totals(
         "used_lb": round(used_lb, 4),
         "stored_lb": round(pool.stored_lb, 6),
         "unknown_wh": round(pool.unknown_wh, 1),
+        "stored_co2": stored_co2,
         "battery_peak_pct": max(peaks) if peaks else None,
     }
 

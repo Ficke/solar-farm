@@ -26,6 +26,8 @@
     [550, "--co2-mid"],
     [850, "--co2-dirty"],
   ];
+  // The stored rate holds until the charge changes, which can take hours.
+  const STORED_GAP = 24 * 3600;
   const PERIODS = (Object.keys(COUNTS) as Period[]).map((p) => ({
     value: p,
     label: p[0].toUpperCase() + p.slice(1),
@@ -137,13 +139,21 @@
   });
 
   const emissionsData = $derived(
-    align([
-      (tl?.samples ?? []).map((p) => [p.moer_t ?? p.t, p.moer]),
+    align(
       [
-        ...(acc?.points ?? []).map(([t, , f]) => [t, f] as [number, number | null]),
-        ...forecast.map(([t, v]) => [t, v] as [number, number]),
+        (tl?.samples ?? []).map((p) => [p.moer_t ?? p.t, p.moer]),
+        [
+          ...(acc?.points ?? []).map(([t, , f]) => [t, f] as [number, number | null]),
+          ...forecast.map(([t, v]) => [t, v] as [number, number]),
+        ],
+        tl?.stored_co2 ?? [],
       ],
-    ]),
+      [15 * 60, 15 * 60, STORED_GAP],
+    ),
+  );
+  const stored = $derived(tl?.stored_co2.at(-1)?.[1]);
+  const storedVsGrid = $derived(
+    stored != null && s?.moer ? Math.round((1 - stored / s.moer) * 100) : null,
   );
   const mix = $derived(stackMix(tl?.mix ?? []));
   const priceData = $derived(
@@ -230,6 +240,15 @@
           {s?.index != null ? `Cleaner than ${Math.round(100 - s.index)}% of the past month` : ""}
         </dd>
       </div>
+      <div>
+        <dt>
+          <Hint text="Average CO₂ of the energy in the battery. Grid charge counts at the rate when it was drawn, charging losses included; solar adds none.">Battery CO₂</Hint>
+        </dt>
+        <dd><b>{stored ?? "–"}</b><small>lb/MWh</small></dd>
+        <dd class="n">
+          {storedVsGrid != null ? `${Math.abs(storedVsGrid)}% ${storedVsGrid >= 0 ? "below" : "above"} grid` : ""}
+        </dd>
+      </div>
     </dl>
   </section>
 
@@ -285,7 +304,7 @@
       </div>
     </div>
     <TimeChart
-      label="Marginal CO2, past 24 hours and forecast"
+      label="Marginal CO2, past 24 hours and forecast, and battery CO2"
       title="CO₂, lb/MWh"
       data={emissionsData}
       {from}
@@ -303,6 +322,7 @@
           width: LINE_THIN,
           unit: "lb/MWh",
         },
+        { label: "Battery", color: "--battery", unit: "lb/MWh" },
       ]}
     />
     <h3>California generation by source, GW</h3>
@@ -539,7 +559,7 @@
   }
   .tiles {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     margin: 28px 0 0;
   }
   .tiles > div {
@@ -555,7 +575,7 @@
       grid-template-columns: repeat(2, minmax(0, 1fr));
       row-gap: 20px;
     }
-    .tiles > div:nth-child(3) {
+    .tiles > div:nth-child(odd) {
       padding-left: 0;
       border-left: 0;
     }

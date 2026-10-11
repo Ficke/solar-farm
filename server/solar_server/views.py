@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from bisect import bisect_right
 from datetime import date, datetime, time, timedelta
 
 from planner.battery import Battery, load_points
@@ -76,11 +77,23 @@ def timeline_view(store: Store, now: int, past_hours: int = 24) -> dict:
         "samples": samples,
         "plug": [{k: r.get(k) for k in ("t", "on", "reason", "w")} for r in plug],
         "load": load_points(samples, plug, battery),
+        "stored_co2": _stored_co2(store, since, now),
         "forecast": [p for p in plan.get("forecast", []) if p[0] >= now - 300],
         # CAISO sometimes revises a row; the latest stored copy wins.
         "mix": list({i["t"]: i for i in window(store, MIX, since, now)}.values()),
         "prices": list({i["t"]: i for i in window(store, PRICES, since, now)}.values()),
     }
+
+
+def _stored_co2(store: Store, since: int, now: int) -> list[tuple[int, float]]:
+    """Return the stored charge's CO2 rate from the last point before ``since``."""
+    points = [
+        (p["t"], p["lb_mwh"])
+        for d in totals.read(store, since - 86400, now)
+        for p in d.get("stored_co2", [])
+    ]
+    first = max(0, bisect_right([t for t, _ in points], since) - 1)
+    return points[first:]
 
 
 def daily_view(store: Store, now: int, days: int = 14) -> dict:
