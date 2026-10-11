@@ -141,7 +141,8 @@ def build_adaptive_plan(
     replan starts from the latest reading. Once the battery is full and no
     room is kept, the plug also stays on, so any load runs from the grid,
     whenever that emits less than draining the battery and recharging it
-    later in the next block the plan would add. Unmet floor or target energy
+    later in the next block the plan would add. Blocks within TIE_MOER of
+    zero keep the plug on regardless of solar. Unmet floor or target energy
     is reported as a shortfall.
     """
     tnow = int(now.timestamp())
@@ -182,8 +183,10 @@ def build_adaptive_plan(
     keep = [h / 2 if h / 2 >= MIN_SOLAR_WH else 0.0 for h in later]
     initial = battery.wh(battery_pct)
     ranked = rank_blocks(slots, held_blocks(slots, hold or [], tnow))
-    # Blocks where the plug stays on for the whole block to run any load.
-    bypass: set[int] = set()
+    # Blocks where the plug stays on for the whole block to run any load. Grid
+    # power within TIE_MOER of zero is as clean as solar, so those blocks skip
+    # the solar reserve: the battery fills from the grid and loads run on it.
+    bypass = {i for i, slot in enumerate(slots) if slot["allowed"] and slot["moer"] <= TIE_MOER}
     recharge_at: dict[int, float] = {}  # rate used in each block's bypass test
 
     def trajectory(grid: list[float]) -> list[float]:

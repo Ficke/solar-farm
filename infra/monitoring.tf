@@ -41,6 +41,11 @@ locals {
       filter = "${local.edge_log}jsonPayload.alert=\"grid_not_charging\""
       doc    = "The plug has been on with draw below 100 W for 10 minutes, and the latest battery reading is below 95%. Check AC connections, Jackery charging limits and telemetry freshness."
     }
+    working_mode_on = {
+      name   = "Jackery working mode is on"
+      filter = "${local.edge_log}jsonPayload.alert=\"working_mode_on\""
+      doc    = "A Jackery app working mode, such as Self-powered, is on (property en is not 0). It stops grid charging and pass-through above its reserve, so the plan can't run. Turn it off in the Jackery app."
+    }
     task_failed = {
       name   = "Scheduled task failed"
       filter = <<-EOT
