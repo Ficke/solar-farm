@@ -5,7 +5,7 @@ from __future__ import annotations
 from bisect import bisect_right
 from datetime import date, datetime, time, timedelta
 
-from planner.battery import Battery, load_points
+from planner.battery import Battery, load_parts
 from planner.plan import PACIFIC
 
 from planner import telemetry
@@ -76,12 +76,20 @@ def timeline_view(store: Store, now: int, past_hours: int = 24) -> dict:
         "since": since,
         "samples": samples,
         "plug": [{k: r.get(k) for k in ("t", "on", "reason", "w")} for r in plug],
-        "load": load_points(samples, plug, battery),
+        **_load_series(samples, plug, battery),
         "stored_co2": _stored_co2(store, since, now),
         "forecast": [p for p in plan.get("forecast", []) if p[0] >= now - 300],
         # CAISO sometimes revises a row; the latest stored copy wins.
         "mix": list({i["t"]: i for i in window(store, MIX, since, now)}.values()),
         "prices": list({i["t"]: i for i in window(store, PRICES, since, now)}.values()),
+    }
+
+
+def _load_series(samples: list[dict], plug: list[dict], battery: Battery) -> dict:
+    parts = load_parts(samples, plug, battery)
+    return {
+        "load": [(t, round(w, 1)) for t, w, _ in parts],
+        "overhead": [(t, round(o, 1)) for t, _, o in parts],
     }
 
 
@@ -149,6 +157,7 @@ def co2_view(store: Store, now: int, by: str = "day", count: int = 14) -> dict:
 
 CO2_SUMS = (
     "load_wh",
+    "overhead_wh",
     "grid_wh",
     "solar_wh",
     "load_lb",
@@ -162,7 +171,7 @@ CO2_SUMS = (
 def _co2_row(p: dict) -> dict:
     return {
         "start": p["start"],
-        **{k: round(p[k]) for k in ("load_wh", "grid_wh", "solar_wh")},
+        **{k: round(p[k]) for k in ("load_wh", "overhead_wh", "grid_wh", "solar_wh")},
         "load_lb": round(p["load_lb"], 3),
         "grid_lb": round(p["grid_lb"], 3),
         "used_lb": round(p["used_lb"], 3),

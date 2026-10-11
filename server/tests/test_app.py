@@ -113,6 +113,7 @@ def test_collect_stores_one_sample_with_every_source():
         "output_w": 90.0,
         "runtime_h": 16.2,
         "full_h": None,
+        "outlets_on": None,
     }
     assert store.day(SAMPLES, "2026-10-04") == [body]
 
@@ -130,6 +131,7 @@ def test_collect_stores_only_new_watttime_readings_and_mix_every_5_minutes():
         "output_w": 90.0,
         "runtime_h": 16.2,
         "full_h": None,
+        "outlets_on": None,
     }
     assert store.day(MIX, "2026-10-04") == mix
     # The dashboard still shows WattTime's last reading.
@@ -701,6 +703,45 @@ def test_load_while_the_plug_is_on_runs_from_the_grid():
     d = store.days["2026-10-04"]
     assert d["load_wh"] == pytest.approx(200, abs=1)
     assert d["load_lb"] == d["used_lb"] == pytest.approx(0.16, abs=0.001)
+
+
+def test_grid_charging_shows_no_load_between_whole_percent_steps():
+    battery = Battery()
+    # The plug charges at 1,350 W with no load. Whole-percent readings land a
+    # minute or two apart, so single steps alternate above and below the input.
+    stored = 1350 * AC_CHARGE / 60  # Wh per minute
+    samples = [
+        {"t": NOW + i * 60, "battery_pct": 50.0 + int(stored * i / battery.wh(1))}
+        for i in range(16)
+    ]
+    plug = [{"t": NOW + i * 60, "on": True, "w": 1350.0} for i in range(16)]
+    loads = [w for _, w in load_points(samples, plug, battery)]
+    # One span: the leftover is the first and last readings' rounding, spread evenly.
+    assert max(loads) == min(loads) < battery.wh(2) * 60 / 15
+
+
+def test_only_standby_load_while_the_outlets_are_off():
+    battery = Battery()
+    # The plug puts in 10% more than the charge gained, but nothing is switched on.
+    samples = [{"t": NOW + i * 60, "battery_pct": 50.0 + i, "outlets_on": False} for i in range(11)]
+    plug = [
+        {"t": NOW + i * 60, "on": True, "w": battery.wh(1.1) * 60 / AC_CHARGE} for i in range(11)
+    ]
+    assert all(w == battery.standby_w for _, w in load_points(samples, plug, battery))
+    on = [dict(s, outlets_on=True) for s in samples]
+    assert all(w > 0 for _, w in load_points(on, plug, battery))
+
+
+def test_load_passed_through_from_the_plug_follows_its_meter():
+    battery = Battery()
+    # A full battery while a 1,200 W vacuum runs for 10 of 40 minutes through the plug.
+    samples = [{"t": NOW + i * 60, "battery_pct": 100.0} for i in range(41)]
+    plug = [
+        {"t": NOW + i * 60, "on": True, "w": 1200.0 if 20 <= i < 30 else 30.0} for i in range(41)
+    ]
+    points = dict(load_points(samples, plug, battery))
+    assert points[NOW + 25 * 60] == pytest.approx(1200, rel=0.01)
+    assert points[NOW + 5 * 60] == pytest.approx(30, rel=0.01)
 
 
 def test_totals_use_the_measured_capacity_and_solar_scale():

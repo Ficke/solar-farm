@@ -68,12 +68,15 @@
 
   const fmtTick = (v: number) => String(+v.toFixed(3));
 
-  const sum = (k: "solar_wh" | "grid_wh" | "load_wh" | "avoided_lb" | "solar_lb" | "shift_lb") =>
-    cols.reduce((a, { p }) => a + (p?.[k] ?? 0), 0);
+  const sum = (
+    k: "solar_wh" | "grid_wh" | "load_wh" | "overhead_wh" | "avoided_lb" | "solar_lb" | "shift_lb",
+  ) => cols.reduce((a, { p }) => a + (p?.[k] ?? 0), 0);
   const totals = $derived({
     solar: fmtWh(sum("solar_wh")),
     grid: fmtWh(sum("grid_wh")),
     load: fmtWh(sum("load_wh")),
+    appliances: fmtWh(sum("load_wh") - sum("overhead_wh")),
+    overhead: fmtWh(sum("overhead_wh")),
     avoided: kg(sum("avoided_lb")),
     solarKg: kg(sum("solar_lb")),
     shiftKg: kg(sum("shift_lb")),
@@ -111,7 +114,8 @@
     return [
       { color: "--solar-area", value: span(fmtWh(p.solar_wh)), name: "Solar" },
       { color: "--grid", value: span(fmtWh(p.grid_wh)), name: "Grid" },
-      { color: "--load", value: span(fmtWh(p.load_wh)), name: "Load" },
+      { color: "--load", value: span(fmtWh(p.load_wh - p.overhead_wh)), name: "Load" },
+      { color: "--overhead", value: span(fmtWh(p.overhead_wh)), name: "Jackery" },
       {
         value: `${fmtMass(Math.abs(kg(p.avoided_lb)))} kg`,
         name: co2Label(p.avoided_lb),
@@ -134,6 +138,9 @@
   <div>
     <dt><i class="sw" style:background="var(--load)"></i>Load</dt>
     <dd><b>{co2 ? totals.load[0] : "–"}</b><small>{totals.load[1]}</small></dd>
+    {#if co2}
+      <dd class="split">Appliances {span(totals.appliances)} · Jackery {span(totals.overhead)}</dd>
+    {/if}
   </div>
   <div>
     <dt>
@@ -157,8 +164,12 @@
   onpointerleave={() => (hovered = null)}
   role="presentation"
 >
-  <h3>Energy in and out, kWh</h3>
-  <svg viewBox="0 0 {width} {EH}" height={EH} role="img" aria-label="Solar, grid and load energy per {by}">
+  <h3 class="legend">
+    Energy in and out, kWh
+    <span><i class="sw" style:background="var(--load)"></i>Load</span>
+    <span><i class="sw" style:background="var(--overhead)"></i>Jackery</span>
+  </h3>
+  <svg viewBox="0 0 {width} {EH}" height={EH} role="img" aria-label="Solar, grid, load and Jackery energy per {by}">
     {#each eTicks as v (v)}
       <line x1={M.l} x2={width - M.r} y1={ey(v)} y2={ey(v)} stroke={v ? "var(--rule)" : "var(--ink-3)"} />
       <text x={M.l - 6} y={ey(v) + 4} text-anchor="end" class="tick">{fmtTick(Math.abs(v))}</text>
@@ -173,7 +184,9 @@
         {@const g = p.grid_wh / 1000}
         <path d={bar(x, ey(0), ey(s), g === 0)} fill="var(--solar-area)" />
         <path d={bar(x, s > 0 ? ey(s) - 2 : ey(s), ey(s + g), true)} fill="var(--grid)" />
-        <path d={bar(x, ey(0) + 1, ey(-p.load_wh / 1000), true)} fill="var(--load)" />
+        {@const a = (p.load_wh - p.overhead_wh) / 1000}
+        <path d={bar(x, ey(0) + 1, ey(-a), p.overhead_wh === 0)} fill="var(--load)" />
+        <path d={bar(x, a > 0 ? ey(-a) + 2 : ey(-a) + 1, ey(-p.load_wh / 1000), true)} fill="var(--overhead)" />
       {/if}
     {/each}
   </svg>

@@ -42,7 +42,7 @@ log = logging.getLogger(__name__)
 # Nothing was recorded before this; the first update fills in every day since.
 FIRST_DAY = "2026-10-01"
 RATE_GAP = 1800  # Carry each marginal rate for at most 30 minutes.
-VERSION = 7  # Increment to recompute history from FIRST_DAY.
+VERSION = 9  # Increment to recompute history from FIRST_DAY.
 MIN_KNOWN_WH = 30  # About 1% of charge; below this the stored rate is noise.
 
 
@@ -93,6 +93,7 @@ class LoadCo2:
     """Load Wh and its CO2 in lb: direct-grid baseline, attributed, and avoided by source."""
 
     wh: float = 0.0
+    overhead_wh: float = 0.0  # Part of ``wh`` that is the Jackery's own draw.
     baseline_lb: float = 0.0
     used_lb: float = 0.0
     solar_lb: float = 0.0
@@ -148,6 +149,7 @@ def load_co2(
         pool.solar_wh = min(pool.solar_wh, max(0.0, battery.wh(span.pct) - pool.unknown_wh))
         per_wh = baseline_lb / load if load > 0 else 0.0
         out.wh += load
+        out.overhead_wh += span.overhead
         out.baseline_lb += baseline_lb
         out.used_lb += direct_lb + take + per_wh * drawn * DISCHARGE * unknown
         out.solar_lb += per_wh * (solar_load + solar_drawn * DISCHARGE)
@@ -196,6 +198,7 @@ def day_totals(
         "solar_n": len(solar),
         "solar_h": round(covered_h(solar), 2),
         "load_wh": round(co2.wh, 1),
+        "overhead_wh": round(co2.overhead_wh, 1),
         "grid_wh": round(grid_wh, 1),
         "load_lb": round(co2.baseline_lb, 4),
         "grid_lb": round(grid_lb, 4),

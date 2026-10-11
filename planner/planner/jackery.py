@@ -23,6 +23,7 @@ class Reading:
     raw: dict
     runtime_h: float | None = None  # Jackery's estimate of hours left at the current draw.
     full_h: float | None = None  # Jackery's estimate of hours to full while charging.
+    outlets_on: bool | None = None  # Whether the AC or DC outlets are switched on.
 
     @property
     def solar_w(self) -> float | None:
@@ -53,6 +54,7 @@ def parse_properties(props: dict, now: datetime) -> Reading:
         raw=props,
         runtime_h=None if (ot := num("ot")) is None or ot >= RUNTIME_UNKNOWN else ot / 10,
         full_h=None if (it := num("it")) is None or it >= RUNTIME_UNKNOWN else it / 10,
+        outlets_on=None if (ac := num("oac")) is None else bool(ac or num("odc")),
     )
 
 
