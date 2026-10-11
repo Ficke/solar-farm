@@ -33,6 +33,14 @@ def test_solar_scale_comes_from_sunny_spans_with_the_plug_off():
     assert battery.capacity_wh == 3000
 
 
+def test_capacity_skips_charging_while_the_outlets_are_on():
+    samples, plug = charging(2800, 1600, 30)
+    on = [dict(s, outlets_on=True) for s in samples]
+    assert measure(on, plug, Battery(capacity_wh=3000)).capacity_wh == 3000
+    off = [dict(s, outlets_on=False) for s in samples]
+    assert measure(off, plug).capacity_wh == pytest.approx(2800, rel=0.03)
+
+
 def test_too_little_charging_keeps_the_previous_measurement():
     samples, plug = charging(2800, 1600, 4)
     previous = Battery(capacity_wh=2900, solar_scale=1.2)

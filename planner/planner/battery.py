@@ -9,13 +9,13 @@ Its output reading lags and misses most draws, so the load is what came in
 (solar, and grid from the plug's meter) less what the charge gained.
 
 Between two readings where the charge changes, the battery gained exactly
-that many percent. Over spans where only the plug charges it, the plug's
-meter times the charger efficiency gives Wh per percent, which tracks
-capacity as the battery ages. Over sunny spans with the plug off, that
-capacity times the gain, divided by the solar charge efficiency, gives the
-panel's true output per Wh the sensor reports. Charger and inverter
-efficiencies can't be separated from capacity without a meter on the
-output, so they are assumed.
+that many percent. Over spans where only the plug charges it and the outlets
+are off, the plug's meter times the charger efficiency gives Wh per percent,
+which tracks capacity as the battery ages. Over sunny spans with the plug and
+outlets off, that capacity times the gain, divided by the solar charge
+efficiency, gives the panel's true output per Wh the sensor reports. Charger
+and inverter efficiencies can't be separated from capacity without a meter on
+the output, so they are assumed.
 """
 
 from __future__ import annotations
@@ -180,6 +180,7 @@ class Flows:
         self.grid = metered(plug, rate)
         # Integrating 1 W while the plug draws power gives hours supplied.
         self.supplied = cumulative([(t, 1.0 if w > 0 else 0.0) for t, w in series(plug, "w")])
+        self.plug_times = [t for t, _ in series(plug, "w")]
         readings = sorted((s for s in samples if _finite(s, "battery_pct")), key=lambda s: s["t"])
         self.draw = [(s["t"], _draw(s)) for s in readings]
         self.draw_times = [t for t, _ in self.draw]
@@ -240,6 +241,13 @@ class Flows:
         """Return the share of a span's load drawn by each time, or None without estimates."""
         return _shares(self.draw, self.draw_times, t0, t1)
 
+    def metering(self, t0: int, t1: int) -> Callable[[float], float] | None:
+        """Return the share of a span's grid energy drawn by each time, or None without any."""
+        i, j = bisect_right(self.plug_times, t0), bisect_right(self.plug_times, t1 - 1)
+        cuts = [t0, *self.plug_times[i:j], t1]
+        start = self.grid(t0)[0]
+        return _linear(cuts, [self.grid(t)[0] - start for t in cuts])
+
     def charging(self, a: dict, b: dict, bal: Balance) -> Callable[[float], float] | None:
         """Return the share of a charging span's load drawn by each time.
 
@@ -288,7 +296,8 @@ def spans(
     between readings where the charge changes. Within each span, the load
     follows the Jackery's runtime estimate: charge divided by hours left is
     proportional to the draw. While charging, its time to full times the gain
-    instead. Spans without either estimate spread the load evenly.
+    instead. Spans mostly supplied from the plug follow the plug's meter. Other
+    spans spread the load evenly.
     """
     readings = sorted((s for s in samples if _finite(s, "battery_pct")), key=lambda s: s["t"])
     if len(readings) < 2:
@@ -317,6 +326,9 @@ def spans(
         done = flows.timing(t0, t1) if bal.share == 0 else None
         if done is None and b["battery_pct"] > a["battery_pct"]:
             done = flows.charging(a, b, bal)
+        if done is None and bal.direct >= bal.load / 2 > 0:
+            # Mostly passed through from the plug: follow its meter.
+            done = flows.metering(t0, t1)
         out.append(
             Span(
                 t0,
@@ -354,6 +366,13 @@ def measure(samples: list[dict], plug: list[dict], previous: Battery | None = No
     flows = Flows(samples, reports, previous)
     # Any output the Jackery reports means load is lowering the solar gain.
     drawing = sorted(s["t"] for s in samples if _finite(s, "output_w") and s["output_w"] > 0)
+
+    def quiet(t0: int, t1: int, otherwise: bool) -> bool:
+        """Whether nothing drew power: outlets off, or before outlet readings, ``otherwise``."""
+        if bisect_right(flows.switch_times, t0):
+            return flows.outlets_off(t0, t1)
+        return otherwise
+
     ac_in = ac_pct = solar_wh = solar_pct = 0.0
     for a, b in pairwise(changes):
         gain = b["battery_pct"] - a["battery_pct"]
@@ -365,6 +384,7 @@ def measure(samples: list[dict], plug: list[dict], previous: Battery | None = No
             inside
             and all(r["w"] >= MIN_CHARGE_W for r in inside)
             and bal.solar_read < 0.1 * bal.grid_wh
+            and quiet(a["t"], b["t"], True)
         ):
             # Count the little solar stored alongside, or no-load charging shows a load.
             ac_in += bal.grid_wh * AC_CHARGE + bal.solar_in
@@ -373,7 +393,7 @@ def measure(samples: list[dict], plug: list[dict], previous: Battery | None = No
             bal.grid_wh < 1
             and b["battery_pct"] < FULL_PCT
             and bal.solar_read / (b["t"] - a["t"]) * 3600 >= MIN_SOLAR_W
-            and bisect_left(drawing, a["t"]) == bisect_right(drawing, b["t"])
+            and quiet(a["t"], b["t"], bisect_left(drawing, a["t"]) == bisect_right(drawing, b["t"]))
         ):
             solar_wh += bal.solar_read
             solar_pct += gain

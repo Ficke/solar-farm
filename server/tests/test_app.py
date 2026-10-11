@@ -732,6 +732,18 @@ def test_no_load_while_the_outlets_are_off():
     assert all(w > 0 for _, w in load_points(on, plug, battery))
 
 
+def test_load_passed_through_from_the_plug_follows_its_meter():
+    battery = Battery()
+    # A full battery while a 1,200 W vacuum runs for 10 of 40 minutes through the plug.
+    samples = [{"t": NOW + i * 60, "battery_pct": 100.0} for i in range(41)]
+    plug = [
+        {"t": NOW + i * 60, "on": True, "w": 1200.0 if 20 <= i < 30 else 30.0} for i in range(41)
+    ]
+    points = dict(load_points(samples, plug, battery))
+    assert points[NOW + 25 * 60] == pytest.approx(1200, rel=0.01)
+    assert points[NOW + 5 * 60] == pytest.approx(30, rel=0.01)
+
+
 def test_totals_use_the_measured_capacity_and_solar_scale():
     store = MemoryStore()
     battery = {"capacity_wh": 2000.0, "solar_scale": 1.5}
