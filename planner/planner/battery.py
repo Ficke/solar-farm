@@ -45,7 +45,7 @@ SCALE_RANGE = (0.5, 3.0)
 MAX_GAP = 3600  # Cap each integration interval at one hour.
 MIN_SPAN = 600  # Seconds; see spans().
 MIN_IDLE_H = 3  # Hours of quiet discharge before an idle measurement replaces the last.
-MIN_REPORTS = 30  # Plug reports at full charge before a standby or bypass measurement does.
+MIN_REPORTS = 10  # Plug reports at full charge before a standby or bypass measurement does.
 MAX_OVERHEAD_W = 100  # Above this, a plug report at full charge has a load on it.
 STEADY = 1.25  # Largest ratio between runtime-based draws in a joined span.
 
