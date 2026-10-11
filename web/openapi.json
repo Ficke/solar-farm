@@ -335,6 +335,10 @@
             "type": "integer",
             "title": "Load Wh"
           },
+          "overhead_wh": {
+            "type": "integer",
+            "title": "Overhead Wh"
+          },
           "grid_wh": {
             "type": "integer",
             "title": "Grid Wh"
@@ -372,6 +376,7 @@
         "required": [
           "start",
           "load_wh",
+          "overhead_wh",
           "grid_wh",
           "solar_wh",
           "load_lb",
@@ -1229,6 +1234,23 @@
             "type": "array",
             "title": "Load"
           },
+          "overhead": {
+            "items": {
+              "prefixItems": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array",
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": "array",
+            "title": "Overhead"
+          },
           "stored_co2": {
             "items": {
               "prefixItems": [
@@ -1285,6 +1307,7 @@
           "samples",
           "plug",
           "load",
+          "overhead",
           "stored_co2",
           "forecast",
           "mix",

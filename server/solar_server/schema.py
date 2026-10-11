@@ -120,7 +120,8 @@ class Timeline(BaseModel):
     since: int
     samples: list[Sample]
     plug: list[StoredPlugReport]
-    load: list[tuple[int, float]]  # Pairs contain Unix seconds and W.
+    load: list[tuple[int, float]]  # Unix seconds and W of load beyond the Jackery's own draw.
+    overhead: list[tuple[int, float]]  # Unix seconds and W the Jackery draws itself.
     # Pairs contain Unix seconds and lb/MWh of CO2 in the battery's known-origin charge.
     stored_co2: list[tuple[int, float]]
     forecast: list[tuple[int, float]]  # Pairs contain Unix seconds and lb/MWh.
@@ -158,7 +159,8 @@ class Co2Period(BaseModel):
     """Summarize a Pacific day, Monday-based week or month."""
 
     start: str
-    load_wh: int
+    load_wh: int  # Includes overhead_wh.
+    overhead_wh: int  # The Jackery's own draw.
     grid_wh: int
     solar_wh: int
     load_lb: float  # Model direct-grid load emissions.

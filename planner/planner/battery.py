@@ -44,6 +44,9 @@ CAPACITY_RANGE = (0.5 * CAPACITY_WH, 1.1 * CAPACITY_WH)  # Outside this, a readi
 SCALE_RANGE = (0.5, 3.0)
 MAX_GAP = 3600  # Cap each integration interval at one hour.
 MIN_SPAN = 600  # Seconds; see spans().
+MIN_IDLE_H = 3  # Hours of quiet discharge before an idle measurement replaces the last.
+MIN_REPORTS = 30  # Plug reports at full charge before a standby or bypass measurement does.
+MAX_OVERHEAD_W = 100  # Above this, a plug report at full charge has a load on it.
 STEADY = 1.25  # Largest ratio between runtime-based draws in a joined span.
 
 type Rate = Callable[[float], float | None]  # Marginal CO2 in lb/MWh at a time.
@@ -57,6 +60,11 @@ def no_rate(_t: float) -> float | None:
 class Battery:
     capacity_wh: float = CAPACITY_WH  # usable Wh from 0 to 100%
     solar_scale: float = 1.0  # panel Wh per Wh of the Jackery's solar reading
+    # The Jackery's own draw: outlets off, outlets on from the battery, and
+    # outlets on while the plug passes power through.
+    standby_w: float = 4.0
+    idle_w: float = 45.0
+    bypass_w: float = 31.0
 
     @property
     def solar_stored(self) -> float:
@@ -161,6 +169,8 @@ class Balance:
     grid_wh: float
     grid_lb: float
     share: float  # Share of the time the plug supplied power
+    overhead: float = 0.0  # Wh of the load that is the Jackery's own draw
+    short: float = 0.0  # Wh the charge gained beyond the measured input
 
 
 class Flows:
@@ -213,11 +223,33 @@ class Flows:
         if direct > grid_wh:
             direct = grid_wh
             load = grid_wh + (solar_in - gained) * DISCHARGE
-        if load <= 0 or self.outlets_off(t0, t1):
-            # More charge than measured input, usually from a low solar reading,
-            # or nothing to power: the rest is charging losses.
-            load = direct = 0.0
-        return Balance(load, direct, solar_read, solar_in, grid_wh, grid_lb, share)
+        short = max(0.0, -load)
+        overhead = self.overhead(t0, t1)
+        if self.outlets_off(t0, t1):
+            # Nothing to power but the Jackery itself; the rest is charging losses.
+            load, direct, short = overhead, overhead * share, 0.0
+        load = max(0.0, load)
+        direct = min(max(0.0, direct), load)
+        return Balance(
+            load, direct, solar_read, solar_in, grid_wh, grid_lb, share, min(overhead, load), short
+        )
+
+    def overhead(self, t0: int, t1: int) -> float:
+        """Return the Jackery's own Wh from its outlet state; 0 where that is unknown."""
+        b = self.battery
+        i = bisect_right(self.switch_times, t0) - 1
+        j = bisect_right(self.switch_times, t1 - 1)
+        cuts = [t0, *self.switch_times[i + 1 : j], t1]
+        wh = 0.0
+        for k, (t, u) in enumerate(pairwise(cuts), i):
+            if k < 0:
+                continue
+            if not self.switched[k]:
+                wh += b.standby_w * (u - t) / 3600
+                continue
+            plugged = self.supplied(u)[0] - self.supplied(t)[0]
+            wh += b.bypass_w * plugged + b.idle_w * ((u - t) / 3600 - plugged)
+        return wh
 
     def steady(self, t0: int, t1: int) -> bool:
         """Whether the plug stayed off and runtime estimates show a steady draw."""
@@ -232,6 +264,12 @@ class Flows:
         i = bisect_right(self.switch_times, t0) - 1
         j = bisect_right(self.switch_times, t1)
         return i >= 0 and not any(self.switched[i:j])
+
+    def outlets_on(self, t0: int, t1: int) -> bool:
+        """Whether the Jackery reported its outlets switched on the whole time."""
+        i = bisect_right(self.switch_times, t0) - 1
+        j = bisect_right(self.switch_times, t1)
+        return i >= 0 and all(self.switched[i:j])
 
     def plugged(self, t0: int, t1: int) -> bool:
         """Whether the plug supplied power the whole time."""
@@ -284,7 +322,9 @@ class Span:
     solar_in: float  # Solar Wh stored
     grid_wh: float
     grid_lb: float
-    done: Callable[[float], float]  # Share of the load drawn by a given time.
+    done: Callable[[float], float]  # Share of the load beyond overhead drawn by a given time.
+    overhead: float = 0.0  # Wh of the load that is the Jackery's own draw
+    own: Callable[[float, float], float] = lambda _t, _u: 0.0  # Overhead Wh between two times.
 
 
 def spans(
@@ -318,11 +358,19 @@ def spans(
             edges.append(e)
     edges.append(steps[-1])
     out = []
+    carry = 0.0
     for a, b in pairwise(edges):
         t0, t1 = a["t"], b["t"]
         if t1 <= t0:
             continue
         bal = flows.between(a, b)
+        # Solar and timing noise make some spans gain more than came in. Take
+        # that excess, up to 1%, from the next span's load instead of dropping
+        # it, so the noise nets out. The first reading isn't a step: its
+        # charge could be anywhere within the percent.
+        take = min(carry, bal.load - bal.overhead)
+        load = bal.load - take
+        carry = min(bal.short, battery.wh(1)) if a is not steps[0] else 0.0
         done = flows.timing(t0, t1) if bal.share == 0 else None
         if done is None and b["battery_pct"] > a["battery_pct"]:
             done = flows.charging(a, b, bal)
@@ -334,12 +382,16 @@ def spans(
                 t0,
                 t1,
                 float(b["battery_pct"]),
-                bal.load,
-                bal.direct,
+                load,
+                min(bal.direct, load),
                 bal.solar_in,
                 bal.grid_wh,
                 bal.grid_lb,
                 done or (lambda t, t0=t0, t1=t1: min(1.0, max(0.0, (t - t0) / (t1 - t0)))),
+                bal.overhead,
+                _scaled(
+                    flows.overhead, bal.overhead / full if (full := flows.overhead(t0, t1)) else 0.0
+                ),
             )
         )
     return out
@@ -347,12 +399,26 @@ def spans(
 
 def load_points(samples: list[dict], plug: list[dict], battery: Battery) -> list[tuple[int, float]]:
     """Return the estimated load in W from each sample to the next."""
+    return [(t, round(w + o, 1)) for t, w, o in load_parts(samples, plug, battery)]
+
+
+def load_parts(
+    samples: list[dict], plug: list[dict], battery: Battery
+) -> list[tuple[int, float, float]]:
+    """Return the load beyond the Jackery's own draw and that draw, in W, per sample."""
     times = sorted(s["t"] for s in samples)
     points = []
     for span in spans(samples, plug, battery):
         inside = times[bisect_right(times, span.t0) : bisect_left(times, span.t1)]
+        rest = span.load - span.overhead
         for t, u in pairwise([span.t0, *inside, span.t1]):
-            points.append((t, round(span.load * (span.done(u) - span.done(t)) * 3600 / (u - t), 1)))
+            points.append(
+                (
+                    t,
+                    rest * (span.done(u) - span.done(t)) * 3600 / (u - t),
+                    span.own(t, u) * 3600 / (u - t),
+                )
+            )
     return points
 
 
@@ -374,12 +440,26 @@ def measure(samples: list[dict], plug: list[dict], previous: Battery | None = No
         return otherwise
 
     ac_in = ac_pct = solar_wh = solar_pct = 0.0
+    idle: list[tuple[float, float]] = []  # W and hours
     for a, b in pairwise(changes):
         gain = b["battery_pct"] - a["battery_pct"]
-        if gain <= 0 or not 0 < b["t"] - a["t"] <= MAX_SPAN:
+        if not 0 < b["t"] - a["t"] <= MAX_SPAN:
+            continue
+        bal = flows.between(a, b)
+        if (
+            gain < 0
+            and bal.grid_wh < 1
+            and bal.solar_read == 0
+            and flows.outlets_on(a["t"], b["t"])
+            and bisect_left(drawing, a["t"]) == bisect_right(drawing, b["t"])
+        ):
+            # Outlets on, nothing in and no output reading: usually the Jackery
+            # idling, but the output reading misses some loads.
+            hours = (b["t"] - a["t"]) / 3600
+            idle.append((previous.wh(-gain) * DISCHARGE / hours, hours))
+        if gain <= 0:
             continue
         inside = reports[bisect_right(report_times, a["t"]) : bisect_right(report_times, b["t"])]
-        bal = flows.between(a, b)
         if (
             inside
             and all(r["w"] >= MIN_CHARGE_W for r in inside)
@@ -404,7 +484,60 @@ def measure(samples: list[dict], plug: list[dict], previous: Battery | None = No
     if solar_pct >= MIN_SOLAR_PCT and solar_wh > 0:
         # Load the output reading misses lowers the gain, so this can only understate.
         scale = _clamp(capacity * solar_pct / 100 / SOLAR_CHARGE / solar_wh, SCALE_RANGE)
-    return Battery(capacity_wh=capacity, solar_scale=scale)
+    idle_w = previous.idle_w
+    if sum(h for _, h in idle) >= MIN_IDLE_H:
+        idle_w = _clamp(_median(idle), (0, MAX_OVERHEAD_W))
+    standby, bypass = _full_draws(readings, reports, flows)
+    return Battery(
+        capacity_wh=capacity,
+        solar_scale=scale,
+        standby_w=_median([(w, 1) for w in standby])
+        if len(standby) >= MIN_REPORTS
+        else previous.standby_w,
+        idle_w=idle_w,
+        bypass_w=_median([(w, 1) for w in bypass])
+        if len(bypass) >= MIN_REPORTS
+        else previous.bypass_w,
+    )
+
+
+def _full_draws(
+    samples: list[dict], reports: list[dict], flows: Flows
+) -> tuple[list[float], list[float]]:
+    """Return the plug's draw at full charge with nothing running, outlets off and on.
+
+    Full and without sun or output, the Jackery passes the plug's power only to
+    itself.
+    """
+    times = [s["t"] for s in samples]
+    off, on = [], []
+    for r in reports:
+        i = bisect_right(times, r["t"]) - 1
+        if i < 0 or not 0 < r["w"] < MAX_OVERHEAD_W:
+            continue
+        s = samples[i]
+        if s.get("battery_pct") != 100 or s.get("solar_w") or s.get("output_w"):
+            continue
+        k = bisect_right(flows.switch_times, r["t"]) - 1
+        if k >= 0:
+            (on if flows.switched[k] else off).append(r["w"])
+    return off, on
+
+
+def _median(weighted: list[tuple[float, float]]) -> float:
+    """Return the weighted median of (value, weight) pairs."""
+    points = sorted(weighted)
+    half = sum(w for _, w in points) / 2
+    seen = 0.0
+    for value, w in points:
+        seen += w
+        if seen >= half:
+            return value
+    return points[-1][0]
+
+
+def _scaled(f: Callable[[int, int], float], k: float) -> Callable[[float, float], float]:
+    return lambda t, u: f(int(t), int(u)) * k
 
 
 def _draw(sample: dict) -> float | None:

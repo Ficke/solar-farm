@@ -21,6 +21,7 @@
   --grid-fill: rgba(37, 99, 201, 0.14);
   --battery: #16181d;
   --load: #878e99;
+  --overhead: #cc79a7;
   --plan-band: rgba(37, 99, 201, 0.08);
   --plan-charge: var(--grid);
   --plan-bypass: #56b4e9;
@@ -64,6 +65,7 @@
   --grid-fill: rgba(74, 138, 230, 0.22);
   --battery: #eef0f3;
   --load: #5e6570;
+  --overhead: #d98bb7;
   --plan-band: rgba(74, 138, 230, 0.12);
   --plan-charge: var(--grid);
   --plan-bypass: #6cc0f0;

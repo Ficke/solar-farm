@@ -1,5 +1,5 @@
 import pytest
-from planner.battery import AC_CHARGE, SOLAR_CHARGE, Battery, measure
+from planner.battery import AC_CHARGE, DISCHARGE, SOLAR_CHARGE, Battery, load_parts, measure
 
 T0 = 1_791_150_000
 
@@ -64,3 +64,38 @@ def test_solar_spans_with_reported_output_are_skipped():
         )
     battery = measure(samples, [], Battery(capacity_wh=3000))
     assert battery.solar_scale == pytest.approx(1.5, rel=0.1)
+
+
+def test_idle_draw_comes_from_quiet_discharge_with_the_outlets_on():
+    # The outlets are on, nothing comes in, and 1% goes every 40 minutes.
+    battery = Battery(capacity_wh=3000)
+    samples = [
+        {"t": T0 + m * 60, "battery_pct": 80 - m // 40, "outlets_on": True, "output_w": 0.0}
+        for m in range(6 * 60 + 1)
+    ]
+    measured = measure(samples, [], battery)
+    assert measured.idle_w == pytest.approx(30 * DISCHARGE * 60 / 40, rel=0.01)
+
+
+def test_standby_and_pass_through_draws_come_from_the_plug_at_full_charge():
+    samples, plug = [], []
+    for m in range(80):
+        on = m >= 40
+        samples.append({"t": T0 + m * 60, "battery_pct": 100.0, "outlets_on": on})
+        plug.append({"t": T0 + m * 60 + 10, "w": 31.0 if on else 3.7})
+    measured = measure(samples, plug)
+    assert (measured.standby_w, measured.bypass_w) == (3.7, 31.0)
+
+
+def test_load_splits_the_jackery_draw_from_appliances():
+    battery = Battery(capacity_wh=3000, idle_w=45.0)
+    # The battery drains 45 W more than the Jackery's idle draw.
+    per_pct = 30 * DISCHARGE / 90 * 60  # minutes per percent at 90 W
+    samples = [
+        {"t": T0 + m * 60, "battery_pct": 80 - int(m / per_pct), "outlets_on": True}
+        for m in range(241)
+    ]
+    parts = load_parts(samples, [], battery)
+    middle = parts[len(parts) // 2]
+    assert middle[1] == pytest.approx(45, rel=0.05)
+    assert middle[2] == pytest.approx(45, rel=0.01)

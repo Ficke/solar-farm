@@ -720,14 +720,14 @@ def test_grid_charging_shows_no_load_between_whole_percent_steps():
     assert max(loads) == min(loads) < battery.wh(2) * 60 / 15
 
 
-def test_no_load_while_the_outlets_are_off():
+def test_only_standby_load_while_the_outlets_are_off():
     battery = Battery()
     # The plug puts in 10% more than the charge gained, but nothing is switched on.
     samples = [{"t": NOW + i * 60, "battery_pct": 50.0 + i, "outlets_on": False} for i in range(11)]
     plug = [
         {"t": NOW + i * 60, "on": True, "w": battery.wh(1.1) * 60 / AC_CHARGE} for i in range(11)
     ]
-    assert all(w == 0 for _, w in load_points(samples, plug, battery))
+    assert all(w == battery.standby_w for _, w in load_points(samples, plug, battery))
     on = [dict(s, outlets_on=True) for s in samples]
     assert all(w > 0 for _, w in load_points(on, plug, battery))
 

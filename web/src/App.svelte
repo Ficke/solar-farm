@@ -191,6 +191,7 @@
       (tl?.samples ?? []).map((p) => [p.t, p.solar_w]),
       (tl?.plug ?? []).map((p) => [p.t, p.w ?? (p.on ? null : 0)]),
       tl?.load ?? [],
+      tl?.overhead ?? [],
     ]),
   );
 
@@ -380,6 +381,7 @@
         { label: "Solar", color: "--solar", fill: "--solar-fill", unit: "W" },
         { label: "Grid", color: "--grid", fill: "--grid-fill", unit: "W" },
         { label: "Load", color: "--ink-3", width: LINE_THIN, unit: "W" },
+        { label: "Jackery", color: "--overhead", width: LINE_THIN, unit: "W" },
       ]}
     />
     <p class="key">
