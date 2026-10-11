@@ -156,10 +156,9 @@
   const inUse = $derived.by(() => {
     const onGrid = headline.mode ? PLAN[headline.mode].on : !!plug?.on;
     const [value, other] = onGrid ? [grid, stored] : [stored, grid];
-    const name = onGrid ? "From grid" : "From battery";
     return {
       value,
-      detail: other != null ? `${name} · ${onGrid ? "battery" : "grid"} ${other}` : name,
+      detail: other != null ? `${onGrid ? "Battery" : "Grid"} ${other}` : "",
     };
   });
   const co2Hint = $derived(
@@ -232,6 +231,7 @@
         <dd class="gauge" aria-hidden="true">
           <i style:width="{s?.battery_pct ?? 0}%"></i>
         </dd>
+        <dd class="n">{blocks.length ? `${Math.round(blocks[blocks.length - 1].pct)}% at 4 PM` : ""}</dd>
       </div>
       <div>
         <dt>Solar</dt>
@@ -259,25 +259,26 @@
       {@const p = now.plan}
       <dl class="facts">
         <div>
-          <dt><Hint text={`Charge to full before the ${PEAK_HOURS} peak, using the cleanest grid hours.`}>Goal</Hint></dt>
+          <dt>
+            <Hint
+              text={`Charge to full before the ${PEAK_HOURS} peak, using the cleanest grid hours, and keep the battery above ${p.floor_pct ?? 20}%.`}
+              >Goal</Hint
+            >
+          </dt>
           <dd>100% by 4 PM</dd>
         </div>
         <div>
-          <dt><Hint text="Grid energy the plan puts into the battery before 4 PM.">Grid charge</Hint></dt>
+          <dt><Hint text="Grid energy the plan still puts into the battery before 4 PM.">Grid charge left</Hint></dt>
           <dd>{p.grid_wh} Wh</dd>
         </div>
         <div>
           <dt>
             <Hint
-              text={`${p.solar_days ? `Average daily solar, last ${p.solar_days === 1 ? "day" : `${p.solar_days} days`}` : "Estimate until solar is measured"}. The plan leaves battery room for solar still to come when it is 300 Wh or more.`}
+              text={`${p.solar_days ? `Average daily solar, last ${p.solar_days === 1 ? "day" : `${p.solar_days} days`}` : "Estimate until solar is measured"}. The plan leaves battery room for solar still to come when it is 300 Wh or more, unless the grid is near zero CO₂.`}
               >Solar</Hint
             >
           </dt>
           <dd>{p.solar_day_wh} Wh/day</dd>
-        </div>
-        <div>
-          <dt><Hint text="The plan keeps the battery at or above this level.">Minimum</Hint></dt>
-          <dd>{p.floor_pct ?? 20}%</dd>
         </div>
         {#if p.shortfall_wh}
           <div class="short">
