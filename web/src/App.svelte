@@ -256,36 +256,16 @@
     <h2 id="plan-h">Plan</h2>
     {#if now?.plan?.strategy === "adaptive"}
       {@const p = now.plan}
-      <dl class="facts">
-        <div>
-          <dt>
-            <Hint
-              text={`Charge to full before the ${PEAK_HOURS} peak, using the cleanest grid hours, and keep the battery above ${p.floor_pct ?? 20}%.`}
-              >Goal</Hint
-            >
-          </dt>
-          <dd>100% by 4 PM</dd>
-        </div>
-        <div>
-          <dt><Hint text="Grid energy the plan still puts into the battery before 4 PM.">Grid charge left</Hint></dt>
-          <dd>{p.grid_wh} Wh</dd>
-        </div>
-        <div>
-          <dt>
-            <Hint
-              text={`${p.solar_days ? `Average daily solar, last ${p.solar_days === 1 ? "day" : `${p.solar_days} days`}` : "Estimate until solar is measured"}. The plan leaves battery room for solar still to come when it is 300 Wh or more, unless the grid is near zero CO₂.`}
-              >Solar</Hint
-            >
-          </dt>
-          <dd>{p.solar_day_wh} Wh/day</dd>
-        </div>
-        {#if p.shortfall_wh}
-          <div class="short">
-            <dt><Hint text="Energy the plan can't fit into clean hours before 4 PM.">Short of full</Hint></dt>
-            <dd>{p.shortfall_wh} Wh</dd>
-          </div>
-        {/if}
-      </dl>
+      {@const by = p.deadline ? fmtWhen(p.deadline, tnow) : "4 PM"}
+      {@const solar = p.solar_days
+        ? `${p.solar_day_wh} Wh/day of solar, the ${p.solar_days === 1 ? "last day" : `${p.solar_days}-day average`}`
+        : `${p.solar_day_wh} Wh/day of solar until it is measured`}
+      <p class="outcome" class:short={!!p.shortfall_wh}>
+        <Hint
+          text={`Goal: full before the ${PEAK_HOURS} peak, charging in the cleanest grid hours and staying above ${p.floor_pct ?? 20}%. Assumes ${solar}; leaves room for solar when 300 Wh or more is still to come.`}
+          >{p.shortfall_wh ? `${p.shortfall_wh} Wh short of full by ${by}` : `Full by ${by}`}</Hint
+        >{#if p.grid_wh && !p.shortfall_wh}<span>, {p.grid_wh} Wh from grid</span>{/if}
+      </p>
     {:else if now?.plan?.strategy === "fallback"}
       <p class="n">Fixed schedule, no battery data</p>
     {/if}
@@ -622,25 +602,16 @@
     font-size: 13px;
     color: var(--ink-3);
   }
-  .facts {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px 24px;
+  .outcome {
     margin: 0 0 12px;
-    font-size: 13px;
+    font-size: 15px;
+    font-weight: 500;
   }
-  .facts div {
-    display: flex;
-    gap: 6px;
+  .outcome span {
+    font-weight: 400;
+    color: var(--ink-2);
   }
-  .facts dt {
-    color: var(--ink-3);
-  }
-  .facts dd {
-    color: var(--ink);
-    font-variant-numeric: tabular-nums;
-  }
-  .facts .short dd {
+  .outcome.short {
     color: var(--bad-ink);
   }
   .key {
