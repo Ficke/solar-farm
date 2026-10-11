@@ -68,6 +68,7 @@ export function peakWindows(from: number, to: number): [number, number][] {
 }
 
 export function hours(seconds: number): string {
+  if (seconds < 3600) return `${Math.max(1, Math.round(seconds / 60))} min`;
   const h = seconds / 3600;
   return `${Number.isInteger(h) ? h : h.toFixed(1)} h`;
 }

@@ -8,7 +8,7 @@
   import { FUTURE, LINE_THIN, PAST } from "./lib/layout";
   import { GROUPS, stackMix } from "./lib/mix";
   import PlanView from "./lib/PlanView.svelte";
-  import { gridUse, MODES as PLAN, stateAt, states } from "./lib/plan";
+  import { gridUse, MODES as PLAN, states } from "./lib/plan";
   import Segmented from "./lib/Segmented.svelte";
   import { explain } from "./lib/status";
   import TimeChart from "./lib/TimeChart.svelte";
@@ -121,21 +121,20 @@
   const to = $derived(base + FUTURE);
   const age = (t?: number | null) => (t ? clock - t : Infinity);
 
+  // Name the state the plug is in now, from the same timeline as the plan strip.
   const headline = $derived.by(() => {
-    if (!plug) return { title: "No report from the plug yet", detail: "" };
-    const why = explain(plug, stateAt(plugStates, tnow)?.mode);
-    const current = spans.find(([st, e]) => st <= tnow && tnow < e);
-    if (plug.on) {
-      return {
-        title: current ? `Grid on until ${fmtWhen(current[1], tnow)}` : "Grid on",
-        detail: why,
-      };
-    }
-    const n = spans.find(([st]) => st > tnow);
-    return {
-      title: n ? `Grid off until ${fmtWhen(n[0], tnow)}` : "Grid off",
-      detail: n ? `${why} · then on for ${hours(n[1] - n[0])}` : why,
-    };
+    if (!plug) return { title: "No report from the plug yet", detail: "", mode: undefined };
+    const segs = plugStates;
+    // What the plug reported up to now, else the plan for this moment.
+    const at = (t: number) => segs.findIndex((g) => g.s <= t && t < g.e);
+    const k = at(tnow - 1) >= 0 ? at(tnow - 1) : at(tnow);
+    const mode = segs[k]?.mode;
+    const title = explain(plug, mode);
+    const next = k >= 0 ? segs.slice(k + 1).find((g) => g.mode !== mode) : undefined;
+    const detail = next
+      ? `Next: ${PLAN[next.mode].label} at ${fmtWhen(next.s, tnow)} for ${hours(next.e - next.s)}`
+      : "";
+    return { title, detail, mode };
   });
 
   const emissionsData = $derived(
@@ -152,8 +151,21 @@
     ),
   );
   const stored = $derived(tl?.stored_co2.at(-1)?.[1]);
-  const storedVsGrid = $derived(
-    stored != null && s?.moer ? Math.round((1 - stored / s.moer) * 100) : null,
+  const grid = $derived(s?.moer != null ? Math.round(s.moer) : null);
+  // Devices run on the grid while the plug is on, otherwise on the battery.
+  const inUse = $derived.by(() => {
+    const onGrid = headline.mode ? PLAN[headline.mode].on : !!plug?.on;
+    const [value, other] = onGrid ? [grid, stored] : [stored, grid];
+    const name = onGrid ? "From grid" : "From battery";
+    return {
+      value,
+      detail: other != null ? `${name} · ${onGrid ? "battery" : "grid"} ${other}` : name,
+    };
+  });
+  const co2Hint = $derived(
+    `CO₂ of the power running your devices now. Grid: marginal CO₂ in Northern California (WattTime)${
+      s?.index != null ? `, cleaner than ${Math.round(100 - s.index)}% of the past month` : ""
+    }. Battery: average CO₂ of the stored energy, charging losses included; solar adds none.`,
   );
   const mix = $derived(stackMix(tl?.mix ?? []));
   const priceData = $derived(
@@ -205,9 +217,9 @@
     <p class="banner">Couldn't refresh: {error}</p>
   {/if}
 
-  <section class="card now" class:on={plug?.on} aria-labelledby="now-h">
+  <section class="card now" aria-labelledby="now-h">
     <div class="headline">
-      <span class="state" aria-hidden="true"></span>
+      <span class="state {headline.mode ?? ''}" aria-hidden="true"></span>
       <div>
         <h2 id="now-h">{headline.title}</h2>
         {#if headline.detail}<p>{headline.detail}</p>{/if}
@@ -233,21 +245,10 @@
       </div>
       <div>
         <dt>
-          <Hint text="CO₂ from the power plants that respond to extra demand right now, Northern California (WattTime).">Grid CO₂</Hint>
+          <Hint text={co2Hint}>CO₂ in use</Hint>
         </dt>
-        <dd><b>{s?.moer != null ? Math.round(s.moer) : "–"}</b><small>lb/MWh</small></dd>
-        <dd class="n">
-          {s?.index != null ? `Cleaner than ${Math.round(100 - s.index)}% of the past month` : ""}
-        </dd>
-      </div>
-      <div>
-        <dt>
-          <Hint text="Average CO₂ of the energy in the battery. Grid charge counts at the rate when it was drawn, charging losses included; solar adds none.">Battery CO₂</Hint>
-        </dt>
-        <dd><b>{stored ?? "–"}</b><small>lb/MWh</small></dd>
-        <dd class="n">
-          {storedVsGrid != null ? `${Math.abs(storedVsGrid)}% ${storedVsGrid >= 0 ? "below" : "above"} grid` : ""}
-        </dd>
+        <dd><b>{inUse.value ?? "–"}</b><small>lb/MWh</small></dd>
+        <dd class="n">{inUse.detail}</dd>
       </div>
     </dl>
   </section>
@@ -552,14 +553,18 @@
     flex: none;
     transform: translateY(-3px);
   }
-  .now.on .state {
-    border-color: var(--grid);
-    background: var(--grid);
+  .state.charge {
+    border-color: var(--plan-charge);
+    background: var(--plan-charge);
     box-shadow: 0 0 0 4px var(--grid-fill);
+  }
+  .state.bypass {
+    border-color: var(--plan-bypass);
+    background: var(--plan-bypass);
   }
   .tiles {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     margin: 28px 0 0;
   }
   .tiles > div {
@@ -575,7 +580,7 @@
       grid-template-columns: repeat(2, minmax(0, 1fr));
       row-gap: 20px;
     }
-    .tiles > div:nth-child(odd) {
+    .tiles > div:nth-child(3) {
       padding-left: 0;
       border-left: 0;
     }
