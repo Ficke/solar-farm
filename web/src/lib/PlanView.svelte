@@ -85,9 +85,8 @@
   });
 
   const rows = $derived.by(() => {
-    const on = states.filter((g) => MODES[g.mode].on && g.e > now);
-    const next = on.find((g) => g.s > now);
-    return on.map((g) => ({ ...g, state: g.s <= now ? "Now" : g === next ? "Next" : "" }));
+    const on = states.filter((g) => MODES[g.mode].on && g.s > now);
+    return on.map((g, i) => ({ ...g, state: i === 0 ? "Next" : "" }));
   });
 </script>
 
@@ -163,7 +162,7 @@
     </tbody>
   </table>
 {:else}
-  <p class="muted">No grid use planned</p>
+  <p class="muted">No more grid use planned</p>
 {/if}
 
 <style>

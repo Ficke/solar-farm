@@ -477,11 +477,16 @@ def test_co2_avoided_compares_the_load_with_what_the_plug_drew():
     # counts at the grid's rate; the clean hour's share avoids it all.
     unknown = 0.5 * 3072 / (0.5 * 3072 + 270)
     assert day["used_lb"] == pytest.approx(0.4 * unknown, abs=0.002)
+    # No solar, so the clean charging hour accounts for all of it.
+    assert day["solar_lb"] == 0.0
+    assert day["shift_lb"] == pytest.approx(day["load_lb"] - day["used_lb"], abs=0.001)
 
     web, _ = make("web", store=store)
     rows = web.get("/api/co2", params={"by": "day", "count": 2}).json()["periods"]
     assert [r["start"] for r in rows] == ["2026-10-04"]
     assert rows[0]["avoided_lb"] == pytest.approx(day["load_lb"] - day["used_lb"], abs=0.002)
+    assert rows[0]["shift_lb"] == pytest.approx(rows[0]["avoided_lb"], abs=0.002)
+    assert rows[0]["solar_lb"] == 0.0
     week = web.get("/api/co2", params={"by": "week"}).json()["periods"]
     assert [r["start"] for r in week] == ["2026-09-28"]
     month = web.get("/api/co2", params={"by": "month", "count": 3}).json()["periods"]
@@ -516,6 +521,9 @@ def test_co2_avoided_doesnt_count_energy_shifted_to_another_day():
     plug_share = 500 / 0.9 * (1 - unknown) / 360 * 0.4
     assert oct4["used_lb"] == pytest.approx(0.5 * unknown + plug_share, abs=0.005)
     assert oct4["used_lb"] > oct4["load_lb"]
+    # Charging losses at the same rate make shifting cost CO2.
+    assert oct4["solar_lb"] == 0.0
+    assert oct4["shift_lb"] == pytest.approx(oct4["load_lb"] - oct4["used_lb"], abs=0.001)
 
 
 def test_stored_co2_averages_the_charge_with_losses():
@@ -572,6 +580,8 @@ def test_solar_adds_energy_without_co2():
     assert d["load_wh"] == pytest.approx(256.5, abs=3)
     assert d["load_lb"] == pytest.approx(0.2565, abs=0.003)
     assert d["used_lb"] == 0.0
+    assert d["solar_lb"] == pytest.approx(d["load_lb"], abs=0.001)
+    assert d["shift_lb"] == pytest.approx(0.0, abs=0.001)
 
 
 def test_solar_runs_the_load_directly_without_co2():
@@ -602,6 +612,42 @@ def test_solar_runs_the_load_directly_without_co2():
     assert d["load_wh"] == pytest.approx(200, abs=2)
     assert d["load_lb"] == pytest.approx(0.2, abs=0.002)
     assert d["used_lb"] == pytest.approx(0.0, abs=0.001)
+    assert d["solar_lb"] == pytest.approx(0.2, abs=0.002)
+    assert d["shift_lb"] == pytest.approx(0.0, abs=0.001)
+
+
+def test_battery_draws_split_avoided_co2_between_solar_and_shifting():
+    store = MemoryStore()
+    # From empty: 300 W of solar for an hour stores 285 Wh; the plug then
+    # charges 400 Wh at 0 lb/MWh, storing 360 Wh. The load then runs the
+    # battery empty at 1000 lb/MWh.
+    stored = 285 + 360
+    for i in range(181):
+        t = NOW - 4 * 3600 + i * 60
+        if i <= 120:
+            held = 285 * min(i, 60) / 60 + 360 * max(0, i - 60) / 60
+        else:
+            held = stored * (1 - (i - 120) / 60)
+        tasks.record_sample(
+            store,
+            {
+                "t": t,
+                "solar_w": 300.0 if i <= 60 else 0.0,
+                "battery_pct": held / 3072 * 100,
+                "moer": 0.0 if i <= 120 else 1000.0,
+                "moer_t": t,
+            },
+        )
+        if 60 <= i <= 120:
+            tasks.record_plug(store, {"t": t, "on": True, "reason": "plan", "w": 400.0})
+    totals.update(store, NOW)
+    d = store.days["2026-10-04"]
+    # 645 Wh stored run 580.5 Wh of load, 285/645 of it solar.
+    assert d["load_lb"] == pytest.approx(stored * DISCHARGE / 1000, abs=0.01)
+    assert d["solar_lb"] == pytest.approx(d["load_lb"] * 285 / stored, abs=0.01)
+    assert d["shift_lb"] == pytest.approx(d["load_lb"] * 360 / stored, abs=0.01)
+    assert d["solar_lb"] + d["shift_lb"] == pytest.approx(d["load_lb"] - d["used_lb"], abs=0.001)
+    assert d["stored_solar_wh"] == pytest.approx(0.0, abs=5)
 
 
 def test_load_follows_the_runtime_estimate_within_a_charge_step():

@@ -36,10 +36,30 @@
   const eHi = $derived(eTicks.at(-1) ?? 1);
   const ey = (kwh: number) => PAD.t + ((eHi - kwh) / (eHi - eLo)) * (EH - PAD.t - PAD.b);
 
-  // Negative avoided CO2 indicates emissions above the direct-grid baseline.
+  // Stack each source's avoided CO2 up from zero; a negative part (CO2
+  // added) stacks down.
+  const parts = (p: { solar_lb: number; shift_lb: number }) => {
+    let up = 0;
+    let down = 0;
+    const xs = [
+      { lb: p.solar_lb, color: "var(--solar-area)" },
+      { lb: p.shift_lb, color: "var(--grid)" },
+    ]
+      .filter((x) => x.lb !== 0)
+      .map((x) => {
+        const from = x.lb > 0 ? up : down;
+        if (x.lb > 0) up += x.lb;
+        else down += x.lb;
+        return { ...x, from, to: from + x.lb };
+      });
+    // Round only the outer end of each stack.
+    return xs.map((x) => ({ ...x, outer: x.to === (x.lb > 0 ? up : down) }));
+  };
   const cTicks = $derived.by(() => {
-    const v = cols.map(({ p }) => p?.avoided_lb ?? 0);
-    return niceTicks(Math.min(0, ...v), Math.max(0.05, ...v), 3);
+    const ps = cols.map(({ p }) => (p ? parts(p) : []));
+    const lo = ps.map((xs) => Math.min(0, ...xs.map((x) => x.to)));
+    const hi = ps.map((xs) => Math.max(0, ...xs.map((x) => x.to)));
+    return niceTicks(Math.min(0, ...lo), Math.max(0.05, ...hi), 3);
   });
   const cLo = $derived(cTicks[0] ?? 0);
   const cHi = $derived(cTicks.at(-1) ?? 1);
@@ -47,13 +67,15 @@
 
   const fmtTick = (v: number) => String(+v.toFixed(3));
 
-  const sum = (k: "solar_wh" | "grid_wh" | "load_wh" | "avoided_lb") =>
+  const sum = (k: "solar_wh" | "grid_wh" | "load_wh" | "avoided_lb" | "solar_lb" | "shift_lb") =>
     cols.reduce((a, { p }) => a + (p?.[k] ?? 0), 0);
   const totals = $derived({
     solar: fmtWh(sum("solar_wh")),
     grid: fmtWh(sum("grid_wh")),
     load: fmtWh(sum("load_wh")),
     avoided: sum("avoided_lb"),
+    solarLb: sum("solar_lb"),
+    shiftLb: sum("shift_lb"),
   });
 
   const tip = $derived<Slot | null>(hovered != null ? (cols[hovered] ?? null) : null);
@@ -80,6 +102,7 @@
     return `M${x},${y0}V${y1 + d}Q${x},${y1} ${x + r},${y1}H${x + bw - r}Q${x + bw},${y1} ${x + bw},${y1 + d}V${y0}Z`;
   }
   const co2Label = (lb: number) => (lb < 0 ? "CO₂ added" : "CO₂ avoided");
+  const signed = (lb: number) => (lb < 0 ? `−${fmtLb(-lb)}` : fmtLb(lb));
   const span = (wh: [string, string]) => `${wh[0]} ${wh[1]}`;
 
   function tipRows({ p }: Slot): TipRow[] {
@@ -89,10 +112,11 @@
       { color: "--grid", value: span(fmtWh(p.grid_wh)), name: "Grid" },
       { color: "--load", value: span(fmtWh(p.load_wh)), name: "Load" },
       {
-        color: p.avoided_lb < 0 ? "--bad" : "--good",
         value: `${fmtLb(Math.abs(p.avoided_lb))} lb`,
         name: co2Label(p.avoided_lb),
       },
+      { color: "--solar-area", value: `${signed(p.solar_lb)} lb`, name: "From solar" },
+      { color: "--grid", value: `${signed(p.shift_lb)} lb`, name: "From load shifting" },
     ];
   }
 </script>
@@ -112,12 +136,15 @@
   </div>
   <div>
     <dt>
-      <i class="sw" style:background={totals.avoided < 0 ? "var(--bad)" : "var(--good)"}></i><Hint
-        text="CO₂ the same load would have caused on the grid at the time it ran, minus CO₂ of the grid energy stored to run it. Solar adds none."
+      <Hint
+        text="CO₂ the same load would have caused on the grid at the time it ran, minus CO₂ of the energy that ran it. Solar: solar energy used, directly or from the battery. Load shifting: grid energy stored at cleaner times, net of charging losses; negative when it was dirtier."
         >{co2Label(totals.avoided)}</Hint
       >
     </dt>
     <dd><b>{co2 ? fmtLb(Math.abs(totals.avoided)) : "–"}</b><small>lb</small></dd>
+    {#if co2}
+      <dd class="split">Solar {fmtLb(totals.solarLb)} · Shifting {signed(totals.shiftLb)}</dd>
+    {/if}
   </div>
 </dl>
 
@@ -150,7 +177,11 @@
     {/each}
   </svg>
 
-  <h3>Net CO₂ avoided, lb</h3>
+  <h3 class="legend">
+    CO₂ avoided, lb
+    <span><i class="sw" style:background="var(--solar-area)"></i>Solar</span>
+    <span><i class="sw" style:background="var(--grid)"></i>Load shifting</span>
+  </h3>
   <svg viewBox="0 0 {width} {CH}" height={CH} role="img" aria-label="CO2 avoided per {by}">
     {#each cTicks as v (v)}
       <line x1={M.l} x2={width - M.r} y1={cy(v)} y2={cy(v)} stroke={v ? "var(--rule)" : "var(--ink-3)"} />
@@ -160,16 +191,11 @@
       <rect class="hl" x={cx(hovered) - gw / 2} y={0} width={gw} height={CH - LABELS + 4} />
     {/if}
     {#each cols as { start, p }, i (start)}
-      {#if p && p.avoided_lb !== 0}
-        {@const top = cy(Math.max(0, p.avoided_lb))}
-        <rect
-          x={cx(i) - bw / 2}
-          y={top}
-          width={bw}
-          height={Math.max(1, Math.abs(cy(p.avoided_lb) - cy(0)))}
-          rx="2"
-          fill={p.avoided_lb < 0 ? "var(--bad)" : "var(--good)"}
-        />
+      {#if p}
+        {#each parts(p) as x (x.color)}
+          {@const gap = x.from === 0 ? 0 : x.lb > 0 ? -1 : 1}
+          <path d={bar(cx(i) - bw / 2, cy(x.from) + gap, cy(x.to), x.outer)} fill={x.color} />
+        {/each}
       {/if}
       {#if (cols.length - 1 - i) % every === 0}
         <text x={cx(i)} y={CH - 6} text-anchor="middle" class="tick" class:on={hovered === i}
@@ -216,6 +242,23 @@
   dd small {
     font-size: 13px;
     margin-left: 4px;
+    color: var(--ink-3);
+  }
+  .split {
+    font-size: 13px;
+    color: var(--ink-3);
+  }
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 12px;
+  }
+  .legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 400;
     color: var(--ink-3);
   }
   .sw {

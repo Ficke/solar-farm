@@ -164,6 +164,8 @@ class Co2Period(BaseModel):
     grid_lb: float  # Attribute grid emissions to charging time.
     used_lb: float  # Attribute stored grid emissions to load time.
     avoided_lb: float  # Subtract used_lb from the direct-grid baseline.
+    solar_lb: float  # Part of avoided_lb from onsite solar.
+    shift_lb: float  # Part of avoided_lb from charging the battery at cleaner times.
 
 
 class Co2(BaseModel):
