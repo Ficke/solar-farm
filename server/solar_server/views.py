@@ -147,7 +147,16 @@ def co2_view(store: Store, now: int, by: str = "day", count: int = 14) -> dict:
     }
 
 
-CO2_SUMS = ("load_wh", "grid_wh", "solar_wh", "load_lb", "grid_lb", "used_lb")
+CO2_SUMS = (
+    "load_wh",
+    "grid_wh",
+    "solar_wh",
+    "load_lb",
+    "grid_lb",
+    "used_lb",
+    "solar_lb",
+    "shift_lb",
+)
 
 
 def _co2_row(p: dict) -> dict:
@@ -158,6 +167,8 @@ def _co2_row(p: dict) -> dict:
         "grid_lb": round(p["grid_lb"], 3),
         "used_lb": round(p["used_lb"], 3),
         "avoided_lb": round(p["load_lb"] - p["used_lb"], 3),
+        "solar_lb": round(p["solar_lb"], 3),
+        "shift_lb": round(p["shift_lb"], 3),
     }
 
 

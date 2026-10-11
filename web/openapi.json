@@ -358,6 +358,14 @@
           "avoided_lb": {
             "type": "number",
             "title": "Avoided Lb"
+          },
+          "solar_lb": {
+            "type": "number",
+            "title": "Solar Lb"
+          },
+          "shift_lb": {
+            "type": "number",
+            "title": "Shift Lb"
           }
         },
         "type": "object",
@@ -369,7 +377,9 @@
           "load_lb",
           "grid_lb",
           "used_lb",
-          "avoided_lb"
+          "avoided_lb",
+          "solar_lb",
+          "shift_lb"
         ],
         "title": "Co2Period",
         "description": "Summarize a Pacific day, Monday-based week or month."
