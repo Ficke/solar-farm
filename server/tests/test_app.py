@@ -703,6 +703,21 @@ def test_load_while_the_plug_is_on_runs_from_the_grid():
     assert d["load_lb"] == d["used_lb"] == pytest.approx(0.16, abs=0.001)
 
 
+def test_grid_charging_shows_no_load_between_whole_percent_steps():
+    battery = Battery()
+    # The plug charges at 1,350 W with no load. Whole-percent readings land a
+    # minute or two apart, so single steps alternate above and below the input.
+    stored = 1350 * AC_CHARGE / 60  # Wh per minute
+    samples = [
+        {"t": NOW + i * 60, "battery_pct": 50.0 + int(stored * i / battery.wh(1))}
+        for i in range(16)
+    ]
+    plug = [{"t": NOW + i * 60, "on": True, "w": 1350.0} for i in range(16)]
+    loads = [w for _, w in load_points(samples, plug, battery)]
+    # One span: the leftover is the first and last readings' rounding, spread evenly.
+    assert max(loads) == min(loads) < battery.wh(2) * 60 / 15
+
+
 def test_totals_use_the_measured_capacity_and_solar_scale():
     store = MemoryStore()
     battery = {"capacity_wh": 2000.0, "solar_scale": 1.5}

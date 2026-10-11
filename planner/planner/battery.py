@@ -220,6 +220,10 @@ class Flows:
         ws = [w for _, w in self.draw[i : bisect_right(self.draw_times, t1 - 1)] if w]
         return bool(ws) and max(ws) <= STEADY * min(ws)
 
+    def plugged(self, t0: int, t1: int) -> bool:
+        """Whether the plug supplied power the whole time."""
+        return self.supplied(t1)[0] - self.supplied(t0)[0] >= 0.99 * (t1 - t0) / 3600
+
     def timing(self, t0: int, t1: int) -> Callable[[float], float] | None:
         """Return the share of a span's load drawn by each time, or None without estimates."""
         return _shares(self.draw, self.draw_times, t0, t1)
@@ -283,13 +287,13 @@ def spans(
     if steps[-1] is not readings[-1]:
         steps.append(readings[-1])
     # Whole-percent steps a minute or two apart alternate between double and
-    # half the real draw. While runtime estimates show a steady draw, join
-    # steps into spans of at least MIN_SPAN.
+    # half the real draw, and while the plug charges, between no load and a
+    # spike. Join steps into spans of at least MIN_SPAN while the plug charges
+    # throughout, or runtime estimates show a steady draw.
     edges = [steps[0]]
     for k, e in enumerate(steps[1:-1], 1):
-        if e["t"] - edges[-1]["t"] >= MIN_SPAN or not flows.steady(
-            edges[-1]["t"], steps[k + 1]["t"]
-        ):
+        t0, t1 = edges[-1]["t"], steps[k + 1]["t"]
+        if e["t"] - t0 >= MIN_SPAN or not (flows.plugged(t0, t1) or flows.steady(t0, t1)):
             edges.append(e)
     edges.append(steps[-1])
     out = []
