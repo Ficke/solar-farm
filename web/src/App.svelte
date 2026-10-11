@@ -231,7 +231,6 @@
         <dd class="gauge" aria-hidden="true">
           <i style:width="{s?.battery_pct ?? 0}%"></i>
         </dd>
-        <dd class="n">{blocks.length ? `${Math.round(blocks[blocks.length - 1].pct)}% at 4 PM` : ""}</dd>
       </div>
       <div>
         <dt>Solar</dt>
