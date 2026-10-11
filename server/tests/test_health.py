@@ -55,3 +55,11 @@ def test_grid_on_but_battery_not_charging():
     assert "grid_not_charging" not in health.problems(store, NOW)
     store.put_state("sample", {"sample": {"t": NOW, "battery_pct": 97.0}})
     assert "grid_not_charging" not in health.problems(store, NOW + 600)
+
+
+def test_jackery_working_mode_is_an_alert():
+    store = healthy()
+    store.put_state("jackery", {"t": NOW, "props": {"en": 2, "dt": 50}})
+    assert "working_mode_on" in health.problems(store, NOW)
+    store.put_state("jackery", {"t": NOW, "props": {"en": 0, "dt": 50}})
+    assert health.problems(store, NOW) == {}

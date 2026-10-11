@@ -115,7 +115,7 @@ def test_estimates_are_cached_between_replans_and_survive_json_storage():
 def test_unexpected_battery_drop_moves_the_plan_to_earlier_charging():
     store = MemoryStore()
     settings = Settings()
-    dirty_then_clean = [(t, 1000.0 if t < NOW + timedelta(hours=5) else 10.0) for t, _ in POINTS]
+    dirty_then_clean = [(t, 1000.0 if t < NOW + timedelta(hours=5) else 100.0) for t, _ in POINTS]
     tasks.record_sample(store, {"t": T, "battery_pct": 80})
     initial = tasks.charging_plan(store, dirty_then_clean, settings, NOW)
     assert initial["windows"][0][0] >= T + 5 * 3600

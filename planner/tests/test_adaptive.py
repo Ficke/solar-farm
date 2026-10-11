@@ -17,7 +17,7 @@ def forecast(hours=24, clean=12):
     return [
         (
             NOW + timedelta(minutes=i * 5),
-            10 if (NOW + timedelta(minutes=i * 5)).astimezone(PACIFIC).hour == clean else 900,
+            100 if (NOW + timedelta(minutes=i * 5)).astimezone(PACIFIC).hour == clean else 900,
         )
         for i in range(hours * 12)
     ]
@@ -345,7 +345,7 @@ def test_solar_is_learned_only_while_the_battery_has_room():
 
 
 def test_blocks_explain_each_quarter_hour():
-    points = flat(900, cleaner={12: 0, 13: 0})
+    points = flat(900, cleaner={12: 100, 13: 100})
     plan = build_adaptive_plan(points, NOW, 90, inputs(solar=0))
     blocks = plan["blocks"]
     assert blocks[0]["s"] == int(NOW.timestamp()) and blocks[-1]["e"] == plan["deadline"]
@@ -356,8 +356,8 @@ def test_blocks_explain_each_quarter_hour():
     assert blocks[28]["recharge"] == 900
     assert blocks[-1]["pct"] == 100
     full = build_adaptive_plan(points, NOW, 100, inputs(solar=0))
-    # The full battery at 7 am is tested against recharging at 0 and stays off.
-    assert full["blocks"][0]["recharge"] == 0 and full["blocks"][0]["mode"] == "battery"
+    # The full battery at 7 am is tested against recharging at 100 and stays off.
+    assert full["blocks"][0]["recharge"] == 100 and full["blocks"][0]["mode"] == "battery"
     after_peak = build_adaptive_plan(points, NOW.replace(hour=23, minute=30), 50, inputs())
     assert after_peak["blocks"][0]["mode"] == "peak"
 
@@ -368,3 +368,22 @@ def test_plan_holds_the_reported_level_without_solar_or_charge():
     before = [b["pct"] for b in plan["blocks"] if datetime.fromtimestamp(b["s"], PACIFIC).hour < 12]
     assert before and all(pct == 98 for pct in before)
     assert plan["blocks"][-1]["pct"] == 100
+
+
+def test_near_zero_grid_keeps_the_plug_on_despite_solar_room():
+    # Oct 11: 0 lb/MWh from 9:15 am to 1 pm with solar still to come. The
+    # plug stays on through the zero hours instead of topping up in bursts.
+    morning = NOW.replace(hour=16, minute=15)  # 9:15 am Pacific
+    zero = {9, 10, 11, 12}
+    points = [
+        (t, 0.0 if t.astimezone(PACIFIC).hour in zero else 900.0)
+        for t, _ in flat(900, now=morning, hours=12)
+    ]
+    plan = build_adaptive_plan(points, morning, 77, inputs(solar=2000))
+    assert plan["windows"] == [[int(morning.timestamp()), int(morning.timestamp()) + 225 * 60]]
+    modes = {b["mode"] for b in plan["blocks"] if b["moer"] == 0}
+    assert modes == {"bypass"}
+    # At 100 lb/MWh the same morning keeps room for solar.
+    cleaner = [(t, 100.0 if v == 0 else v) for t, v in points]
+    held = build_adaptive_plan(cleaner, morning, 77, inputs(solar=2000))
+    assert duration(held) < duration(plan) / 2

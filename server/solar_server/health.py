@@ -24,7 +24,7 @@ def _latest(store: Store, series: str, now: int, within: int, key: str = "t") ->
 
 
 def problems(store: Store, now: int) -> dict[str, str]:
-    """Return alert names and descriptions for stale data or low charging power."""
+    """Return alert names and descriptions for stale data, low charging power or a working mode."""
     found = {}
     if _latest(store, PLUG, now, PLUG_SILENT, key="received") is None:
         found["plug_silent"] = "No report from the plug in 10 minutes."
@@ -40,6 +40,11 @@ def problems(store: Store, now: int) -> dict[str, str]:
     ):
         found["grid_not_charging"] = (
             f"Grid on for 10 minutes but the battery isn't charging ({battery:.0f}%)."
+        )
+    mode = ((store.get_state("jackery") or {}).get("props") or {}).get("en")
+    if mode:
+        found["working_mode_on"] = (
+            f"A Jackery working mode is on (en={mode}); it overrides the grid plan."
         )
     plan = store.get_state("plan")
     made = (plan or {}).get("generated_at")

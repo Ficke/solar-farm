@@ -19,6 +19,13 @@ loads, in blocks without expected solar that are cleaner than running the
 loads from the battery and recharging later (about 1/0.81 of the replacement
 block's rate, at 90% efficiency each way).
 
+In blocks forecast at 50 lb/MWh or less, the plug stays on all block, even
+with solar to come. Grid power that clean is as good as solar, so it fills the
+battery and runs the loads.
+
+A Jackery working mode such as Self-powered stops grid charging and pass-through
+above its reserve, so it must stay off; the server alerts when it is on.
+
 A live rate under 15 minutes old replaces the forecast for the current block.
 If a live rate of 300 or more contradicts a zero forecast, the day's remaining
 zeros use the live rate until it falls below 100.
