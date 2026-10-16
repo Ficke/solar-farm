@@ -142,8 +142,9 @@ def build_adaptive_plan(
     room is kept, the plug also stays on, so any load runs from the grid,
     whenever that emits less than draining the battery and recharging it
     later in the next block the plan would add. Blocks within TIE_MOER of
-    zero keep the plug on regardless of solar. Unmet floor or target energy
-    is reported as a shortfall.
+    zero keep room for all later solar, since solar is cleaner still, and
+    keep the plug on once less than TOLERANCE_WH of solar is left. Unmet
+    floor or target energy is reported as a shortfall.
     """
     tnow = int(now.timestamp())
     battery = Battery.from_dict(estimate.get("battery"))
@@ -180,13 +181,19 @@ def build_adaptive_plan(
     later = [0.0] * len(slots)
     for i in range(len(slots) - 2, -1, -1):
         later[i] = later[i + 1] + slots[i + 1]["solar"]
-    keep = [h / 2 if h / 2 >= MIN_SOLAR_WH else 0.0 for h in later]
+    # Grid power within TIE_MOER of zero costs nothing to defer, so those
+    # blocks keep room for all later solar; others keep half when material.
+    zero = {i for i, slot in enumerate(slots) if slot["allowed"] and slot["moer"] <= TIE_MOER}
+    keep = [
+        (h if h > TOLERANCE_WH else 0.0) if i in zero else (h / 2 if h / 2 >= MIN_SOLAR_WH else 0.0)
+        for i, h in enumerate(later)
+    ]
     initial = battery.wh(battery_pct)
     ranked = rank_blocks(slots, held_blocks(slots, hold or [], tnow))
-    # Blocks where the plug stays on for the whole block to run any load. Grid
-    # power within TIE_MOER of zero is as clean as solar, so those blocks skip
-    # the solar reserve: the battery fills from the grid and loads run on it.
-    bypass = {i for i, slot in enumerate(slots) if slot["allowed"] and slot["moer"] <= TIE_MOER}
+    # Blocks where the plug stays on for the whole block to run any load:
+    # near-zero blocks with no solar left to make room for, so the battery
+    # fills from the grid and loads run on it.
+    bypass = {i for i in zero if keep[i] == 0}
     recharge_at: dict[int, float] = {}  # rate used in each block's bypass test
 
     def trajectory(grid: list[float]) -> list[float]:
