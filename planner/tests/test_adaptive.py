@@ -370,20 +370,17 @@ def test_plan_holds_the_reported_level_without_solar_or_charge():
     assert plan["blocks"][-1]["pct"] == 100
 
 
-def test_near_zero_grid_keeps_the_plug_on_despite_solar_room():
-    # Oct 11: 0 lb/MWh from 9:15 am to 1 pm with solar still to come. The
-    # plug stays on through the zero hours instead of topping up in bursts.
-    morning = NOW.replace(hour=16, minute=15)  # 9:15 am Pacific
-    zero = {9, 10, 11, 12}
+def test_near_zero_grid_leaves_room_for_the_rest_of_the_solar():
+    # Oct 14: 0 lb/MWh from 9 am to 4 pm. The old rule filled the battery from
+    # the grid by 10 am, and the panels made nothing for the rest of the day.
+    morning = NOW.replace(hour=16)  # 9 am Pacific
     points = [
-        (t, 0.0 if t.astimezone(PACIFIC).hour in zero else 900.0)
+        (t, 0.0 if t.astimezone(PACIFIC).hour >= 9 else 900.0)
         for t, _ in flat(900, now=morning, hours=12)
     ]
-    plan = build_adaptive_plan(points, morning, 77, inputs(solar=2000))
-    assert plan["windows"] == [[int(morning.timestamp()), int(morning.timestamp()) + 225 * 60]]
-    modes = {b["mode"] for b in plan["blocks"] if b["moer"] == 0}
-    assert modes == {"bypass"}
-    # At 100 lb/MWh the same morning keeps room for solar.
-    cleaner = [(t, 100.0 if v == 0 else v) for t, v in points]
-    held = build_adaptive_plan(cleaner, morning, 77, inputs(solar=2000))
-    assert duration(held) < duration(plan) / 2
+    plan = build_adaptive_plan(points, morning, 76, inputs(solar=500))
+    assert datetime.fromtimestamp(plan["windows"][0][0], PACIFIC).hour >= 13
+    assert plan["windows"][-1][1] == plan["deadline"]  # on once the solar is done
+    assert plan["blocks"][-1]["pct"] == 100 and plan["shortfall_wh"] == 0
+    modes = [b["mode"] for b in plan["blocks"]]
+    assert modes[0] == "solar" and modes[-1] == "bypass"

@@ -16,7 +16,7 @@ export const MODES: Record<Mode, { label: string; rule: string; on: boolean }> =
   },
   bypass: {
     label: "Running on grid",
-    rule: `Plug on. Devices run on grid power when it is near zero CO₂, or when the battery is full and grid power is cleaner than recharging later, after ${Math.round((1 - ROUND_TRIP) * 100)}% charging losses.`,
+    rule: `Plug on. Devices run on grid power when it is near zero CO₂ and no solar is left to store, or when the battery is full and grid power is cleaner than recharging later, after ${Math.round((1 - ROUND_TRIP) * 100)}% charging losses.`,
     on: true,
   },
   // Room for solar caps how much the plan charges, not when, so the strip
