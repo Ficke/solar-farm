@@ -40,8 +40,17 @@
     color: var(--ink-2);
     cursor: pointer;
   }
-  button:hover {
-    color: var(--ink);
+  @media (hover: hover) {
+    button:hover {
+      color: var(--ink);
+    }
+  }
+  /* iOS segmented-control height for fingers. */
+  @media (pointer: coarse) {
+    button {
+      min-height: 32px;
+      padding: 4px 12px;
+    }
   }
   button[aria-pressed="true"] {
     background: var(--panel);

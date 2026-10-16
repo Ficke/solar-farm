@@ -12,7 +12,7 @@
   import Segmented from "./lib/Segmented.svelte";
   import { explain } from "./lib/status";
   import TimeChart from "./lib/TimeChart.svelte";
-  import { type Mode, setMode, theme } from "./lib/theme.svelte";
+  import { type Mode, setMode, theme, tintBrowser } from "./lib/theme.svelte";
   import { ago, fmtWhen, hours, PEAK_HOURS } from "./lib/time";
   import { RATE, rate } from "./lib/units";
 
@@ -83,6 +83,7 @@
   const tick = () => (clock = Date.now() / 1000);
 
   onMount(() => {
+    tintBrowser();
     load("all");
     // Stagger polling on one timer; hidden tabs resume on visibility change.
     let beat = 0;
@@ -207,14 +208,12 @@
 <main>
   <header>
     <h1><i class="mark" aria-hidden="true"></i>Solar Farm</h1>
-    <div class="tools">
-      {#if stale.length}
-        <p class="sub">
-          <span class="dot bad"></span>No data from {stale.map((h) => h.name.toLowerCase()).join(", ")}
-        </p>
-      {/if}
-      <Segmented label="Theme" options={MODES} value={theme.mode} onpick={setMode} />
-    </div>
+    {#if stale.length}
+      <p class="sub">
+        <span class="dot bad"></span>No data from {stale.map((h) => h.name.toLowerCase()).join(", ")}
+      </p>
+    {/if}
+    <Segmented label="Theme" options={MODES} value={theme.mode} onpick={setMode} />
   </header>
 
   {#if error}
@@ -413,11 +412,10 @@
     gap: 40px;
   }
   header {
-    display: flex;
+    display: grid;
+    grid-template-columns: 1fr auto auto;
     align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    flex-wrap: wrap;
+    gap: 8px 16px;
     margin-bottom: -16px;
   }
   h1 {
@@ -438,12 +436,6 @@
     font: 600 15px var(--f-sans);
     letter-spacing: -0.005em;
     margin: 0 0 10px;
-  }
-  .tools {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    flex-wrap: wrap;
   }
   .sub {
     margin: 0;
@@ -561,9 +553,24 @@
     border-left: 0;
   }
   @media (max-width: 640px) {
+    main {
+      gap: 32px;
+    }
+    header {
+      grid-template-columns: 1fr auto;
+      margin-bottom: -8px;
+    }
+    .sub {
+      grid-column: 1 / -1;
+      order: 1;
+    }
     .tiles {
       grid-template-columns: repeat(2, minmax(0, 1fr));
       row-gap: 20px;
+      margin-top: 20px;
+    }
+    .tiles > div {
+      padding: 2px 16px;
     }
     .tiles > div:nth-child(3) {
       padding-left: 0;
@@ -571,6 +578,9 @@
     }
     .headline h2 {
       font-size: 24px;
+    }
+    .tiles dd b {
+      font-size: 32px;
     }
   }
   dt {

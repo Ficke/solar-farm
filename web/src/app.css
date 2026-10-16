@@ -93,14 +93,37 @@
 * {
   box-sizing: border-box;
 }
+html {
+  /* Keep text size in landscape; skip double-tap zoom so taps respond at once. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
 body {
+  /* Side gutter: 20 px, 16 px on phones; never under the notch or home indicator. */
+  --gutter: 20px;
   margin: 0;
   background: var(--bg);
   color: var(--ink);
   font: 15px / 1.5 var(--f-sans);
   font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
-  padding: max(20px, env(safe-area-inset-top)) 20px max(32px, env(safe-area-inset-bottom));
+  padding: max(20px, env(safe-area-inset-top)) max(var(--gutter), env(safe-area-inset-right))
+    max(32px, env(safe-area-inset-bottom)) max(var(--gutter), env(safe-area-inset-left));
+}
+@media (max-width: 640px) {
+  body {
+    --gutter: 16px;
+    padding-top: max(12px, env(safe-area-inset-top));
+  }
+}
+/* Charts take press-and-drag to read values; vertical swipes still scroll. */
+.uplot .u-over {
+  touch-action: pan-y;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 .uplot {
   font-family: var(--f-sans);
