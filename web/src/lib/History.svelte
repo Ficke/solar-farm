@@ -4,6 +4,7 @@
   import { fmtMass, fmtWh, niceTicks, periodLabel, periodName, type Slot, slots } from "./co2";
   import Hint from "./Hint.svelte";
   import Tooltip, { type TipRow } from "./Tooltip.svelte";
+  import { holdTouch } from "./touch";
   import { kg } from "./units";
 
   let { co2, now }: { co2: Co2 | undefined; now: number } = $props();
@@ -161,7 +162,9 @@
   bind:clientWidth={width}
   onpointermove={pick}
   onpointerdown={pick}
-  onpointerleave={() => (hovered = null)}
+  onpointerup={(e) => e.pointerType === "touch" && holdTouch(e.currentTarget, () => (hovered = null))}
+  onpointerleave={(e) => e.pointerType !== "touch" && (hovered = null)}
+  onpointercancel={() => (hovered = null)}
   role="presentation"
 >
   <h3 class="legend">
@@ -289,6 +292,9 @@
   .plot {
     position: relative;
     touch-action: pan-y;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
   }
   svg {
     display: block;

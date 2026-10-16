@@ -242,9 +242,11 @@
     border: 0;
     cursor: pointer;
   }
-  button:hover:not(:disabled) {
-    color: var(--ink);
-    background: var(--panel-2);
+  @media (hover: hover) {
+    button:hover:not(:disabled) {
+      color: var(--ink);
+      background: var(--panel-2);
+    }
   }
   button:focus-visible,
   .brush:focus-visible {
@@ -270,6 +272,16 @@
     height: 32px;
     padding: 0;
     border-radius: 6px;
+  }
+  @media (pointer: coarse) {
+    .icon {
+      width: 44px;
+      height: 44px;
+      margin-right: -8px;
+    }
+    .text {
+      min-height: 32px;
+    }
   }
   .icon path {
     fill: none;

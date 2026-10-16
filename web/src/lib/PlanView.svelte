@@ -16,6 +16,7 @@
     localMinutes,
     peakWindows,
   } from "./time";
+  import { holdTouch } from "./touch";
   import { fmtRate } from "./units";
 
   let {
@@ -50,9 +51,16 @@
     hover.t = t >= from && t <= to ? t : null;
     hover.from = "plan";
   }
-  function leave() {
+  function clear() {
     hover.t = null;
     hover.from = "plan";
+  }
+  // Touch readouts stay after the finger lifts; see touch.ts.
+  function leave(e: PointerEvent) {
+    if (e.pointerType !== "touch") clear();
+  }
+  function lift(e: PointerEvent) {
+    if (e.pointerType === "touch") holdTouch(e.currentTarget as Element, clear);
   }
 
   const tip = $derived.by(() => {
@@ -95,8 +103,11 @@
     height={H}
     role="img"
     aria-label="Plug states, past 24 hours and plan for the next 24"
+    onpointerdown={move}
     onpointermove={move}
+    onpointerup={lift}
     onpointerleave={leave}
+    onpointercancel={clear}
   >
     <defs>
       <pattern id="peak-hatch" width="6" height="6" patternUnits="userSpaceOnUse">
@@ -172,6 +183,9 @@
     display: block;
     width: 100%;
     touch-action: pan-y;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
   }
   .tick {
     font: 11px var(--f-sans);

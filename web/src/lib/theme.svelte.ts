@@ -19,7 +19,14 @@ export const theme = $state({ version: 0, mode: saved() });
 function apply() {
   const dark = theme.mode === "dark" || (theme.mode === "system" && media.matches);
   document.documentElement.dataset.theme = dark ? "dark" : "light";
+  tintBrowser();
   theme.version++;
+}
+
+/** Match the iPhone status bar and Safari toolbar to the page background. */
+export function tintBrowser() {
+  const bg = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim();
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", bg);
 }
 
 export function setMode(mode: Mode) {

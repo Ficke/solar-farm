@@ -11,6 +11,7 @@
   import Tooltip, { type TipRow } from "./Tooltip.svelte";
   import { theme } from "./theme.svelte";
   import { fmtClock, fmtDayClock, fmtWeekday, localMinutes, peakWindows } from "./time";
+  import { holdTouch } from "./touch";
 
   export interface Series {
     label: string;
@@ -286,10 +287,32 @@
     );
     u.over.addEventListener("dblclick", () => onview?.([from, to]));
     u.over.addEventListener("mouseenter", () => (hovering = true));
-    u.over.addEventListener("mouseleave", () => {
+    const clear = () => {
       hovering = false;
       tip = null;
       hover.t = null;
+    };
+    u.over.addEventListener("mouseleave", clear);
+    // uPlot follows only the mouse; drive its cursor from touches too.
+    const touch = (e: PointerEvent) => {
+      if (e.pointerType !== "touch") return;
+      hovering = true;
+      const r = u.over.getBoundingClientRect();
+      u.setCursor({ left: e.clientX - r.left, top: e.clientY - r.top });
+    };
+    u.over.addEventListener("pointerdown", touch);
+    u.over.addEventListener("pointermove", touch);
+    u.over.addEventListener("pointerup", (e) => {
+      if (e.pointerType !== "touch") return;
+      holdTouch(u.over, () => {
+        clear();
+        plot?.setCursor({ left: -10, top: -10 });
+      });
+    });
+    // A vertical swipe scrolls the page instead.
+    u.over.addEventListener("pointercancel", () => {
+      clear();
+      u.setCursor({ left: -10, top: -10 });
     });
     plot = u;
     return () => {
@@ -461,9 +484,19 @@
     color: var(--ink-3);
     cursor: pointer;
   }
-  .expand:hover {
-    color: var(--ink);
-    background: var(--panel-2);
+  /* A 44 px target for fingers, without moving the icon. */
+  @media (pointer: coarse) {
+    .expand {
+      width: 44px;
+      height: 44px;
+      margin: -15px -14px -15px 0;
+    }
+  }
+  @media (hover: hover) {
+    .expand:hover {
+      color: var(--ink);
+      background: var(--panel-2);
+    }
   }
   .expand:focus-visible {
     outline: 2px solid var(--grid);
