@@ -51,7 +51,7 @@
     box-shadow: 0 2px 8px rgb(0 0 0 / 0.08);
     font: 400 12px / 1.5 var(--f-sans);
     color: var(--ink-2);
-    white-space: normal;
+    white-space: pre-line;
     text-align: left;
     cursor: auto;
   }
