@@ -42,7 +42,7 @@ log = logging.getLogger(__name__)
 # Nothing was recorded before this; the first update fills in every day since.
 FIRST_DAY = "2026-10-01"
 RATE_GAP = 1800  # Carry each marginal rate for at most 30 minutes.
-VERSION = 9  # Increment to recompute history from FIRST_DAY.
+VERSION = 10  # Increment to recompute history from FIRST_DAY.
 MIN_KNOWN_WH = 30  # About 1% of charge; below this the stored rate is noise.
 
 
