@@ -11,12 +11,12 @@ export const ROUND_TRIP = 0.81;
 export const MODES: Record<Mode, { label: string; rule: string; on: boolean }> = {
   charge: {
     label: "Charging from grid",
-    rule: "Plug on. Charges in the cleanest grid hours so the battery is full by 4 PM.",
+    rule: "Grid on. Battery charges in the cleanest grid hours before 4 PM.",
     on: true,
   },
   bypass: {
     label: "Running on grid",
-    rule: `Plug on. Devices run on grid power when it is near zero CO₂ and no solar is left to store, or when the battery is full and grid power is cleaner than recharging later, after ${Math.round((1 - ROUND_TRIP) * 100)}% charging losses.`,
+    rule: "Grid on. Devices run on grid power while it is cleaner than recharging the battery later.",
     on: true,
   },
   // Room for solar caps how much the plan charges, not when, so the strip
@@ -24,12 +24,12 @@ export const MODES: Record<Mode, { label: string; rule: string; on: boolean }> =
   solar: { label: "Running on battery", rule: "", on: false },
   battery: {
     label: "Running on battery",
-    rule: "Plug off. Devices run on the battery and solar.",
+    rule: "Grid off. Devices run on battery and solar.",
     on: false,
   },
   peak: {
     label: `Peak, ${PEAK_HOURS}`,
-    rule: "PG&E peak rate. Plug off unless the battery drops to 10%.",
+    rule: "PG&E peak rate. Grid off unless the battery falls to 10%.",
     on: false,
   },
   none: { label: "No forecast", rule: "", on: false },

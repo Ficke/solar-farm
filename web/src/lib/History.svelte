@@ -115,8 +115,8 @@
     return [
       { color: "--solar-area", value: span(fmtWh(p.solar_wh)), name: "Solar" },
       { color: "--grid", value: span(fmtWh(p.grid_wh)), name: "Grid" },
-      { color: "--load", value: span(fmtWh(p.load_wh - p.overhead_wh)), name: "Load" },
-      { color: "--overhead", value: span(fmtWh(p.overhead_wh)), name: "Jackery" },
+      { color: "--load", value: span(fmtWh(p.load_wh - p.overhead_wh)), name: "Devices" },
+      { color: "--overhead", value: span(fmtWh(p.overhead_wh)), name: "Battery overhead" },
       {
         value: `${fmtMass(Math.abs(kg(p.avoided_lb)))} kg`,
         name: co2Label(p.avoided_lb),
@@ -140,13 +140,13 @@
     <dt><i class="sw" style:background="var(--load)"></i>Load</dt>
     <dd><b>{co2 ? totals.load[0] : "–"}</b><small>{totals.load[1]}</small></dd>
     {#if co2}
-      <dd class="split">Appliances {span(totals.appliances)} · Jackery {span(totals.overhead)}</dd>
+      <dd class="split">Devices {span(totals.appliances)} · Battery overhead {span(totals.overhead)}</dd>
     {/if}
   </div>
   <div>
     <dt>
       <Hint
-        text="CO₂ the same load would have caused on the grid at the time it ran, minus CO₂ of the energy that ran it. Solar: solar energy used, directly or from the battery. Load shifting: grid energy stored at cleaner times, net of charging losses; negative when it was dirtier."
+        text={"Versus running the same load straight from the grid.\nSolar: solar power used.\nLoad shifting: grid charging at cleaner hours. Negative when dirtier."}
         >{co2Label(totals.avoided)}</Hint
       >
     </dt>
@@ -169,10 +169,10 @@
 >
   <h3 class="legend">
     Energy in and out, kWh
-    <span><i class="sw" style:background="var(--load)"></i>Load</span>
-    <span><i class="sw" style:background="var(--overhead)"></i>Jackery</span>
+    <span><i class="sw" style:background="var(--load)"></i>Devices</span>
+    <span><i class="sw" style:background="var(--overhead)"></i>Battery overhead</span>
   </h3>
-  <svg viewBox="0 0 {width} {EH}" height={EH} role="img" aria-label="Solar, grid, load and Jackery energy per {by}">
+  <svg viewBox="0 0 {width} {EH}" height={EH} role="img" aria-label="Solar, grid, devices and battery overhead energy per {by}">
     {#each eTicks as v (v)}
       <line x1={M.l} x2={width - M.r} y1={ey(v)} y2={ey(v)} stroke={v ? "var(--rule)" : "var(--ink-3)"} />
       <text x={M.l - 6} y={ey(v) + 4} text-anchor="end" class="tick">{fmtTick(Math.abs(v))}</text>

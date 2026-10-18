@@ -85,7 +85,7 @@
     const co2 = b?.moer ?? nearest(forecast, t, ([ft]) => ft)?.[1];
     if (co2 != null) rows.push({ value: fmtRate(co2), name: "CO₂ forecast" });
     if (b?.recharge != null)
-      rows.push({ value: fmtRate(b.recharge / ROUND_TRIP), name: "Recharge later, with losses" });
+      rows.push({ value: fmtRate(b.recharge / ROUND_TRIP), name: "Recharge later" });
     if (b) rows.push({ value: `${Math.round(b.pct)}%`, name: "Battery" });
     if (mode === "solar") rows.push({ name: "Room kept for solar" });
     return { t, rows };
@@ -102,7 +102,7 @@
     viewBox="0 0 {width} {H}"
     height={H}
     role="img"
-    aria-label="Plug states, past 24 hours and plan for the next 24"
+    aria-label="Grid use, past 24 hours and plan for the next 24"
     onpointerdown={move}
     onpointermove={move}
     onpointerup={lift}

@@ -4,12 +4,12 @@ import { PEAK_HOURS } from "./time";
 
 const REASONS: Record<string, string> = {
   peak: `Peak hours, ${PEAK_HOURS}`,
-  "peak-low": "Peak, low battery",
+  "peak-low": "Low-battery charge",
   safety: "Safety charge",
   index: "Following live CO₂",
   fallback: "Fixed schedule, 10 AM–3 PM",
-  "no-time": "Plug clock not set",
-  start: "Plug starting",
+  "no-time": "Smart plug clock not set",
+  start: "Smart plug starting",
 };
 
 /** Name the plan mode behind a plan-driven relay state when it agrees with the relay. */
