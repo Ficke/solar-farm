@@ -5,18 +5,15 @@ import { PEAK_HOURS } from "./time";
 export type PlanBlock = NonNullable<Now["plan"]>["blocks"][number];
 export type Mode = PlanBlock["mode"];
 
-/** Grid to battery to outlet loses about 19% at 90% efficiency each way. */
-export const ROUND_TRIP = 0.81;
-
 export const MODES: Record<Mode, { label: string; rule: string; on: boolean }> = {
   charge: {
     label: "Charging from grid",
-    rule: "Grid on. Battery charges in the cleanest grid hours before 4 PM.",
+    rule: "Battery charges from the grid during the cleanest hours.",
     on: true,
   },
   bypass: {
     label: "Running on grid",
-    rule: "Grid on. Devices run on grid power while it is cleaner than recharging the battery later.",
+    rule: "Devices run on the grid while it is cleaner than the battery.",
     on: true,
   },
   // Room for solar caps how much the plan charges, not when, so the strip
@@ -24,12 +21,12 @@ export const MODES: Record<Mode, { label: string; rule: string; on: boolean }> =
   solar: { label: "Running on battery", rule: "", on: false },
   battery: {
     label: "Running on battery",
-    rule: "Grid off. Devices run on battery and solar.",
+    rule: "Devices run on the battery and solar.",
     on: false,
   },
   peak: {
     label: `Peak, ${PEAK_HOURS}`,
-    rule: "PG&E peak rate. Grid off unless the battery falls to 10%.",
+    rule: "Highest electricity rates. The grid stays off.",
     on: false,
   },
   none: { label: "No forecast", rule: "", on: false },
