@@ -271,6 +271,18 @@ class Flows:
         j = bisect_right(self.switch_times, t1)
         return i >= 0 and all(self.switched[i:j])
 
+    def powered(self, t0: int, t1: int) -> Callable[[float], float] | None:
+        """Return the share of a span's outlets-on time passed by each time, or None if unknown."""
+        i = bisect_right(self.switch_times, t0) - 1
+        if i < 0:
+            return None
+        j = bisect_right(self.switch_times, t1 - 1)
+        cuts = [t0, *self.switch_times[i + 1 : j], t1]
+        sums = [0.0]
+        for k, (t, u) in enumerate(pairwise(cuts), i):
+            sums.append(sums[-1] + (u - t if self.switched[k] else 0))
+        return _linear(cuts, sums)
+
     def plugged(self, t0: int, t1: int) -> bool:
         """Whether the plug supplied power the whole time."""
         return self.supplied(t1)[0] - self.supplied(t0)[0] >= 0.99 * (t1 - t0) / 3600
@@ -335,9 +347,11 @@ def spans(
     Charge readings are whole percent (about 31 Wh), so the balance runs
     between readings where the charge changes. Within each span, the load
     follows the Jackery's runtime estimate: charge divided by hours left is
-    proportional to the draw. While charging, its time to full times the gain
-    instead. Spans mostly supplied from the plug follow the plug's meter. Other
-    spans spread the load evenly.
+    proportional to the draw, and nothing draws while the outlets are off.
+    While charging, its time to full times the gain instead. Spans mostly
+    supplied from the plug follow the plug's meter. Other spans spread the load
+    evenly over the time the outlets were on, or without outlet readings, over
+    the whole span.
     """
     readings = sorted((s for s in samples if _finite(s, "battery_pct")), key=lambda s: s["t"])
     if len(readings) < 2:
@@ -377,6 +391,9 @@ def spans(
         if done is None and bal.direct >= bal.load / 2 > 0:
             # Mostly passed through from the plug: follow its meter.
             done = flows.metering(t0, t1)
+        if done is None:
+            # Nothing runs off the outlets while they are off.
+            done = flows.powered(t0, t1)
         out.append(
             Span(
                 t0,
@@ -541,7 +558,9 @@ def _scaled(f: Callable[[int, int], float], k: float) -> Callable[[float, float]
 
 
 def _draw(sample: dict) -> float | None:
-    """Return charge over hours left, proportional to the battery's draw."""
+    """Return charge over hours left, proportional to the battery's draw; 0 with outlets off."""
+    if sample.get("outlets_on") is False:
+        return 0.0
     hours = sample.get("runtime_h")
     return sample["battery_pct"] / hours if hours else None
 

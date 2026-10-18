@@ -99,3 +99,19 @@ def test_load_splits_the_jackery_draw_from_appliances():
     middle = parts[len(parts) // 2]
     assert middle[1] == pytest.approx(45, rel=0.05)
     assert middle[2] == pytest.approx(45, rel=0.01)
+
+
+def test_load_waits_for_the_outlets_to_switch_on():
+    # Full with the outlets off for two hours, then 15% goes in the half hour
+    # after they switch on, with no runtime estimate.
+    battery = Battery(capacity_wh=3000)
+    samples = [
+        {"t": T0 + m * 60, "battery_pct": 100.0 if m < 150 else 85.0, "outlets_on": m >= 120}
+        for m in range(151)
+    ]
+    parts = load_parts(samples, [], battery)
+    off = [w for t, w, _ in parts if t < T0 + 120 * 60]
+    on = [w + o for t, w, o in parts if t >= T0 + 120 * 60]
+    assert max(off) == 0
+    # 15% less two hours of standby draw, over half an hour.
+    assert sum(on) / len(on) == pytest.approx((450 * DISCHARGE - 2 * 4.0) * 2, rel=0.01)
