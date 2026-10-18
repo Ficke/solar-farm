@@ -146,7 +146,7 @@
   <div>
     <dt>
       <Hint
-        text={"Versus running the same load straight from the grid.\nSolar: solar power used.\nLoad shifting: grid charging at cleaner hours. Negative when dirtier."}
+        text="CO₂ saved compared with running your devices straight from the grid."
         >{co2Label(totals.avoided)}</Hint
       >
     </dt>

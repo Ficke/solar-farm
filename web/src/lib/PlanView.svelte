@@ -4,7 +4,7 @@
   import Hint from "./Hint.svelte";
   import { hover } from "./hover.svelte";
   import { AXIS_W, hourTicks, LINE_THIN, PAD_R } from "./layout";
-  import { blockAt, KEY, MODES, type PlanBlock, ROUND_TRIP, type Segment, stateAt } from "./plan";
+  import { blockAt, KEY, MODES, type PlanBlock, type Segment, stateAt } from "./plan";
   import Tooltip, { type TipRow } from "./Tooltip.svelte";
   import {
     fmtClock,
@@ -84,8 +84,6 @@
     const b = blockAt(blocks, t);
     const co2 = b?.moer ?? nearest(forecast, t, ([ft]) => ft)?.[1];
     if (co2 != null) rows.push({ value: fmtRate(co2), name: "CO₂ forecast" });
-    if (b?.recharge != null)
-      rows.push({ value: fmtRate(b.recharge / ROUND_TRIP), name: "Recharge later" });
     if (b) rows.push({ value: `${Math.round(b.pct)}%`, name: "Battery" });
     if (mode === "solar") rows.push({ name: "Room kept for solar" });
     return { t, rows };

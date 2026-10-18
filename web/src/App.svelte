@@ -166,15 +166,6 @@
       detail: other != null ? `${onGrid ? "Battery" : "Grid"} ${other}` : "",
     };
   });
-  const co2Hint = $derived(
-    [
-      "CO₂ per kWh of the power your devices use now.",
-      `Grid: marginal rate from WattTime${
-        s?.index != null ? `, cleaner than ${Math.round(100 - s.index)}% of the past month` : ""
-      }.`,
-      "Battery: average of its stored charge.",
-    ].join("\n"),
-  );
   const mix = $derived(stackMix(tl?.mix ?? []));
   const priceData = $derived(
     align([
@@ -252,7 +243,7 @@
       </div>
       <div>
         <dt>
-          <Hint text={co2Hint}>CO₂ in use</Hint>
+          <Hint text="CO₂ per kWh of the power your devices are using now.">CO₂ in use</Hint>
         </dt>
         <dd><b>{inUse.value ?? "–"}</b><small>{RATE}</small></dd>
         <dd class="n">{inUse.detail}</dd>
@@ -265,12 +256,9 @@
     {#if now?.plan?.strategy === "adaptive"}
       {@const p = now.plan}
       {@const by = p.deadline ? fmtWhen(p.deadline, tnow) : "4 PM"}
-      {@const solar = `${p.solar_day_wh} Wh/day (${
-        p.solar_days ? (p.solar_days === 1 ? "last day" : `${p.solar_days}-day average`) : "default"
-      })`}
       <p class="outcome" class:short={!!p.shortfall_wh}>
         <Hint
-          text={`Goal: full before the ${PEAK_HOURS} peak.\nMinimum: ${p.floor_pct ?? 20}%.\nGrid charging: cleanest hours.\nSolar: ${solar}.`}
+          text={`Charges to full before the ${PEAK_HOURS} peak, using the cleanest grid hours.`}
           >{p.shortfall_wh ? `${p.shortfall_wh} Wh short of full by ${by}` : `Full by ${by}`}</Hint
         >{#if p.grid_wh && !p.shortfall_wh}<span>, {p.grid_wh} Wh from grid</span>{/if}
       </p>
@@ -286,7 +274,7 @@
       <h3>CO₂, {RATE}</h3>
       <div class="ctl">
         <span class="stat"
-          ><Hint text={`Average gap between actual CO₂ and the forecast made ${lead} h earlier, last 24 hours.`}>Forecast error</Hint></span
+          ><Hint text="How far the CO₂ forecast was off, on average, over the last 24 hours.">Forecast error</Hint></span
         >
         <Segmented label="Hours ahead" options={LEADS} value={lead} onpick={pickLead} />
         <span class="stat"><b>{acc?.error != null ? Math.round(rate(acc.error)) : "–"}</b> {RATE}</span>
@@ -316,7 +304,7 @@
     />
     <h3>California generation by source, GW</h3>
     <TimeChart
-      label="CAISO generation by source, past 24 hours"
+      label="California generation by source, past 24 hours"
       title="California generation by source, GW"
       data={mix.stacked}
       tipData={mix.raw}
