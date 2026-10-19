@@ -19,7 +19,7 @@ def test_fresh_battery_enables_adaptive_plan_and_stale_battery_uses_fallback():
     store.append(SAMPLES, {"t": T, "battery_pct": 80})
     plan = tasks.charging_plan(store, POINTS, Settings(), NOW)
     assert plan["strategy"] == "adaptive"
-    assert plan["target_pct"] == 100
+    assert 80 < plan["target_pct"] < 100  # room for tomorrow's solar
     assert (plan["battery_pct"], plan["battery_at"]) == (80, T)
     plan = tasks.charging_plan(store, POINTS, Settings(), NOW + timedelta(minutes=16))
     assert plan["strategy"] == "fallback"
@@ -116,7 +116,7 @@ def test_unexpected_battery_drop_moves_the_plan_to_earlier_charging():
     store = MemoryStore()
     settings = Settings()
     dirty_then_clean = [(t, 1000.0 if t < NOW + timedelta(hours=5) else 100.0) for t, _ in POINTS]
-    tasks.record_sample(store, {"t": T, "battery_pct": 80})
+    tasks.record_sample(store, {"t": T, "battery_pct": 60})
     initial = tasks.charging_plan(store, dirty_then_clean, settings, NOW)
     assert initial["windows"][0][0] >= T + 5 * 3600
     tasks.record_sample(store, {"t": T + 300, "battery_pct": 15})

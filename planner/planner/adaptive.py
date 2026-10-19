@@ -130,7 +130,7 @@ def build_adaptive_plan(
     region: str = "CAISO_NORTH",
     hold: list[list[int]] | None = None,
 ) -> dict:
-    """Target a full battery by the next 4 pm Pacific, outside peak hours.
+    """Target a full battery by the next 4 pm Pacific, less the next day's solar.
 
     Charge in the cleanest 15-minute blocks; blocks within TIE_MOER of each
     other tie and the later one wins, so solar arrives first. Blocks in
@@ -143,14 +143,15 @@ def build_adaptive_plan(
     whenever that emits less than draining the battery and recharging it
     later in the next block the plan would add. Blocks within TIE_MOER of
     zero keep room for all later solar, since solar is cleaner still, and
-    keep the plug on once less than TOLERANCE_WH of solar is left. Unmet
-    floor or target energy is reported as a shortfall.
+    keep the plug on once less than TOLERANCE_WH of solar is left. The 4 pm
+    target leaves room for a day of expected solar, so the battery has room
+    the next morning even if nothing runs overnight; those blocks keep the
+    plug off. Unmet floor or target energy is reported as a shortfall.
     """
     tnow = int(now.timestamp())
     battery = Battery.from_dict(estimate.get("battery"))
     capacity = battery.capacity_wh
     floor = capacity * floor_pct / 100
-    target = capacity
     deadline = next_deadline(now)
     signals: dict[int, list[float]] = defaultdict(list)
     for t, value in points:
@@ -161,6 +162,9 @@ def build_adaptive_plan(
     end = min(deadline, max(signals, default=tnow - 900) + 900)
     # State documents use JSON, which turns integer dictionary keys into strings.
     profile = {int(q): w for q, w in estimate["solar_profile"].items()}
+    # Solar between this deadline and the next one fills the room left here.
+    tomorrow = sum(profile.values()) / 4 * battery.solar_stored
+    target = max(floor, capacity - (tomorrow if tomorrow > TOLERANCE_WH else 0.0))
     slots: list[dict] = []
     for start in range(tnow // 900 * 900, end, 900):
         s, e = max(tnow, start), min(end, start + 900)
@@ -193,7 +197,7 @@ def build_adaptive_plan(
     # Blocks where the plug stays on for the whole block to run any load:
     # near-zero blocks with no solar left to make room for, so the battery
     # fills from the grid and loads run on it.
-    bypass = {i for i in zero if keep[i] == 0}
+    bypass = {i for i in zero if keep[i] == 0} if target == capacity else set()
     recharge_at: dict[int, float] = {}  # rate used in each block's bypass test
 
     def trajectory(grid: list[float]) -> list[float]:
@@ -333,7 +337,7 @@ def build_adaptive_plan(
         "strategy": "adaptive",
         "windows": windows,
         "battery_pct": battery_pct,
-        "target_pct": 100,
+        "target_pct": round(target / capacity * 100, 1),
         "deadline": deadline,
         "floor_pct": floor_pct,
         "solar_day_wh": round(estimate["solar_day_wh"]),
