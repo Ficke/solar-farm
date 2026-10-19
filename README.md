@@ -7,7 +7,7 @@ The battery is a Jackery Explorer 3000 v2 with a 250 W solar panel. A Shelly
 Plug US Gen4 switches the Jackery's AC input on and off; the panel charges it
 regardless of the plug. A server uses WattTime's marginal-emissions forecast
 for Northern California (`CAISO_NORTH`) to schedule grid charging so the
-battery is full by 4 pm each day.
+battery is charged by 4 pm each day, leaving room for the next day's solar.
 
 ## How it works
 

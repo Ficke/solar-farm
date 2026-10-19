@@ -5,9 +5,11 @@ Times are Pacific; emission rates are WattTime marginal rates in lb CO₂/MWh.
 ## Plan
 
 The server replans every minute to fill the battery by 4 pm, keeping it
-above 20%. It charges in the cleanest 15-minute forecast blocks outside
-4–9 pm and leaves room for half the expected solar when that is at least
-150 Wh. Blocks within 50 lb/MWh of the cleanest count as a tie; the block
+above 20%. The 4 pm target leaves room for a day of expected solar (about
+87% in October), so the battery can take the next morning's solar even if
+nothing runs overnight. It charges in the cleanest 15-minute forecast blocks
+outside 4–9 pm and leaves room for half the expected solar when that is at
+least 150 Wh. Blocks within 50 lb/MWh of the cleanest count as a tie; the block
 already planned wins, otherwise the later one.
 
 The plan projects no load: the battery holds its latest reported level apart
@@ -22,7 +24,7 @@ block's rate, at 90% efficiency each way).
 In blocks forecast at 50 lb/MWh or less, the plan leaves room for all the
 solar still expected before 4 pm, since solar is cleaner still. Once less than
 30 Wh of solar is left, the plug stays on all block, filling the battery and
-running the loads.
+running the loads, but only when no solar is expected the next day.
 
 A Jackery working mode such as Self-powered stops grid charging and pass-through
 above its reserve, so it must stay off; the server alerts when it is on.

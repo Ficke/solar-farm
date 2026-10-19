@@ -256,10 +256,15 @@
     {#if now?.plan?.strategy === "adaptive"}
       {@const p = now.plan}
       {@const by = p.deadline ? fmtWhen(p.deadline, tnow) : "4 PM"}
+      {@const goal = (p.target_pct ?? 100) >= 99.5 ? "full" : `${Math.round(p.target_pct ?? 100)}%`}
       <p class="outcome" class:short={!!p.shortfall_wh}>
         <Hint
-          text={`Charges to full before the ${PEAK_HOURS} peak, using the cleanest grid hours.`}
-          >{p.shortfall_wh ? `${p.shortfall_wh} Wh short of full by ${by}` : `Full by ${by}`}</Hint
+          text={goal === "full"
+            ? `Charges to full before the ${PEAK_HOURS} peak, using the cleanest grid hours.`
+            : `Charges before the ${PEAK_HOURS} peak, leaving room for tomorrow's solar.`}
+          >{p.shortfall_wh
+            ? `${p.shortfall_wh} Wh short of ${goal} by ${by}`
+            : `${goal === "full" ? "Full" : goal} by ${by}`}</Hint
         >{#if p.grid_wh && !p.shortfall_wh}<span>, {p.grid_wh} Wh from grid</span>{/if}
       </p>
     {:else if now?.plan?.strategy === "fallback"}
