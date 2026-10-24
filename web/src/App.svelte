@@ -243,7 +243,7 @@
       </div>
       <div>
         <dt>
-          <Hint text="CO₂ per kWh of the power your devices are using now.">CO₂ in use</Hint>
+          <Hint text="CO₂ per kWh supplied to appliances connected to the Jackery.">CO₂ in use</Hint>
         </dt>
         <dd><b>{inUse.value ?? "–"}</b><small>{RATE}</small></dd>
         <dd class="n">{inUse.detail}</dd>
@@ -365,7 +365,7 @@
     />
     <h3>Power, W</h3>
     <TimeChart
-      label="Solar and grid power in, devices and battery overhead out, past 24 hours"
+      label="Solar and grid input, connected load and battery overhead, past 24 hours"
       title="Power, W"
       data={powerData}
       {from}
@@ -376,7 +376,7 @@
       series={[
         { label: "Solar", color: "--solar", fill: "--solar-fill", unit: "W" },
         { label: "Grid", color: "--grid", fill: "--grid-fill", unit: "W" },
-        { label: "Devices", color: "--ink-3", width: LINE_THIN, unit: "W" },
+        { label: "Connected load", color: "--load", width: LINE_THIN, unit: "W" },
         { label: "Battery overhead", color: "--overhead", width: LINE_THIN, unit: "W" },
       ]}
     />
@@ -391,7 +391,7 @@
       <h2 id="hist-h">Last {COUNTS[by]} {by}s</h2>
       <Segmented label="Period" options={PERIODS} value={by} onpick={pickPeriod} />
     </div>
-    <History co2={co2?.by === by ? co2 : undefined} now={tnow} />
+    <History {by} co2={co2?.by === by ? co2 : undefined} now={tnow} />
   </section>
 
   <footer>
