@@ -26,16 +26,17 @@
     display: inline-flex;
     padding: 2px;
     gap: 2px;
-    border-radius: 7px;
+    border-radius: var(--radius-control);
     background: var(--panel-2);
   }
   button {
     font: inherit;
-    font-size: 13px;
+    font-size: var(--text-control);
     font-weight: 500;
-    padding: 3px 10px;
+    min-height: var(--control-height);
+    padding: var(--space-1) 10px;
     border: 0;
-    border-radius: 5px;
+    border-radius: var(--radius-control);
     background: transparent;
     color: var(--ink-2);
     cursor: pointer;
@@ -45,18 +46,17 @@
       color: var(--ink);
     }
   }
-  /* iOS segmented-control height for fingers. */
+  button:focus-visible { outline: var(--focus-width) solid var(--grid); outline-offset: -2px; }
+  /* Larger targets on touch screens. */
   @media (pointer: coarse) {
     button {
-      min-height: 32px;
+      min-height: var(--touch-target);
       padding: 4px 12px;
     }
   }
   button[aria-pressed="true"] {
     background: var(--panel);
     color: var(--ink);
-    box-shadow:
-      0 0 0 1px var(--line),
-      0 1px 2px rgb(0 0 0 / 0.06);
+    box-shadow: inset 0 -2px 0 var(--ink);
   }
 </style>

@@ -52,8 +52,8 @@
     pointer-events: none;
     background: var(--panel);
     border: 1px solid var(--line);
-    border-radius: 6px;
-    box-shadow: 0 2px 8px rgb(0 0 0 / 0.08);
+    border-radius: var(--radius-tooltip);
+    box-shadow: var(--shadow-floating);
     padding: 6px 10px;
     font-size: 12px;
     white-space: nowrap;
@@ -78,7 +78,7 @@
   .key {
     width: 10px;
     height: 10px;
-    border-radius: 2px;
+    border-radius: var(--radius-key);
   }
   .key.line {
     height: 2px;
