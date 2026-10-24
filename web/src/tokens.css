@@ -1,0 +1,120 @@
+/* Solar Farm design tokens. See ../DESIGN.md.
+   Cool neutrals with one hue per energy source. Series colors follow the
+   Okabe-Ito set, checked for colorblind separation between neighbors and
+   for 3:1 contrast against the page; text tokens meet WCAG AA. Imports and
+   Other are neutral on purpose. Dark values apply under [data-theme=dark],
+   which index.html sets from the saved choice or the system setting. */
+:root {
+  color-scheme: light;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --text-meta: 12px;
+  --text-control: 14px;
+  --text-body: 16px;
+  --text-section: 20px;
+  --text-status: 28px;
+  --text-metric: 40px;
+  --text-metric-mobile: 32px;
+  --radius-control: 0px;
+  --radius-surface: 0px;
+  --radius-tooltip: 2px;
+  --radius-key: 1px;
+  --control-height: 32px;
+  --touch-target: 44px;
+  --border-width: 1px;
+  --focus-width: 2px;
+  --shadow-floating: 0 2px 8px rgb(0 0 0 / 0.08);
+  --bg: #f8f9fa;
+  --panel: #ffffff;
+  --panel-2: #eceef1;
+  --ink: #16181d;
+  --ink-2: #4a5160;
+  --ink-3: #5f6673;
+  --line: #dde0e5;
+  --rule: #eaecef;
+  --solar: #c28400;
+  /* Lines use --solar (3:1 on the page); fills use the brighter --solar-area. */
+  --solar-area: #e6a700;
+  --solar-fill: rgba(194, 132, 0, 0.16);
+  --grid: #2563c9;
+  --grid-fill: rgba(37, 99, 201, 0.14);
+  --battery: #16181d;
+  --load: #737c8a;
+  --overhead: #cc79a7;
+  --shift: #7853ad;
+  --plan-band: rgba(37, 99, 201, 0.08);
+  --plan-charge: var(--grid);
+  --plan-bypass: #56b4e9;
+  --plan-battery: var(--panel-2);
+  --plan-solar: var(--panel-2);
+  --plan-peak: var(--peak-hatch);
+  --peak-hatch: rgba(22, 24, 29, 0.13);
+  --co2-clean: #009e73;
+  --co2-mid: #8c939e;
+  --co2-dirty: #d55e00;
+  --mix-gas: #d55e00;
+  --mix-imports: #c3c8cf;
+  --mix-batteries: #009e73;
+  --mix-wind: #56b4e9;
+  --mix-hydro: #0072b2;
+  --mix-other: #aeb4bd;
+  --mix-nuclear: #6f55b8;
+  --good: #009e73;
+  --good-ink: #007a5a;
+  --good-bg: rgba(0, 158, 115, 0.12);
+  --bad: #d55e00;
+  --bad-ink: #c4471a;
+  --bad-bg: rgba(213, 94, 0, 0.1);
+  --f-sans:
+    "IBM Plex Sans Variable", "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #121417;
+  --panel: #1b1e23;
+  --panel-2: #23272d;
+  --ink: #eef0f3;
+  --ink-2: #b4bac4;
+  --ink-3: #959ca8;
+  --line: #2e333a;
+  --rule: #20242a;
+  --solar: #d99a00;
+  --solar-area: #d99a00;
+  --solar-fill: rgba(217, 154, 0, 0.2);
+  --grid: #4a8ae6;
+  --grid-fill: rgba(74, 138, 230, 0.22);
+  --battery: #eef0f3;
+  --load: #959ca8;
+  --overhead: #d98bb7;
+  --shift: #b59ade;
+  --shadow-floating: 0 2px 8px rgb(0 0 0 / 0.28);
+  --plan-band: rgba(74, 138, 230, 0.12);
+  --plan-charge: var(--grid);
+  --plan-bypass: #6cc0f0;
+  --plan-battery: var(--panel-2);
+  --plan-solar: var(--panel-2);
+  --plan-peak: var(--peak-hatch);
+  --peak-hatch: rgba(238, 240, 243, 0.12);
+  --co2-clean: #14a37a;
+  --co2-mid: #8a919c;
+  --co2-dirty: #e06a2c;
+  --mix-gas: #e06a2c;
+  --mix-imports: #c5cad1;
+  --mix-batteries: #14a37a;
+  --mix-wind: #6cc0f0;
+  --mix-hydro: #2f74c0;
+  --mix-other: #9aa1ab;
+  --mix-nuclear: #7e62d0;
+  --good: #14a37a;
+  --good-ink: #3cc29a;
+  --good-bg: rgba(20, 163, 122, 0.16);
+  --bad: #e06a2c;
+  --bad-ink: #f08a5a;
+  --bad-bg: rgba(224, 106, 44, 0.14);
+}

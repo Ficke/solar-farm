@@ -55,6 +55,8 @@ just web              # dashboard at http://localhost:5173 with synthetic data
 After changing API models in `server/solar_server/schema.py`, run `just api`
 to regenerate the dashboard's types.
 
+Dashboard layout, tokens and component rules: [web/DESIGN.md](web/DESIGN.md).
+
 ## Configuration
 
 - **Server:** `SOLAR_DAY_WH` (default 500), `CHARGE_W` (1700) and

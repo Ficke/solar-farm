@@ -14,6 +14,11 @@ See [README.md](README.md) for what the project does and how to set it up.
 - Never probe `/healthz` on Cloud Run; it is reserved. Use `/health`.
 - Merging to `main` deploys to production.
 
+## Dashboard design
+
+- Read [web/DESIGN.md](web/DESIGN.md) before changing dashboard UI. Use its
+  shared tokens, components, information architecture and chart semantics.
+
 ## Writing
 
 Applies to docs, comments, commits, PRs and dashboard text.

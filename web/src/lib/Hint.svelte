@@ -33,8 +33,9 @@
     outline: none;
   }
   .hint:focus-visible {
-    border-radius: 2px;
-    box-shadow: 0 0 0 2px var(--grid-fill);
+    border-radius: var(--radius-control);
+    outline: var(--focus-width) solid var(--grid);
+    outline-offset: 2px;
   }
   .tip {
     display: none;
@@ -47,8 +48,8 @@
     padding: 6px 10px;
     background: var(--panel);
     border: 1px solid var(--line);
-    border-radius: 6px;
-    box-shadow: 0 2px 8px rgb(0 0 0 / 0.08);
+    border-radius: var(--radius-tooltip);
+    box-shadow: var(--shadow-floating);
     font: 400 12px / 1.5 var(--f-sans);
     color: var(--ink-2);
     white-space: pre-line;
