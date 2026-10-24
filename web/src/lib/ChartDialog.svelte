@@ -1,13 +1,27 @@
 <script lang="ts">
   import type { ComponentProps } from "svelte";
   import { onMount } from "svelte";
+  import Button from "./Button.svelte";
+  import { niceTicks } from "./co2";
   import { AXIS_W, MIN_SPAN, PAD_R } from "./layout";
   import TimeChart from "./TimeChart.svelte";
   import { fmtDayClock } from "./time";
 
   type Chart = Omit<ComponentProps<typeof TimeChart>, "title" | "mode" | "view" | "onview">;
 
-  let { title, chart, onclose }: { title: string; chart: Chart; onclose: () => void } = $props();
+  let {
+    title,
+    chart,
+    onclose,
+    splitAt,
+    panelTitles = ["Supply", "Consumption"],
+  }: {
+    title: string;
+    chart: Chart;
+    onclose: () => void;
+    splitAt?: number;
+    panelTitles?: [string, string];
+  } = $props();
 
   let dialog: HTMLDialogElement;
   let brush: HTMLDivElement;
@@ -19,6 +33,18 @@
   const lo = $derived(zoom ? Math.max(from, Math.min(zoom[0], to - MIN_SPAN)) : from);
   const hi = $derived(zoom ? Math.min(to, Math.max(zoom[1], lo + MIN_SPAN)) : to);
   const zoomed = $derived(zoom != null);
+  // Both power panels use the same scale and zoom range.
+  const splitMax = $derived.by(() => {
+    if (splitAt == null) return undefined;
+    let max = 1;
+    const xs = chart.data[0];
+    for (let i = 0; i < xs.length; i++) {
+      const t = xs[i];
+      if (t == null || t < lo || t > hi) continue;
+      for (const ys of chart.data.slice(1)) max = Math.max(max, ys[i] ?? 0);
+    }
+    return niceTicks(0, max, 4).at(-1) ?? 1;
+  });
 
   function setView([a, b]: [number, number]) {
     a = Math.max(from, a);
@@ -146,17 +172,31 @@
       <h2>{title}</h2>
       <span class="range">{rangeText}</span>
     </div>
-    <button type="button" class="text" disabled={!zoomed} onclick={() => (zoom = null)}>
+    <Button disabled={!zoomed} onclick={() => (zoom = null)}>
       Reset zoom
-    </button>
-    <button type="button" class="icon" aria-label="Close" onclick={() => dialog.close()}>
-      <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"
+    </Button>
+    <Button variant="icon" aria-label="Close" onclick={() => dialog.close()}>
+      <svg class="close-icon" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"
         ><path d="M2.5 2.5l9 9M11.5 2.5l-9 9" /></svg
       >
-    </button>
+    </Button>
   </header>
-  <div class="main">
-    <TimeChart {...chart} mode="expanded" view={[lo, hi]} onview={setView} />
+  <div class="main" class:split={splitAt != null}>
+    {#if splitAt != null}
+      {#each [[0, splitAt], [splitAt, chart.series.length]] as [a, b], i (i)}
+        <section aria-label={panelTitles[i]}>
+          <h3>{panelTitles[i]} <span>W · Matching scales</span></h3>
+          <TimeChart {...chart}
+            data={[chart.data[0], ...chart.data.slice(a + 1, b + 1)]}
+            series={chart.series.slice(a, b)}
+            tipData={chart.tipData ? [chart.tipData[0], ...chart.tipData.slice(a + 1, b + 1)] : undefined}
+            yMax={splitMax} syncKey="power-detail"
+            label={`${panelTitles[i]}, W`} mode="expanded" view={[lo, hi]} onview={setView} />
+        </section>
+      {/each}
+    {:else}
+      <TimeChart {...chart} mode="expanded" view={[lo, hi]} onview={setView} />
+    {/if}
   </div>
   <div class="overview">
     <TimeChart {...chart} mode="overview" height={80} />
@@ -235,55 +275,8 @@
     font-size: 13px;
     color: var(--ink-2);
   }
-  button {
-    font: inherit;
-    color: var(--ink-2);
-    background: transparent;
-    border: 0;
-    cursor: pointer;
-  }
-  @media (hover: hover) {
-    button:hover:not(:disabled) {
-      color: var(--ink);
-      background: var(--panel-2);
-    }
-  }
-  button:focus-visible,
-  .brush:focus-visible {
-    outline: 2px solid var(--grid);
-    outline-offset: 1px;
-  }
-  .text {
-    font-size: 13px;
-    font-weight: 500;
-    padding: 4px 10px;
-    border-radius: 6px;
-    box-shadow: inset 0 0 0 1px var(--line);
-  }
-  .text:disabled {
-    color: var(--ink-3);
-    opacity: 0.6;
-    cursor: default;
-  }
-  .icon {
-    display: grid;
-    place-items: center;
-    width: 32px;
-    height: 32px;
-    padding: 0;
-    border-radius: 6px;
-  }
-  @media (pointer: coarse) {
-    .icon {
-      width: 44px;
-      height: 44px;
-      margin-right: -8px;
-    }
-    .text {
-      min-height: 32px;
-    }
-  }
-  .icon path {
+  .brush:focus-visible { outline: var(--focus-width) solid var(--grid); outline-offset: 1px; }
+  .close-icon path {
     fill: none;
     stroke: currentColor;
     stroke-width: 1.5;
@@ -293,6 +286,10 @@
     flex: 1;
     min-height: 0;
   }
+  .main.split { display: grid; grid-template-rows: repeat(2, minmax(220px, 1fr)); gap: 16px; overflow-y: auto; }
+  .split section { min-height: 0; display: flex; flex-direction: column; }
+  .split h3 { font: 500 13px var(--f-sans); margin: 0 0 6px; color: var(--ink-2); }
+  .split h3 span { font-size: 12px; font-weight: 400; color: var(--ink-3); margin-left: 6px; }
   .overview {
     position: relative;
     flex: none;
@@ -306,7 +303,7 @@
     height: 46px;
     touch-action: none;
     user-select: none;
-    border-radius: 3px;
+    border-radius: var(--radius-control);
   }
   .shade {
     position: absolute;
@@ -320,7 +317,7 @@
     bottom: 0;
     box-sizing: border-box;
     border: 1px solid var(--ink-3);
-    border-radius: 3px;
+    border-radius: var(--radius-control);
   }
   .frame:not(.zoomed) {
     border-color: var(--line);
@@ -331,7 +328,7 @@
     width: 6px;
     height: 18px;
     margin: -9px 0 0 -4px;
-    border-radius: 2px;
+    border-radius: var(--radius-control);
     background: var(--panel);
     box-shadow: inset 0 0 0 1px var(--ink-3);
   }

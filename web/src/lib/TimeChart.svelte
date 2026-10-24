@@ -45,6 +45,7 @@
     mode = "inline",
     view,
     onview,
+    syncKey,
   }: {
     data: (number | null | undefined)[][];
     series: Series[];
@@ -65,6 +66,8 @@
     /** Override the visible [from, to] span when zoomed in. */
     view?: [number, number];
     onview?: (span: [number, number]) => void;
+    /** Link cursors across panels in an expanded chart. */
+    syncKey?: string;
   } = $props();
 
   const lo = $derived(view?.[0] ?? from);
@@ -134,10 +137,14 @@
       ctx.stroke();
       if (mode !== "overview") {
         ctx.fillStyle = css("--ink-2");
-        ctx.font = `500 ${11 * dpr}px ${css("--f-sans")}`;
+        ctx.font = `500 ${Number.parseFloat(css("--text-meta")) * dpr}px ${css("--f-sans")}`;
         ctx.textAlign = "left";
         ctx.textBaseline = "top";
-        ctx.fillText("Now", x + 4 * dpr, u.bbox.top + 2 * dpr);
+        const textX = Math.min(
+          x + 4 * dpr,
+          u.bbox.left + u.bbox.width - ctx.measureText("Now").width - 4 * dpr,
+        );
+        ctx.fillText("Now", textX, u.bbox.top + 2 * dpr);
       }
     }
     ctx.restore();
@@ -209,7 +216,7 @@
       stroke: css("--ink-3"),
       grid: { stroke: css("--rule"), width: 1 },
       ticks: { show: false },
-      font: `11px ${css("--f-sans")}`,
+      font: `${css("--text-meta")} ${css("--f-sans")}`,
     };
     const mini = mode === "overview";
     return {
@@ -219,7 +226,7 @@
         ? { show: false }
         : {
             // Only the dashboard's own charts follow each other.
-            sync: mode === "inline" ? { key: "timeline" } : undefined,
+            sync: mode === "inline" ? { key: "timeline" } : syncKey ? { key: syncKey } : undefined,
             y: false,
             // Hide cursor dots on stacked areas to avoid clutter.
             points: { show: !series.some((s) => s.area), size: 8, width: 2, fill: css("--panel") },
@@ -278,7 +285,7 @@
   }
 
   let plot: uPlot | undefined;
-  const shape = $derived(JSON.stringify([series, yMax, mode, theme.version]));
+  const shape = $derived(JSON.stringify([series, yMax, mode, syncKey, theme.version]));
 
   $effect(() => {
     shape;
@@ -479,7 +486,7 @@
     margin: -7px -6px -7px 0;
     padding: 0;
     border: 0;
-    border-radius: 6px;
+    border-radius: var(--radius-control);
     background: transparent;
     color: var(--ink-3);
     cursor: pointer;
@@ -528,6 +535,6 @@
   .swatch {
     width: 10px;
     height: 10px;
-    border-radius: 2px;
+    border-radius: var(--radius-key);
   }
 </style>

@@ -71,7 +71,7 @@
     const mode = g?.mode ?? (t >= now && peak ? "peak" : null);
     const rows: TipRow[] = [
       mode
-        ? { value: MODES[mode].label, color: `var(--plan-${mode})`, shape: "square" }
+        ? { value: MODES[mode].label, color: `--plan-${mode}`, shape: "square" }
         : { value: t < now ? "No data" : "Grid off" },
     ];
     if (t < now) {
@@ -90,8 +90,13 @@
   });
 
   const rows = $derived.by(() => {
-    const on = states.filter((g) => MODES[g.mode].on && g.s > now);
-    return on.map((g, i) => ({ ...g, state: i === 0 ? "Next" : "" }));
+    const on = states.filter((g) => MODES[g.mode].on && g.e > now);
+    let next = true;
+    return on.map((g) => {
+      const state = g.s <= now ? "Now" : next ? "Next" : "";
+      if (g.s > now) next = false;
+      return { ...g, state };
+    });
   });
 </script>
 
@@ -112,7 +117,7 @@
         <path d="M-1,7 L7,-1" stroke="var(--peak-hatch)" stroke-width="1.5" />
       </pattern>
     </defs>
-    <rect x={AXIS_W} y="8" width={Math.max(0, width - AXIS_W - PAD_R)} height="20" rx="4" fill="var(--panel-2)" />
+    <rect x={AXIS_W} y="8" width={Math.max(0, width - AXIS_W - PAD_R)} height="20" rx="0" fill="var(--panel-2)" />
     {#each peakWindows(from, to) as [s, e] (s)}
       {@const [a, b] = clip(s, e)}
       {#if b > a}<rect x={a} y="8" width={b - a} height="20" fill="url(#peak-hatch)" />{/if}
@@ -120,12 +125,13 @@
     {#each states as g, i (i)}
       {#if g.e > from && g.s < to && MODES[g.mode].on}
         {@const [a, b] = clip(g.s, g.e)}
-        <rect x={a} y="10" width={Math.max(2, b - a)} height="16" rx="3" fill="var(--plan-{g.mode})"
+        <rect x={a} y="10" width={Math.max(2, b - a)} height="16" rx="0" fill="var(--plan-{g.mode})"
           ><title>{MODES[g.mode].label}, {fmtRange(g.s, g.e)}</title></rect
         >
       {/if}
     {/each}
     <line x1={x(now)} x2={x(now)} y1="4" y2="32" stroke="var(--ink)" stroke-width={LINE_THIN} />
+    <text x={Math.min(width - PAD_R - 28, x(now) + 4)} y="7" class="tick">Now</text>
     {#if hover.t != null}
       <line x1={x(hover.t)} x2={x(hover.t)} y1="4" y2="32" stroke="var(--ink-2)" stroke-width={LINE_THIN} stroke-dasharray="3 3" />
     {/if}
@@ -153,15 +159,17 @@
 </ul>
 
 {#if rows.length}
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard users need to scroll narrow tables.) -->
+  <div class="table-scroll" tabindex="0" role="region" aria-label="Planned grid use">
   <table>
     <thead>
-      <tr><th>Time</th><th>Length</th><th>Mode</th><th>CO₂</th><th></th></tr>
+      <tr><th>Time</th><th>Length</th><th>Mode</th><th>CO₂, g/kWh</th><th></th></tr>
     </thead>
     <tbody>
       {#each rows as r (r.s)}
         <tr>
-          <td>{fmtWhen(r.s, now).replace(fmtClock(r.s), "")}{fmtRange(r.s, r.e)}</td>
-          <td>{hours(r.e - r.s)}</td>
+          <td>{#if r.s <= now}Now–{fmtClock(r.e)}{:else}{fmtWhen(r.s, now).replace(fmtClock(r.s), "")}{fmtRange(r.s, r.e)}{/if}</td>
+          <td>{hours(r.e - Math.max(now, r.s))}{r.s <= now ? " remaining" : ""}</td>
           <td>{MODES[r.mode].label}</td>
           <td>{r.moer == null ? "" : fmtRate(r.moer)}</td>
           <td class="st">{#if r.state}<span class={r.state.toLowerCase()}>{r.state}</span>{/if}</td>
@@ -169,8 +177,9 @@
       {/each}
     </tbody>
   </table>
+  </div>
 {:else}
-  <p class="muted">No more grid use planned</p>
+  <p class="muted">No grid use planned</p>
 {/if}
 
 <style>
@@ -186,9 +195,11 @@
     -webkit-touch-callout: none;
   }
   .tick {
-    font: 11px var(--f-sans);
+    font: var(--text-meta) var(--f-sans);
     fill: var(--ink-3);
   }
+  .table-scroll { overflow-x: auto; }
+  .table-scroll:focus-visible { outline: var(--focus-width) solid var(--grid); outline-offset: 2px; }
   table {
     width: 100%;
     border-collapse: collapse;
@@ -235,7 +246,7 @@
   .sw {
     width: 12px;
     height: 10px;
-    border-radius: 2px;
+    border-radius: var(--radius-key);
   }
   .sw.charge {
     background: var(--plan-charge);
