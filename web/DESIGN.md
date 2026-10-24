@@ -76,6 +76,8 @@ introducing another shared color, type role or control size.
 - Keep zero on bar and filled-area axes. Use square bar ends and restrained grids.
 - Use solid actuals and dashed forecasts. Reserve negative carbon values for
   added emissions; label the direct-grid baseline and that savings are estimated.
+- The carbon reference includes connected load and battery overhead. Label it
+  as the same consumption supplied from the grid.
 - Show missing readings separately from zero. Never invent savings percentages,
   confidence intervals, household totals or cost savings from unavailable data.
 

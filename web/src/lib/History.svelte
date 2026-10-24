@@ -177,8 +177,8 @@
   <section class="carbon" aria-label="Carbon impact">
     <div class="carbon-summary">
       <div>
-        <h3><Hint text="Net CO₂ saved compared with powering the same connected appliances directly from the grid. Includes battery overhead.">{co2Label(totals.avoided)}</Hint></h3>
-        <p class="baseline">Estimated · Baseline: direct grid use</p>
+        <h3><Hint text="Estimated CO₂ difference versus supplying the same consumption directly from the grid. Consumption includes connected load and battery overhead.">{co2Label(totals.avoided)}</Hint></h3>
+        <p class="baseline">Estimated · Baseline: same consumption from grid</p>
         <p class="total" class:avoided={hasReadings && totals.avoided > 0} class:added={totals.avoided < 0}><b>{hasReadings ? fmtMass(Math.abs(totals.avoided)) : "–"}</b><small>kg</small></p>
       </div>
       <dl class="breakdown">

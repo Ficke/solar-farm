@@ -1,6 +1,5 @@
 <script lang="ts">
   // Update data, scales and size in place to preserve hover state.
-  // Series, yMax, mode or theme changes rebuild the plot.
   import { untrack } from "svelte";
   import uPlot from "uplot";
   import { bucket, NEAR, stepFor } from "./align";
@@ -38,6 +37,7 @@
     windows = [],
     height = 160,
     yMax,
+    yRange,
     label,
     tipData,
     shade = true,
@@ -55,6 +55,8 @@
     windows?: Window[];
     height?: number;
     yMax?: number;
+    /** Fix both bounds when panels must share an axis, including while zoomed. */
+    yRange?: [number, number];
     label: string;
     /** Supply tooltip values separately from drawn values, such as stacked totals. */
     tipData?: (number | null | undefined)[][];
@@ -225,7 +227,7 @@
       cursor: mini
         ? { show: false }
         : {
-            // Only the dashboard's own charts follow each other.
+            // Keep dashboard and expanded-panel cursor groups separate.
             sync: mode === "inline" ? { key: "timeline" } : syncKey ? { key: syncKey } : undefined,
             y: false,
             // Hide cursor dots on stacked areas to avoid clutter.
@@ -240,6 +242,7 @@
         // Keep zero on the axis, allowing negative supply; fit zoomed lines.
         y: {
           range: (_u, min, max) => {
+            if (yRange) return yRange;
             const floor = Math.min(0, min ?? 0);
             if (fit() && min != null && max != null) {
               const [a, b] = uPlot.rangeNum(min, max, 0.1, true);
@@ -285,7 +288,7 @@
   }
 
   let plot: uPlot | undefined;
-  const shape = $derived(JSON.stringify([series, yMax, mode, syncKey, theme.version]));
+  const shape = $derived(JSON.stringify([series, yMax, yRange, mode, syncKey, theme.version]));
 
   $effect(() => {
     shape;

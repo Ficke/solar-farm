@@ -190,7 +190,7 @@
             data={[chart.data[0], ...chart.data.slice(a + 1, b + 1)]}
             series={chart.series.slice(a, b)}
             tipData={chart.tipData ? [chart.tipData[0], ...chart.tipData.slice(a + 1, b + 1)] : undefined}
-            yMax={splitMax} syncKey="power-detail"
+            yRange={[0, splitMax ?? 1]} syncKey="power-detail"
             label={`${panelTitles[i]}, W`} mode="expanded" view={[lo, hi]} onview={setView} />
         </section>
       {/each}
