@@ -1,9 +1,4 @@
-/* Solar Farm design tokens. See ../DESIGN.md.
-   Cool neutrals with one hue per energy source. Series colors follow the
-   Okabe-Ito set, checked for colorblind separation between neighbors and
-   for 3:1 contrast against the page; text tokens meet WCAG AA. Imports and
-   Other are neutral on purpose. Dark values apply under [data-theme=dark],
-   which index.html sets from the saved choice or the system setting. */
+/* Shared Solar Farm tokens. See ../DESIGN.md. */
 :root {
   color-scheme: light;
   --space-1: 4px;
@@ -39,7 +34,7 @@
   --line: #dde0e5;
   --rule: #eaecef;
   --solar: #c28400;
-  /* Lines use --solar (3:1 on the page); fills use the brighter --solar-area. */
+  /* Brighter solar fill for large generation areas. */
   --solar-area: #e6a700;
   --solar-fill: rgba(194, 132, 0, 0.16);
   --grid: #2563c9;
