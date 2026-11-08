@@ -17,7 +17,7 @@ def now_view(store: Store, now: int) -> dict:
     """Read live data and today's totals from four state documents."""
     sample = store.get_state("sample") or {}
     estimate = (store.get_state("charging_estimates") or {}).get("estimate") or {}
-    solar_scale = Battery.from_dict(estimate.get("battery")).solar_scale
+    solar_stored = Battery.from_dict(estimate.get("battery")).solar_stored
     plug = store.get_state("plug") or {}
     today = day_key(now)
 
@@ -34,7 +34,7 @@ def now_view(store: Store, now: int) -> dict:
         "now": now,
         "sample": latest(sample, "sample", 2 * 3600),
         "plug": latest(plug, "report", 3600),
-        "today": {"solar_wh": wh(sample, solar_scale), "grid_wh": wh(plug)},
+        "today": {"solar_wh": wh(sample, solar_stored), "grid_wh": wh(plug)},
         "plan": {
             k: v
             for k, v in plan.items()

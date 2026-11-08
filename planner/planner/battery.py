@@ -12,10 +12,10 @@ Between two readings where the charge changes, the battery gained exactly
 that many percent. Over spans where only the plug charges it and the outlets
 are off, the plug's meter times the charger efficiency gives Wh per percent,
 which tracks capacity as the battery ages. Over sunny spans with the plug and
-outlets off, that capacity times the gain, divided by the solar charge
-efficiency, gives the panel's true output per Wh the sensor reports. Charger
-and inverter efficiencies can't be separated from capacity without a meter on
-the output, so they are assumed.
+outlets off, that capacity times the gain gives the Wh stored per Wh the solar
+sensor reports, one measured number that covers the sensor's error and the
+solar charger's losses together. AC charger and inverter efficiencies can't be
+separated from capacity without a meter on the output, so they are assumed.
 """
 
 from __future__ import annotations
@@ -29,7 +29,6 @@ from itertools import pairwise
 from planner.telemetry import CAPACITY_WH
 
 AC_CHARGE = 0.9  # Wh stored per Wh the plug meters.
-SOLAR_CHARGE = 0.95  # Wh stored per Wh the panel makes; the DC charger skips a conversion.
 DISCHARGE = 0.9  # Wh at the outlet per Wh drawn from the battery.
 # Percent of charge gained before a measurement replaces the previous one. Each
 # end of a span is known to a minute, about 17 Wh at 1 kW, so short totals are noisy.
@@ -59,17 +58,12 @@ def no_rate(_t: float) -> float | None:
 @dataclass(frozen=True)
 class Battery:
     capacity_wh: float = CAPACITY_WH  # usable Wh from 0 to 100%
-    solar_scale: float = 1.0  # panel Wh per Wh of the Jackery's solar reading
+    solar_stored: float = 1.0  # Wh stored per Wh of the Jackery's solar reading
     # The Jackery's own draw: outlets off, outlets on from the battery, and
     # outlets on while the plug passes power through.
     standby_w: float = 4.0
     idle_w: float = 45.0
     bypass_w: float = 31.0
-
-    @property
-    def solar_stored(self) -> float:
-        """Wh stored per Wh of solar reading."""
-        return self.solar_scale * SOLAR_CHARGE
 
     def wh(self, pct: float) -> float:
         return pct / 100 * self.capacity_wh
@@ -79,9 +73,11 @@ class Battery:
 
     @classmethod
     def from_dict(cls, data: dict | None) -> Battery:
-        return cls(
-            **{k: float(v) for k, v in (data or {}).items() if k in cls.__dataclass_fields__}
-        )
+        data = dict(data or {})
+        if "solar_scale" in data and "solar_stored" not in data:
+            # Measurements saved before solar_stored held panel Wh, stored at 95%.
+            data["solar_stored"] = float(data["solar_scale"]) * 0.95
+        return cls(**{k: float(v) for k, v in data.items() if k in cls.__dataclass_fields__})
 
 
 def series(items: list[dict], key: str) -> list[tuple[int, float]]:
@@ -497,17 +493,17 @@ def measure(samples: list[dict], plug: list[dict], previous: Battery | None = No
     capacity = previous.capacity_wh
     if ac_pct >= MIN_CAPACITY_PCT:
         capacity = _clamp(ac_in / ac_pct * 100, CAPACITY_RANGE)
-    scale = previous.solar_scale
+    solar_stored = previous.solar_stored
     if solar_pct >= MIN_SOLAR_PCT and solar_wh > 0:
         # Load the output reading misses lowers the gain, so this can only understate.
-        scale = _clamp(capacity * solar_pct / 100 / SOLAR_CHARGE / solar_wh, SCALE_RANGE)
+        solar_stored = _clamp(capacity * solar_pct / 100 / solar_wh, SCALE_RANGE)
     idle_w = previous.idle_w
     if sum(h for _, h in idle) >= MIN_IDLE_H:
         idle_w = _clamp(_median(idle), (0, MAX_OVERHEAD_W))
     standby, bypass = _full_draws(readings, reports, flows)
     return Battery(
         capacity_wh=capacity,
-        solar_scale=scale,
+        solar_stored=solar_stored,
         standby_w=_median([(w, 1) for w in standby])
         if len(standby) >= MIN_REPORTS
         else previous.standby_w,

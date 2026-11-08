@@ -42,7 +42,7 @@ log = logging.getLogger(__name__)
 # Nothing was recorded before this; the first update fills in every day since.
 FIRST_DAY = "2026-10-01"
 RATE_GAP = 1800  # Carry each marginal rate for at most 30 minutes.
-VERSION = 10  # Increment to recompute history from FIRST_DAY.
+VERSION = 11  # Increment to recompute history from FIRST_DAY.
 MIN_KNOWN_WH = 30  # About 1% of charge; below this the stored rate is noise.
 
 
@@ -167,8 +167,8 @@ def day_totals(
     """Compute daily totals, starting from the previous day's ``pool``.
 
     Without one, the first charge reading is of unknown origin. ``battery``
-    gives the measured capacity and solar scale; solar Wh are scaled to the
-    panel's output.
+    gives the measured capacity and solar Wh stored per Wh of solar reading;
+    solar Wh are what the battery stored.
     """
     battery = battery or Battery()
     samples = sorted(store.day(SAMPLES, day), key=lambda s: s["t"])
@@ -194,7 +194,7 @@ def day_totals(
     peaks = [float(s["battery_pct"]) for s in samples if s.get("battery_pct") is not None]
     return {
         "day": day,
-        "solar_wh": round(integrate_wh(solar) * battery.solar_scale, 1),
+        "solar_wh": round(integrate_wh(solar) * battery.solar_stored, 1),
         "solar_n": len(solar),
         "solar_h": round(covered_h(solar), 2),
         "load_wh": round(co2.wh, 1),
