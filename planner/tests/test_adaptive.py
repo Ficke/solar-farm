@@ -411,3 +411,20 @@ def test_near_zero_grid_charges_now_and_leaves_room_for_the_rest_of_the_solar():
     late = build_adaptive_plan(points, morning.replace(hour=22), 90, dark)
     assert late["windows"] == [[int(morning.replace(hour=22).timestamp()), late["deadline"]]]
     assert late["blocks"][-1]["pct"] == 100
+
+
+def test_a_held_window_lets_go_when_its_rate_jumps():
+    # Nov 8: charging at 9:30 in a zero forecast. A live 400 contradicts it,
+    # so today's zeros all become 400. The charging window loses its hold and
+    # charging moves to the latest of those blocks, in case the zeros return.
+    morning = NOW.replace(hour=16, minute=30)  # 9:30 am Pacific
+    hold = [[int(morning.timestamp()), int(morning.timestamp()) + 4500]]
+    points = [
+        (t, 400.0 if 9 <= t.astimezone(PACIFIC).hour < 15 else 950.0)
+        for t, _ in flat(900, now=morning, hours=12)
+    ]
+    was = {int(t.timestamp()) // 900 * 900: 0.0 for t, _ in points}
+    kept = build_adaptive_plan(points, morning, 23, inputs(solar=0), hold=hold)
+    assert kept["windows"][0][0] == hold[0][0]
+    moved = build_adaptive_plan(points, morning, 23, inputs(solar=0), hold=hold, held_moer=was)
+    assert datetime.fromtimestamp(moved["windows"][0][0], PACIFIC).hour >= 13

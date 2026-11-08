@@ -304,6 +304,7 @@ def charging_plan(
         p["strategy"] = "fallback"
         return p
     estimate = charging_estimates(store, settings, t)
+    previous = store.get_state("plan") or {}
     p = build_adaptive_plan(
         points,
         now,
@@ -311,7 +312,12 @@ def charging_plan(
         estimate,
         floor_pct=settings.floor_pct,
         region=settings.region,
-        hold=(store.get_state("plan") or {}).get("windows"),
+        hold=previous.get("windows"),
+        held_moer={
+            b["s"] // 900 * 900: b["moer"]
+            for b in previous.get("blocks") or []
+            if b.get("moer") is not None
+        },
     )
     # The plug checks this reading's age before allowing peak power at low battery.
     p["battery_at"] = battery["t"]
