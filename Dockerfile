@@ -7,8 +7,8 @@ RUN bun install --frozen-lockfile
 COPY web ./
 RUN bun run build
 
-FROM mirror.gcr.io/library/python:3.14-slim AS build
-COPY --from=ghcr.io/astral-sh/uv:0.12 /uv /bin/uv
+FROM mirror.gcr.io/library/python:3.15-slim AS build
+COPY --from=ghcr.io/astral-sh/uv:0.13 /uv /bin/uv
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
 WORKDIR /app
 
@@ -24,7 +24,7 @@ COPY server server
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-editable --package solar-farm-server
 
-FROM mirror.gcr.io/library/python:3.14-slim
+FROM mirror.gcr.io/library/python:3.15-slim
 RUN useradd --system --no-create-home app
 COPY --from=build /app/.venv /app/.venv
 COPY --from=web /web/dist /app/web/dist
