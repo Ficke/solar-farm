@@ -129,6 +129,7 @@ def build_adaptive_plan(
     floor_pct: float = 20,
     region: str = "CAISO_NORTH",
     hold: list[list[int]] | None = None,
+    held_moer: dict[int, float] | None = None,
 ) -> dict:
     """Target a full battery by the next 4 pm Pacific, less the next day's solar.
 
@@ -136,7 +137,9 @@ def build_adaptive_plan(
     come first, earliest first. Otherwise blocks within TIE_MOER of each
     other tie and the later one wins, so solar arrives first. Blocks in
     ``hold`` (the previous plan's current or next window) win ties, so small
-    forecast changes don't move the relay. Room is kept for material later solar at
+    forecast changes don't move the relay. A block whose rate rose more than
+    TIE_MOER above ``held_moer`` (the previous plan's rate for that block)
+    loses its hold. Room is kept for material later solar at
     half its estimated output. The plan projects no load: the battery holds
     its reported level except for planned solar and grid charge, and each
     replan starts from the latest reading. Once the battery is full and no
@@ -194,7 +197,7 @@ def build_adaptive_plan(
         for i, h in enumerate(later)
     ]
     initial = battery.wh(battery_pct)
-    ranked = rank_blocks(slots, held_blocks(slots, hold or [], tnow))
+    ranked = rank_blocks(slots, held_blocks(slots, hold or [], tnow, held_moer or {}))
     # Blocks where the plug stays on for the whole block to run any load:
     # near-zero blocks with no solar left to make room for, so the battery
     # fills from the grid and loads run on it.
@@ -350,12 +353,26 @@ def build_adaptive_plan(
     }
 
 
-def held_blocks(slots: list[dict], hold: list[list[int]], now: int) -> set[int]:
-    """Slots overlapping the window in ``hold`` that is current or next at ``now``."""
+def held_blocks(
+    slots: list[dict], hold: list[list[int]], now: int, held_moer: dict[int, float]
+) -> set[int]:
+    """Slots overlapping the window in ``hold`` that is current or next at ``now``.
+
+    A slot whose rate rose more than TIE_MOER above its rate in ``held_moer``
+    (keyed by block start) is left out: the hold absorbs small forecast
+    changes, not a jump such as a zero forecast that the live rate contradicts.
+    """
     window = next((w for w in sorted(hold) if w[1] > now), None)
     if window is None:
         return set()
-    return {i for i, slot in enumerate(slots) if slot["s"] < window[1] and window[0] < slot["e"]}
+    return {
+        i
+        for i, slot in enumerate(slots)
+        if slot["s"] < window[1]
+        and window[0] < slot["e"]
+        and slot["moer"] is not None
+        and slot["moer"] <= held_moer.get(slot["s"] // 900 * 900, math.inf) + TIE_MOER
+    }
 
 
 def rank_blocks(slots: list[dict], held: set[int]) -> list[int]:
