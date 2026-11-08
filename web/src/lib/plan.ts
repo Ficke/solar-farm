@@ -13,7 +13,7 @@ export const MODES: Record<Mode, { label: string; rule: string; on: boolean }> =
   },
   bypass: {
     label: "Running on grid",
-    rule: "Connected appliances run on the grid while it is cleaner than the battery.",
+    rule: "Devices run on the clean grid while the battery is full.",
     on: true,
   },
   // Room for solar caps how much the plan charges, not when, so the strip

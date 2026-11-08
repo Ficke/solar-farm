@@ -32,6 +32,10 @@ fmt:
 web:
     cd server && uv run uvicorn solar_server.dev:app --port 8000 & cd web && bun run dev
 
+# Replay the planner over saved production data; see tools/replay.py.
+replay *args:
+    uv run tools/replay.py {{args}}
+
 # Deploy the script and settings to the plug.
 deploy *args:
     uv run tools/deploy.py {{args}}

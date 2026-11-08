@@ -1,4 +1,4 @@
-"""Build greedy charging plans from the battery level, solar and the emissions forecast."""
+"""Plan grid charging from the battery level, expected solar and the rate timeline."""
 
 from __future__ import annotations
 
@@ -9,11 +9,15 @@ from datetime import datetime, time, timedelta
 from itertools import pairwise
 from statistics import mean, median
 
-from planner.battery import AC_CHARGE, DISCHARGE, Battery
+from planner.battery import AC_CHARGE, Battery
 from planner.plan import PACIFIC
 
-TIE_MOER = 50  # Round emissions to groups of this many lb/MWh.
-MIN_SOLAR_WH = 150  # Reserve headroom when the solar allowance reaches this value.
+# Actual rates sit near 0 or above 800 lb/MWh; forecasts up to this mostly come true as 0.
+CLEAN_MOER = 300
+CHARGE_MARGIN = 900  # Seconds before the deadline that charging ends, for a slow charge.
+# Dirty forecasts miss the actual by a median 35 and 75th percentile 92 lb/MWh.
+DIRTY_TIE = 100
+START_WH = 100  # Smallest target deficit that starts a charge; about 3%.
 MIN_CHARGE_W = 200  # Exclude low-power passthrough readings.
 MIN_CHARGE_READINGS = 3
 RECENT_CHARGE_READINGS = 30  # Favor recent charging speed over older readings.
@@ -128,29 +132,23 @@ def build_adaptive_plan(
     estimate: dict,
     floor_pct: float = 20,
     region: str = "CAISO_NORTH",
-    hold: list[list[int]] | None = None,
-    held_moer: dict[int, float] | None = None,
+    charging: bool = False,
 ) -> dict:
-    """Target a full battery by the next 4 pm Pacific, less the next day's solar.
+    """Put the grid charge needed by the next 4 pm Pacific into the cleanest blocks.
 
-    Charge in the cleanest 15-minute blocks. Blocks within TIE_MOER of zero
-    come first, earliest first. Otherwise blocks within TIE_MOER of each
-    other tie and the later one wins, so solar arrives first. Blocks in
-    ``hold`` (the previous plan's current or next window) win ties, so small
-    forecast changes don't move the relay. A block whose rate rose more than
-    TIE_MOER above ``held_moer`` (the previous plan's rate for that block)
-    loses its hold. Room is kept for material later solar at
-    half its estimated output. The plan projects no load: the battery holds
-    its reported level except for planned solar and grid charge, and each
-    replan starts from the latest reading. Once the battery is full and no
-    room is kept, the plug also stays on, so any load runs from the grid,
-    whenever that emits less than draining the battery and recharging it
-    later in the next block the plan would add. Blocks within TIE_MOER of
-    zero keep room for all later solar, since solar is cleaner still, and
-    keep the plug on once less than TOLERANCE_WH of solar is left. The 4 pm
-    target leaves room for a day of expected solar, so the battery has room
-    the next morning even if nothing runs overnight; those blocks keep the
-    plug off. Unmet floor or target energy is reported as a shortfall.
+    ``points`` is the rate timeline: the live rate for the current block and
+    the forecast after it. The need is the 4 pm target (full, less the next
+    day's solar) less the battery now and the solar expected before then, so
+    room for solar is left by construction. Allowed 15-minute blocks are
+    outside 4-9 pm and end CHARGE_MARGIN before the deadline; rank_blocks
+    orders them. The need fills down that order, after any gap below the
+    floor. The current block's charge is the plug decision. The plan projects
+    no load: each replan starts from the latest reading. A full battery in a
+    clean block with no solar left to make room for, today or tomorrow, keeps
+    the plug on, so loads run on the clean grid. Unmet floor or target energy is reported as
+    a shortfall. Unless ``charging`` (the previous plan charges now), a
+    target deficit under START_WH waits, so whole-percent readings don't
+    cycle the relay.
     """
     tnow = int(now.timestamp())
     battery = Battery.from_dict(estimate.get("battery"))
@@ -176,6 +174,7 @@ def build_adaptive_plan(
         hours = (e - s) / 3600
         solar = profile.get(local.hour * 4 + local.minute // 15, 0.0) * battery.solar_stored * hours
         moer = sum(signals[start]) / len(signals[start]) if start in signals else None
+        peak = 16 <= local.hour < 21
         slots.append(
             {
                 "s": s,
@@ -183,106 +182,63 @@ def build_adaptive_plan(
                 "solar": solar,
                 "max": estimate["charge_w"] * AC_CHARGE * hours,
                 "moer": moer,
-                "allowed": moer is not None and not 16 <= local.hour < 21,
+                "peak": peak,
+                "allowed": moer is not None and not peak and e <= deadline - CHARGE_MARGIN,
             }
         )
     later = [0.0] * len(slots)
     for i in range(len(slots) - 2, -1, -1):
         later[i] = later[i + 1] + slots[i + 1]["solar"]
-    # Grid power within TIE_MOER of zero costs nothing to defer, so those
-    # blocks keep room for all later solar; others keep half when material.
-    zero = {i for i, slot in enumerate(slots) if slot["allowed"] and slot["moer"] <= TIE_MOER}
-    keep = [
-        (h if h > TOLERANCE_WH else 0.0) if i in zero else (h / 2 if h / 2 >= MIN_SOLAR_WH else 0.0)
-        for i, h in enumerate(later)
-    ]
     initial = battery.wh(battery_pct)
-    ranked = rank_blocks(slots, held_blocks(slots, hold or [], tnow, held_moer or {}))
-    # Blocks where the plug stays on for the whole block to run any load:
-    # near-zero blocks with no solar left to make room for, so the battery
-    # fills from the grid and loads run on it.
-    bypass = {i for i in zero if keep[i] == 0} if target == capacity else set()
-    recharge_at: dict[int, float] = {}  # rate used in each block's bypass test
+    order = rank_blocks(slots)
 
     def trajectory(grid: list[float]) -> list[float]:
         level = initial
         out = []
-        for i, slot in enumerate(slots):
-            if i in bypass:
-                # The grid runs any load and charges any room left at full rate.
-                level = min(capacity, level + slot["solar"] + slot["max"])
-            else:
-                level = min(capacity, level + slot["solar"] + grid[i])
+        for slot, g in zip(slots, grid, strict=True):
+            level = min(capacity, level + slot["solar"] + g)
             out.append(level)
         return out
 
-    def charge() -> list[float]:
-        grid = [0.0] * len(slots)
-        order = [i for i in ranked if i not in bypass]
+    grid = [0.0] * len(slots)
 
-        def fill(by: int, desired: float) -> None:
-            """Fill a deficit using only ranked blocks at or before ``by``."""
-            for i in order:
-                levels = trajectory(grid)
-                need = desired - levels[by]
-                if need <= TOLERANCE_WH:
-                    break
-                if i <= by:
-                    # Only charge that is still stored at ``by`` helps: a block
-                    # already followed by a full battery adds nothing.
-                    room = min(capacity - level for level in levels[i : by + 1])
-                    grid[i] += max(0.0, min(slots[i]["max"] - grid[i], need, room))
-
-        for i in range(len(slots)):
-            fill(i, floor)
-        # Stop once a clean block can reach the ceiling reserved for later solar.
+    def fill(by: int, desired: float) -> None:
+        """Fill a deficit at ``by`` down the ranking, from blocks at or before it."""
         for i in order:
             levels = trajectory(grid)
-            before = levels[i - 1] if i else initial
-            room = target - keep[i] - before - slots[i]["solar"] - sum(grid[i:])
-            grid[i] += max(0.0, min(slots[i]["max"] - grid[i], room))
-            if grid[i] < slots[i]["max"] - 0.01:
+            need = desired - levels[by]
+            if need <= TOLERANCE_WH:
                 break
-        # Cover any deadline deficit left by solar headroom or limited blocks.
-        if slots:
-            fill(len(slots) - 1, target)
-        return grid
+            if i <= by:
+                # Only charge still stored at ``by`` helps: charge followed by
+                # a full battery adds nothing.
+                room = min(capacity - level for level in levels[i : by + 1])
+                grid[i] += max(0.0, min(slots[i]["max"] - grid[i], need, room))
 
-    grid = charge()
-    for _ in range(len(slots)):
-        levels = trajectory(grid)
-        added = set()
-        for i, slot in enumerate(slots):
-            before = levels[i - 1] if i else initial
-            if (
-                i in bypass
-                or not slot["allowed"]
-                or keep[i] > 0
-                or slot["solar"] > 0
-                or before < capacity - TOLERANCE_WH
-            ):
-                continue
-            # Each outlet Wh drawn from the battery now takes 1/DISCHARGE stored
-            # Wh, refilled later in the next block the plan would add at
-            # 1/AC_CHARGE grid Wh each.
-            spare = [slots[j]["moer"] for j in ranked if j > i and grid[j] < slots[j]["max"] - 0.01]
-            recharge = min(spare, default=math.inf)
-            recharge_at[i] = recharge
-            if slot["moer"] <= recharge / (DISCHARGE * AC_CHARGE):
-                added.add(i)
-        if not added:
-            break
-        bypass |= added
-        grid = charge()
+    for i in range(len(slots)):
+        fill(i, floor)
+    slack = TOLERANCE_WH if charging else START_WH
+    if slots and target - trajectory(grid)[-1] > slack:
+        fill(len(slots) - 1, target)
     levels = trajectory(grid)
+    bypass = set()
+    for i, slot in enumerate(slots):
+        before = levels[i - 1] if i else initial
+        if (
+            slot["moer"] is not None
+            and slot["moer"] <= CLEAN_MOER
+            and not slot["peak"]
+            and before >= capacity - TOLERANCE_WH
+            and slot["solar"] + later[i] <= TOLERANCE_WH
+            and target >= capacity - TOLERANCE_WH
+        ):
+            bypass.add(i)
     windows: list[list[int]] = []
     drawn = 0.0  # Wh from the outlet
     for i, slot in enumerate(slots):
         if i in bypass:
-            before = levels[i - 1] if i else initial
-            stored = max(0.0, levels[i] - before - slot["solar"])
             s, e = slot["s"], slot["e"]
-            drawn += stored / AC_CHARGE
+            drawn += grid[i] / AC_CHARGE
         elif grid[i] > 0.01:
             seconds = min(
                 slot["e"] - slot["s"],
@@ -305,20 +261,24 @@ def build_adaptive_plan(
     levels = trajectory(grid)
     blocks = []
     for i, slot in enumerate(slots):
-        local = datetime.fromtimestamp(slot["s"], PACIFIC)
+        before = levels[i - 1] if i else initial
         if slot["moer"] is None:
             mode = "none"
-        elif 16 <= local.hour < 21:
+        elif slot["peak"]:
             mode = "peak"
         elif i in bypass:
             mode = "bypass"
         elif grid[i] > 0.01:
             mode = "charge"
-        elif keep[i] > 0:
-            mode = "solar"
+        elif (
+            slot["moer"] <= CLEAN_MOER
+            and slot["allowed"]
+            and before < capacity - TOLERANCE_WH
+            and later[i] > TOLERANCE_WH
+        ):
+            mode = "solar"  # clean, with room left for the solar still to come
         else:
             mode = "battery"
-        recharge = recharge_at.get(i)
         blocks.append(
             {
                 "s": slot["s"],
@@ -326,13 +286,10 @@ def build_adaptive_plan(
                 "mode": mode,
                 "moer": slot["moer"],
                 "pct": round(levels[i] / capacity * 100, 1),
-                "recharge": recharge if recharge is not None and math.isfinite(recharge) else None,
             }
         )
     shortfall = (
-        max(0.0, floor - TOLERANCE_WH - min(levels), target - TOLERANCE_WH - levels[-1])
-        if levels
-        else 0
+        max(0.0, floor - TOLERANCE_WH - min(levels), target - slack - levels[-1]) if levels else 0
     )
     return {
         "generated_at": tnow,
@@ -353,48 +310,25 @@ def build_adaptive_plan(
     }
 
 
-def held_blocks(
-    slots: list[dict], hold: list[list[int]], now: int, held_moer: dict[int, float]
-) -> set[int]:
-    """Slots overlapping the window in ``hold`` that is current or next at ``now``.
+def rank_blocks(slots: list[dict]) -> list[int]:
+    """Allowed slots in the order they take charge.
 
-    A slot whose rate rose more than TIE_MOER above its rate in ``held_moer``
-    (keyed by block start) is left out: the hold absorbs small forecast
-    changes, not a jump such as a zero forecast that the live rate contradicts.
-    """
-    window = next((w for w in sorted(hold) if w[1] > now), None)
-    if window is None:
-        return set()
-    return {
-        i
-        for i, slot in enumerate(slots)
-        if slot["s"] < window[1]
-        and window[0] < slot["e"]
-        and slot["moer"] is not None
-        and slot["moer"] <= held_moer.get(slot["s"] // 900 * 900, math.inf) + TIE_MOER
-    }
-
-
-def rank_blocks(slots: list[dict], held: set[int]) -> list[int]:
-    """Allowed slots, cleanest first.
-
-    Slots at or under TIE_MOER come first, earliest first: their charge
-    emits nothing whenever it runs, and charging early makes the energy
-    usable sooner and doesn't depend on later zeros in the forecast holding.
-    The room they keep for later solar protects the panels.
-
-    Among the rest, slots within TIE_MOER of the cleanest slot not yet
-    ranked tie. A held slot wins a tie, so another slot must be cleaner by
-    more than TIE_MOER to replace it; otherwise the later slot wins.
+    Clean slots (CLEAN_MOER or less) come first, earliest first: they emit
+    about nothing whenever they run, and early charge is usable sooner and
+    doesn't wait on a later forecast. Dirty slots follow, cleanest first.
+    Dirty slots within DIRTY_TIE of the cleanest one left tie, and the later
+    one wins: the gap is within forecast error, and waiting leaves time for a
+    clean slot to appear.
     """
     allowed = [i for i, slot in enumerate(slots) if slot["allowed"]]
-    ranked = [i for i in allowed if slots[i]["moer"] <= TIE_MOER]
-    order = sorted((i for i in allowed if i not in ranked), key=lambda i: slots[i]["moer"])
-    while order:
-        tied = [i for i in order if slots[i]["moer"] <= slots[order[0]]["moer"] + TIE_MOER]
-        ranked += sorted(tied, key=lambda i: (i not in held, -slots[i]["s"]))
-        order = [i for i in order if i not in tied]
-    return ranked
+    clean = [i for i in allowed if slots[i]["moer"] <= CLEAN_MOER]
+    left = sorted((i for i in allowed if i not in clean), key=lambda i: slots[i]["moer"])
+    dirty: list[int] = []
+    while left:
+        tied = [i for i in left if slots[i]["moer"] <= slots[left[0]]["moer"] + DIRTY_TIE]
+        dirty += sorted(tied, key=lambda i: -slots[i]["s"])
+        left = [i for i in left if i not in tied]
+    return clean + dirty
 
 
 def next_deadline(now: datetime) -> int:
