@@ -387,21 +387,25 @@ def test_plan_holds_the_reported_level_without_solar_or_charge():
     assert plan["blocks"][-1]["pct"] == 100
 
 
-def test_near_zero_grid_leaves_room_for_the_rest_of_the_solar():
+def test_near_zero_grid_charges_now_and_leaves_room_for_the_rest_of_the_solar():
     # Oct 14: 0 lb/MWh from 9 am to 4 pm. The old rule filled the battery from
     # the grid by 10 am, and the panels made nothing for the rest of the day.
+    # Nov 8: waiting for the latest zero block left a 23% battery idle all
+    # morning. Charge now, to the target less the solar still to come.
     morning = NOW.replace(hour=16)  # 9 am Pacific
     points = [
         (t, 0.0 if t.astimezone(PACIFIC).hour >= 9 else 900.0)
         for t, _ in flat(900, now=morning, hours=12)
     ]
-    plan = build_adaptive_plan(points, morning, 60, inputs(solar=500))
-    assert datetime.fromtimestamp(plan["windows"][0][0], PACIFIC).hour >= 13
+    plan = build_adaptive_plan(points, morning, 23, inputs(solar=500))
+    assert plan["windows"][0][0] == int(morning.timestamp())
+    modes = [b["mode"] for b in plan["blocks"]]
+    charged = plan["blocks"][modes.index("solar") - 1]["pct"]
+    assert charged < plan["target_pct"] - 10  # room for the solar still to come
     assert plan["blocks"][-1]["pct"] == pytest.approx(plan["target_pct"], abs=1)
     assert plan["shortfall_wh"] == 0
-    modes = [b["mode"] for b in plan["blocks"]]
     # Room is left for tomorrow's solar, so the plug doesn't stay on to fill up.
-    assert modes[0] == "solar" and "bypass" not in modes
+    assert modes[0] == "charge" and "bypass" not in modes
     # With no solar expected tomorrow, the plug stays on once today's is done.
     dark = dict(inputs(solar=500), solar_profile={q: 0.0 for q in range(96)})
     late = build_adaptive_plan(points, morning.replace(hour=22), 90, dark)

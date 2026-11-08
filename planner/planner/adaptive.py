@@ -132,7 +132,8 @@ def build_adaptive_plan(
 ) -> dict:
     """Target a full battery by the next 4 pm Pacific, less the next day's solar.
 
-    Charge in the cleanest 15-minute blocks; blocks within TIE_MOER of each
+    Charge in the cleanest 15-minute blocks. Blocks within TIE_MOER of zero
+    come first, earliest first. Otherwise blocks within TIE_MOER of each
     other tie and the later one wins, so solar arrives first. Blocks in
     ``hold`` (the previous plan's current or next window) win ties, so small
     forecast changes don't move the relay. Room is kept for material later solar at
@@ -360,14 +361,18 @@ def held_blocks(slots: list[dict], hold: list[list[int]], now: int) -> set[int]:
 def rank_blocks(slots: list[dict], held: set[int]) -> list[int]:
     """Allowed slots, cleanest first.
 
-    Slots within TIE_MOER of the cleanest slot not yet ranked tie. A held
-    slot wins a tie, so another slot must be cleaner by more than TIE_MOER
-    to replace it; otherwise the later slot wins.
+    Slots at or under TIE_MOER come first, earliest first: their charge
+    emits nothing whenever it runs, and charging early makes the energy
+    usable sooner and doesn't depend on later zeros in the forecast holding.
+    The room they keep for later solar protects the panels.
+
+    Among the rest, slots within TIE_MOER of the cleanest slot not yet
+    ranked tie. A held slot wins a tie, so another slot must be cleaner by
+    more than TIE_MOER to replace it; otherwise the later slot wins.
     """
-    order = sorted(
-        (i for i, slot in enumerate(slots) if slot["allowed"]), key=lambda i: slots[i]["moer"]
-    )
-    ranked: list[int] = []
+    allowed = [i for i, slot in enumerate(slots) if slot["allowed"]]
+    ranked = [i for i in allowed if slots[i]["moer"] <= TIE_MOER]
+    order = sorted((i for i in allowed if i not in ranked), key=lambda i: slots[i]["moer"])
     while order:
         tied = [i for i in order if slots[i]["moer"] <= slots[order[0]]["moer"] + TIE_MOER]
         ranked += sorted(tied, key=lambda i: (i not in held, -slots[i]["s"]))

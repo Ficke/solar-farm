@@ -9,8 +9,10 @@ above 20%. The 4 pm target leaves room for a day of expected solar (about
 87% in October), so the battery can take the next morning's solar even if
 nothing runs overnight. It charges in the cleanest 15-minute forecast blocks
 outside 4–9 pm and leaves room for half the expected solar when that is at
-least 150 Wh. Blocks within 50 lb/MWh of the cleanest count as a tie; the block
-already planned wins, otherwise the later one.
+least 150 Wh. Blocks forecast at 50 lb/MWh or less come first, earliest first,
+so a low battery fills as soon as the grid is clean. Among other blocks, those
+within 50 lb/MWh of the cleanest count as a tie; the block already planned
+wins, otherwise the later one.
 
 The plan projects no load: the battery holds its latest reported level apart
 from planned solar and grid charge. Any drain shows up in the next reading
