@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import math
 from datetime import UTC, datetime, timedelta
-from typing import Any
 
 from planner.adaptive import MIN_CHARGE_W, build_adaptive_plan, estimates
 from planner.battery import WINDOW, Battery, integrate_wh, measure
@@ -180,9 +179,8 @@ def plan(
     points = clean_forecast(sources.forecast(24))
     if not any(now <= t < now + timedelta(hours=24) for t, _ in points):
         raise ValueError("unusable emissions forecast; keeping the previous plan")
-    p = charging_plan(store, live_check(store, points, now), settings, now)
+    p = charging_plan(store, rate_timeline(store, points, now), settings, now)
     note_inputs(p, points, int(now.timestamp()))
-    p["zeros_doubted_since"] = (store.get_state("zero_check") or {}).get("since")
     # Reuse the percentile collected with the latest WattTime reading.
     p["index_now"] = ((store.get_state("sample") or {}).get("sample") or {}).get("index")
     if p["index_now"] is None:
@@ -220,47 +218,27 @@ def clean_forecast(points: list[tuple[datetime, float]]) -> list[tuple[datetime,
     return sorted(by_time.items())
 
 
-LIVE_HIGH = 300  # Doubt zero forecasts at or above this live rate in lb/MWh.
-LIVE_CLEAN = 100  # Clear doubt below this live rate in lb/MWh.
 LIVE_MAX_AGE = 900
 
 
-def live_check(
+def rate_timeline(
     store: Store, points: list[tuple[datetime, float]], now: datetime
 ) -> list[tuple[datetime, float]]:
-    """Replace current-block forecasts with a fresh WattTime actual.
+    """Return the rates the plan uses: a fresh WattTime actual for the current
+    15-minute block, the forecast after it.
 
-    When a high actual contradicts a zero forecast, replace today's other zeros
-    with that recorded rate. Persist doubt until a clean actual or a new Pacific day.
+    Beyond the current block the forecast predicts better than the actual,
+    even when the two disagree, so a miss now doesn't change later blocks.
     """
     t = int(now.timestamp())
-    today = now.astimezone(PACIFIC).date().isoformat()
-    check = store.get_state("zero_check") or {}
-    doubt: dict[str, Any] = (
-        dict(check) if check.get("day") == today else {"day": today, "since": None}
-    )
     live = (store.get_state("sample") or {}).get("sample") or {}
     moer, moer_t = live.get("moer"), live.get("moer_t")
-    rate = None
-    if moer is not None and moer_t is not None and 0 <= t - moer_t <= LIVE_MAX_AGE:
-        rate = float(moer)
-        forecast_now = next((v for p_t, v in points if p_t.timestamp() >= moer_t), None)
-        if rate >= LIVE_HIGH and forecast_now == 0 and doubt["since"] is None:
-            doubt.update(since=moer_t, rate=rate)
-        elif rate < LIVE_CLEAN:
-            doubt = {"day": today, "since": None}
-    if doubt != check:
-        store.put_state("zero_check", doubt)
+    if moer is None or moer_t is None or not 0 <= t - moer_t <= LIVE_MAX_AGE:
+        return points
     block = t // 900 * 900
-    doubted = doubt["since"] is not None
-    out = []
-    for p_t, v in points:
-        if rate is not None and block <= p_t.timestamp() < block + 900:
-            v = rate
-        elif doubted and v == 0 and p_t.astimezone(PACIFIC).date().isoformat() == today:
-            v = float(doubt["rate"])
-        out.append((p_t, v))
-    return out
+    return [
+        (p_t, float(moer) if block <= p_t.timestamp() < block + 900 else v) for p_t, v in points
+    ]
 
 
 FORECAST_STALE = 600  # Flag forecasts older than ten minutes.
@@ -304,7 +282,7 @@ def charging_plan(
         p["strategy"] = "fallback"
         return p
     estimate = charging_estimates(store, settings, t)
-    previous = store.get_state("plan") or {}
+    windows = (store.get_state("plan") or {}).get("windows") or []
     p = build_adaptive_plan(
         points,
         now,
@@ -312,12 +290,7 @@ def charging_plan(
         estimate,
         floor_pct=settings.floor_pct,
         region=settings.region,
-        hold=previous.get("windows"),
-        held_moer={
-            b["s"] // 900 * 900: b["moer"]
-            for b in previous.get("blocks") or []
-            if b.get("moer") is not None
-        },
+        charging=any(s <= t < e for s, e in windows),
     )
     # The plug checks this reading's age before allowing peak power at low battery.
     p["battery_at"] = battery["t"]
@@ -368,9 +341,8 @@ def refresh_charging_plan(store: Store, settings: Settings, now: datetime) -> No
     points = clean_forecast([(datetime.fromtimestamp(t, now.tzinfo), v) for t, v in forecast])
     if not any(t >= now for t, _ in points):
         return
-    p = charging_plan(store, live_check(store, points, now), settings, now)
+    p = charging_plan(store, rate_timeline(store, points, now), settings, now)
     note_inputs(p, points, old.get("forecast_at", old["generated_at"]))
-    p["zeros_doubted_since"] = (store.get_state("zero_check") or {}).get("since")
     p["forecast"] = forecast
     p["index_now"] = old.get("index_now")
     store.put_state("plan", p)
@@ -378,9 +350,19 @@ def refresh_charging_plan(store: Store, settings: Settings, now: datetime) -> No
 
 
 def keep_plan(store: Store, old: dict, new: dict) -> None:
-    """Keep five-minute snapshots and window changes to limit document growth."""
-    changed = [list(w) for w in new["windows"]] != [list(w) for w in old.get("windows", [])]
-    if changed or new["generated_at"] % 300 < 60:
+    """Keep five-minute snapshots and window changes to limit document growth.
+
+    A window clipped to now, or an edge that moves within five minutes, is no
+    change: a running charge moves both every minute.
+    """
+    t = new["generated_at"]
+
+    def edges(windows: list) -> list[int]:
+        return [x for s, e in windows if e > t for x in (max(s, t), e)]
+
+    a, b = edges(new["windows"]), edges(old.get("windows", []))
+    changed = len(a) != len(b) or any(abs(x - y) > 300 for x, y in zip(a, b, strict=True))
+    if changed or t % 300 < 60:
         store.append(PLANS, plan_record(new))
 
 
@@ -396,7 +378,6 @@ PLAN_HISTORY_KEYS = (
     "forecast_at",
     "forecast_until",
     "missing",
-    "zeros_doubted_since",
 )
 
 

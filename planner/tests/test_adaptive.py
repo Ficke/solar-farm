@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 from itertools import pairwise
 
 import pytest
-from planner.adaptive import build_adaptive_plan, estimates
+from planner.adaptive import START_WH, build_adaptive_plan, estimates
 from planner.plan import PACIFIC
 from planner.telemetry import CAPACITY_WH
 
@@ -127,7 +127,7 @@ def test_equal_forecasts_charge_as_late_as_possible():
     assert datetime.fromtimestamp(plan["deadline"], PACIFIC).hour == 16
 
 
-def test_room_is_kept_only_for_material_later_solar():
+def test_room_is_left_for_the_solar_still_expected():
     early = forecast(clean=10)
     none = build_adaptive_plan(early, NOW, 60, inputs(solar=0))
     small = build_adaptive_plan(early, NOW, 60, inputs(solar=200))
@@ -136,12 +136,14 @@ def test_room_is_kept_only_for_material_later_solar():
     def at_11(plan):
         return next(b["pct"] for b in plan["blocks"] if b["s"] == NOW.replace(hour=18).timestamp())
 
-    # 200 Wh/day leaves too little after 10am to wait for: fill up at 10.
+    # The clean hour charges to the target less the solar still to come, and
+    # that solar tops it up by 4 pm.
     assert at_11(none) == pytest.approx(none["target_pct"], abs=1)
-    assert at_11(small) >= small["target_pct"] - 1
-    # 2,000 Wh/day: keep room for half of what usually comes after 10.
-    assert none["grid_wh"] - big["grid_wh"] > 600
-    assert big["shortfall_wh"] == 0
+    assert at_11(small) < small["target_pct"] - 1
+    assert small["blocks"][-1]["pct"] == pytest.approx(small["target_pct"], abs=1)
+    assert small["shortfall_wh"] == 0
+    # 2,000 Wh/day: the battery already holds the target less the solar to come.
+    assert big["grid_wh"] == 0 and big["shortfall_wh"] == 0
 
 
 def test_after_peak_the_plan_aims_for_tomorrow_afternoon():
@@ -248,7 +250,7 @@ def adams_forecast(day: datetime) -> list[tuple[datetime, float]]:
 def test_current_block_stays_planned_between_forecast_points():
     points = adams_forecast(datetime(2026, 10, 4, 18, tzinfo=UTC))  # 11am Pacific
     now = datetime(2026, 10, 4, 13, 58, tzinfo=PACIFIC)
-    plan = build_adaptive_plan(points, now, 78, inputs())
+    plan = build_adaptive_plan(points, now, 70, inputs())
     assert plan["windows"][0][0] == int(now.timestamp())
 
 
@@ -259,20 +261,21 @@ def test_slow_charging_still_fills_by_4pm():
     first = build_adaptive_plan(points, now, 70, inputs())
     assert first["windows"][0][0] == int(now.timestamp())
     assert first["windows"][0][1] - first["windows"][0][0] <= 20 * 60
-    pct, samples, on_minutes = 70.0, [], []
+    pct, samples, on_minutes, on = 70.0, [], [], False
     estimate = inputs()
     while now.astimezone(PACIFIC).hour < 16:
         t = int(now.timestamp())
         if now.minute % 5 == 0:  # the server's estimate refresh while charging
             estimate = estimates(samples, t, 500, 1700)
-        plan = build_adaptive_plan(points, now, pct, estimate)
+        plan = build_adaptive_plan(points, now, pct, estimate, charging=on)
         on = any(s <= t < e for s, e in plan["windows"])
         if on:
             on_minutes.append(t)
             pct = min(100.0, pct + 850 * 0.9 / 60 / CAPACITY_WH * 100)
         samples.append({"t": t, "ac_input_w": 850.0 if on else 0.0, "output_w": 1.0})
         now += timedelta(minutes=1)
-    assert pct >= first["target_pct"] - 1
+    # A deficit under START_WH waits rather than restart the charge.
+    assert pct >= first["target_pct"] - START_WH / CAPACITY_WH * 100
     gaps = [b - a - 60 for a, b in pairwise(on_minutes) if b - a > 60]
     assert all(g <= 180 or g >= 15 * 60 for g in gaps), gaps
 
@@ -297,23 +300,19 @@ def flat(rate, now=NOW, hours=24, cleaner=None):
     return out
 
 
-def test_full_battery_runs_the_load_from_the_grid_when_that_beats_recharging():
-    # Sunday-like: 1,000 lb/MWh all day, 900 from 1 to 2 pm. Draining the full
-    # battery now means recharging at 900 / 0.81 = 1,111 later, so the load
-    # runs from the grid instead and the battery stays full.
+def test_full_battery_runs_on_the_battery_while_the_grid_is_dirty():
     plan = build_adaptive_plan(flat(1000, cleaner={13: 900}), NOW, 100, inputs(solar=0))
-    assert plan["windows"] == [[int(NOW.timestamp()), plan["deadline"]]]
+    assert plan["windows"] == []
     assert plan["shortfall_wh"] == 0
 
 
-def test_battery_runs_the_load_when_a_curtailment_block_will_refill_it():
-    # Grid at 0 from noon to 2 pm: the plug stays off this morning, since the
-    # clean block would refill any draw rather than buying 900 now. From noon
-    # nothing cleaner is left, so the grid runs any load until 4 pm.
+def test_full_battery_runs_the_load_on_the_grid_while_it_is_clean():
+    # Grid at 0 from noon to 2 pm and no solar to make room for: the plug
+    # passes clean power to the load, so the battery stays full for the peak.
     plan = build_adaptive_plan(flat(900, cleaner={12: 0, 13: 0}), NOW, 100, inputs(solar=0))
     noon = int(NOW.replace(hour=19).timestamp())
-    assert plan["windows"] == [[noon, plan["deadline"]]]
-    assert plan["shortfall_wh"] == 0
+    assert plan["windows"] == [[noon, noon + 7200]]
+    assert {b["mode"] for b in plan["blocks"] if noon <= b["s"] < noon + 7200} == {"bypass"}
 
 
 def test_no_bypass_while_room_is_kept_for_solar():
@@ -323,20 +322,37 @@ def test_no_bypass_while_room_is_kept_for_solar():
     assert all(datetime.fromtimestamp(s, PACIFIC).hour >= 9 for s, _ in plan["windows"])
 
 
-def test_held_window_keeps_its_place_unless_clearly_beaten():
-    # 10 am at 480 and 11 am at 500 tie; the later block wins by default.
-    points = flat(900, cleaner={10: 480, 11: 500})
+def test_dirty_blocks_within_forecast_error_charge_later():
+    # 10 am at 480 and 11 am at 560 are within forecast error: the later block
+    # charges, in case a clean one appears first.
     estimate = inputs(solar=0)
-    first = build_adaptive_plan(points, NOW, 85, estimate)
-    assert datetime.fromtimestamp(first["windows"][0][0], PACIFIC).hour == 11
-    # A plan already holding 10 am keeps it within the tie band ...
-    ten = int(NOW.replace(hour=17).timestamp())  # 10 am Pacific
-    held = build_adaptive_plan(points, NOW, 85, estimate, hold=[[ten, ten + 900]])
-    assert datetime.fromtimestamp(held["windows"][0][0], PACIFIC).hour == 10
-    # ... but gives way to a block more than 50 lb/MWh cleaner.
-    cleaner = flat(900, cleaner={10: 480, 11: 420})
-    moved = build_adaptive_plan(cleaner, NOW, 85, estimate, hold=[[ten, ten + 900]])
-    assert datetime.fromtimestamp(moved["windows"][0][0], PACIFIC).hour == 11
+    tied = build_adaptive_plan(flat(900, cleaner={10: 480, 11: 560}), NOW, 85, estimate)
+    assert datetime.fromtimestamp(tied["windows"][0][0], PACIFIC).hour == 11
+    # More than 100 lb/MWh cleaner wins.
+    clear = build_adaptive_plan(flat(900, cleaner={10: 440, 11: 560}), NOW, 85, estimate)
+    assert datetime.fromtimestamp(clear["windows"][0][0], PACIFIC).hour == 10
+
+
+def test_clean_blocks_come_before_any_dirty_block():
+    # A clean block at 3 pm beats every dirty block, even a much cleaner one.
+    points = flat(900, cleaner={9: 350, 15: 250})
+    plan = build_adaptive_plan(points, NOW, 85, inputs(solar=0))
+    assert all(datetime.fromtimestamp(s, PACIFIC).hour == 15 for s, _ in plan["windows"])
+    assert plan["shortfall_wh"] == 0
+
+
+def test_charging_ends_15_minutes_before_4pm():
+    plan = build_adaptive_plan(flat(900), NOW, 60, inputs(solar=0))
+    assert plan["windows"][-1][1] <= plan["deadline"] - 900
+    assert plan["shortfall_wh"] == 0
+
+
+def test_a_small_deficit_waits_unless_already_charging():
+    points = forecast(clean=12)
+    idle = build_adaptive_plan(points, NOW, 98, inputs(solar=0))
+    assert idle["windows"] == [] and idle["shortfall_wh"] == 0
+    running = build_adaptive_plan(points, NOW, 98, inputs(solar=0), charging=True)
+    assert running["windows"] and running["blocks"][-1]["pct"] == 100
 
 
 def test_solar_is_learned_only_while_the_battery_has_room():
@@ -366,24 +382,23 @@ def test_blocks_explain_each_quarter_hour():
     plan = build_adaptive_plan(points, NOW, 90, inputs(solar=0))
     blocks = plan["blocks"]
     assert blocks[0]["s"] == int(NOW.timestamp()) and blocks[-1]["e"] == plan["deadline"]
-    modes = {datetime.fromtimestamp(b["s"], PACIFIC).hour: b["mode"] for b in blocks}
-    assert modes[8] == "battery" and modes[13] == "charge" and modes[15] == "bypass"
-    assert blocks[0]["recharge"] is None  # not full, so not tested
-    # Full after 2 pm: tested against recharging at 900 and runs on the grid.
-    assert blocks[28]["recharge"] == 900
+    modes = {datetime.fromtimestamp(b["s"], PACIFIC).hour: b["mode"] for b in reversed(blocks)}
+    # Charges at noon, then passes clean power through while full.
+    assert modes[8] == "battery" and modes[12] == "charge" and modes[13] == "bypass"
+    assert modes[15] == "battery"
     assert blocks[-1]["pct"] == 100
-    full = build_adaptive_plan(points, NOW, 100, inputs(solar=0))
-    # The full battery at 7 am is tested against recharging at 100 and stays off.
-    assert full["blocks"][0]["recharge"] == 100 and full["blocks"][0]["mode"] == "battery"
+    sunny = build_adaptive_plan(points, NOW, 70, inputs(solar=500))
+    sunny_modes = {datetime.fromtimestamp(b["s"], PACIFIC).hour: b["mode"] for b in sunny["blocks"]}
+    assert sunny_modes[13] == "solar"  # clean, with room left for the solar to come
     after_peak = build_adaptive_plan(points, NOW.replace(hour=23, minute=30), 50, inputs())
     assert after_peak["blocks"][0]["mode"] == "peak"
 
 
 def test_plan_holds_the_reported_level_without_solar_or_charge():
-    # No load is projected: the battery stays at 98% until the clean noon hour.
-    plan = build_adaptive_plan(forecast(), NOW, 98, inputs(solar=0))
+    # No load is projected: the battery stays at 95% until the clean noon hour.
+    plan = build_adaptive_plan(forecast(), NOW, 95, inputs(solar=0))
     before = [b["pct"] for b in plan["blocks"] if datetime.fromtimestamp(b["s"], PACIFIC).hour < 12]
-    assert before and all(pct == 98 for pct in before)
+    assert before and all(pct == 95 for pct in before)
     assert plan["blocks"][-1]["pct"] == 100
 
 
@@ -408,23 +423,7 @@ def test_near_zero_grid_charges_now_and_leaves_room_for_the_rest_of_the_solar():
     assert modes[0] == "charge" and "bypass" not in modes
     # With no solar expected tomorrow, the plug stays on once today's is done.
     dark = dict(inputs(solar=500), solar_profile={q: 0.0 for q in range(96)})
-    late = build_adaptive_plan(points, morning.replace(hour=22), 90, dark)
-    assert late["windows"] == [[int(morning.replace(hour=22).timestamp()), late["deadline"]]]
+    late = build_adaptive_plan(points, morning.replace(hour=22), 90, dark)  # 3 pm Pacific
+    assert len(late["windows"]) == 1 and late["windows"][0][1] == late["deadline"]
+    assert late["windows"][0][0] < int(morning.replace(hour=22).timestamp()) + 900
     assert late["blocks"][-1]["pct"] == 100
-
-
-def test_a_held_window_lets_go_when_its_rate_jumps():
-    # Nov 8: charging at 9:30 in a zero forecast. A live 400 contradicts it,
-    # so today's zeros all become 400. The charging window loses its hold and
-    # charging moves to the latest of those blocks, in case the zeros return.
-    morning = NOW.replace(hour=16, minute=30)  # 9:30 am Pacific
-    hold = [[int(morning.timestamp()), int(morning.timestamp()) + 4500]]
-    points = [
-        (t, 400.0 if 9 <= t.astimezone(PACIFIC).hour < 15 else 950.0)
-        for t, _ in flat(900, now=morning, hours=12)
-    ]
-    was = {int(t.timestamp()) // 900 * 900: 0.0 for t, _ in points}
-    kept = build_adaptive_plan(points, morning, 23, inputs(solar=0), hold=hold)
-    assert kept["windows"][0][0] == hold[0][0]
-    moved = build_adaptive_plan(points, morning, 23, inputs(solar=0), hold=hold, held_moer=was)
-    assert datetime.fromtimestamp(moved["windows"][0][0], PACIFIC).hour >= 13

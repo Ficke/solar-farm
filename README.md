@@ -50,6 +50,7 @@ just setup            # install dependencies
 just check            # lint, type-check and test Python, plug and dashboard
 just test-firestore   # Firestore emulator tests; requires Java 21+ and Node
 just web              # dashboard at http://localhost:5173 with synthetic data
+just replay run DATA --start 2026-10-12 --end 2026-11-07  # score the planner on saved data
 ```
 
 After changing API models in `server/solar_server/schema.py`, run `just api`

@@ -705,17 +705,6 @@
           "pct": {
             "type": "number",
             "title": "Pct"
-          },
-          "recharge": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Recharge"
           }
         },
         "type": "object",
@@ -724,8 +713,7 @@
           "e",
           "mode",
           "moer",
-          "pct",
-          "recharge"
+          "pct"
         ],
         "title": "PlanBlock",
         "description": "One 15-minute block of the plan, clipped to now and the deadline."
@@ -899,17 +887,6 @@
             "type": "array",
             "title": "Missing",
             "default": []
-          },
-          "zeros_doubted_since": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Zeros Doubted Since"
           }
         },
         "type": "object",

@@ -150,43 +150,24 @@ def live(store, t, moer):
     store.put_state("sample", {"sample": {"t": t, "battery_pct": 60, "moer": moer, "moer_t": t}})
 
 
-def test_live_check_doubts_todays_zeros_after_a_miss_and_trusts_them_again():
+def test_rate_timeline_uses_the_live_rate_for_the_current_block_only():
     store = MemoryStore()
     points = zero_midday()
     eleven = NOW + timedelta(hours=4)
     t = int(eleven.timestamp())
-    # Live rate agrees with the forecast: zeros stand, the current block takes the live rate.
-    live(store, t, 20.0)
-    checked = tasks.live_check(store, points, eleven)
-    assert [v for p_t, v in checked if p_t < eleven + timedelta(minutes=15)][-3:] == [20.0] * 3
-    assert checked[len(checked) // 2 :] == points[len(points) // 2 :]
-    # Live rate is high while the forecast says 0: today's zeros become the live rate.
-    live(store, t + 300, 980.0)
-    checked = tasks.live_check(store, points, eleven + timedelta(minutes=5))
-    assert {v for _, v in checked} == {900.0, 980.0}
-    assert store.get_state("zero_check") == {"day": "2026-10-03", "since": t + 300, "rate": 980.0}
-    # Without a fresh live rate the doubt holds at the rate that raised it.
-    store.put_state("sample", {"sample": {"t": t + 300}})
-    assert 0.0 not in {v for _, v in tasks.live_check(store, points, eleven + timedelta(minutes=6))}
-    # A middling rate keeps the doubt; a clean one clears it.
-    live(store, t + 600, 500.0)
-    assert tasks.live_check(store, points, eleven + timedelta(minutes=10)) != points
-    live(store, t + 900, 40.0)
-    checked = tasks.live_check(store, points, eleven + timedelta(minutes=15))
-    assert {v for _, v in checked} == {0.0, 40.0, 900.0}
+    # A high actual against a zero forecast changes the current block only;
+    # later zeros stand, since the forecast predicts them better.
+    live(store, t, 980.0)
+    timeline = tasks.rate_timeline(store, points, eleven)
+    block = [v for p_t, v in timeline if eleven <= p_t < eleven + timedelta(minutes=15)]
+    assert block == [980.0] * 3
+    later = [(p_t, v) for p_t, v in timeline if p_t >= eleven + timedelta(minutes=15)]
+    assert later == [(p_t, v) for p_t, v in points if p_t >= eleven + timedelta(minutes=15)]
+    # A live rate over 15 minutes old is ignored.
+    assert tasks.rate_timeline(store, points, eleven + timedelta(minutes=16)) == points
 
 
-def test_live_check_leaves_tomorrows_zeros_and_resets_each_day():
-    store = MemoryStore()
-    store.put_state("zero_check", {"day": "2026-10-03", "since": T, "rate": 980.0})
-    tomorrow = [(t + timedelta(days=1), v) for t, v in zero_midday()]
-    assert tasks.live_check(store, tomorrow, NOW) == tomorrow
-    next_day = NOW + timedelta(days=1)
-    assert tasks.live_check(store, zero_midday(), next_day) == zero_midday()
-    assert store.get_state("zero_check") == {"day": "2026-10-04", "since": None}
-
-
-def test_replan_skips_doubted_zeros_and_records_it():
+def test_replan_charges_in_the_next_zeros_after_a_miss_now():
     store = MemoryStore()
     eleven = NOW + timedelta(hours=4)
     t = int(eleven.timestamp())
@@ -197,8 +178,5 @@ def test_replan_skips_doubted_zeros_and_records_it():
     store.append(SAMPLES, {"t": t, "battery_pct": 60})
     tasks.refresh_charging_plan(store, Settings(), eleven)
     p = store.get_state("plan") or {}
-    assert p["zeros_doubted_since"] == t
     assert p["forecast"] == forecast  # WattTime's forecast is kept as sent
-    assert p["windows"]
-    for s, _ in p["windows"]:
-        assert not 11 <= datetime.fromtimestamp(s, PACIFIC).hour < 14
+    assert p["windows"][0][0] == t + 900  # the next forecast zero, not the dirty block now

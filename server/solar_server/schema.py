@@ -82,9 +82,8 @@ class PlanBlock(BaseModel):
     s: int
     e: int
     mode: Literal["charge", "bypass", "solar", "battery", "peak", "none"]
-    moer: float | None  # forecast marginal CO2, lb/MWh
+    moer: float | None  # marginal CO2, lb/MWh: live for the current block, else forecast
     pct: float  # projected battery % at the block's end
-    recharge: float | None  # lb/MWh of the block that would refill the battery
 
 
 class PlanSummary(BaseModel):
@@ -104,7 +103,6 @@ class PlanSummary(BaseModel):
     forecast_at: int | None = None
     forecast_until: int | None = None
     missing: list[Literal["battery", "forecast", "forecast_horizon"]] = []
-    zeros_doubted_since: int | None = None
 
 
 class Now(BaseModel):
