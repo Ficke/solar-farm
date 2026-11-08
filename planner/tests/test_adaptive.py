@@ -40,7 +40,7 @@ def test_4pm_target_leaves_room_for_tomorrows_solar():
     # Oct 18: full by 4 pm, nothing ran overnight, and the battery began Oct 19
     # at 99% with the day's solar still to come.
     plan = build_adaptive_plan(forecast(), NOW, 60, inputs(solar=500))
-    room = 500 * 1.0 * 0.95 / CAPACITY_WH * 100  # default scale, solar charging
+    room = 500 * 1.0 / CAPACITY_WH * 100  # default: stored as read
     assert plan["target_pct"] == pytest.approx(100 - room, abs=0.1)
     # The clean hour is noon; half the solar after it was left room for, and the
     # rest lands on top.

@@ -321,7 +321,7 @@ def charging_estimates(store: Store, settings: Settings, now: int) -> dict:
 
 
 def battery_estimate(store: Store, now: int) -> Battery:
-    """Measure capacity and the solar scale over 30 days, every six hours."""
+    """Measure capacity and stored solar per Wh of reading over 30 days, every six hours."""
     cached = store.get_state("battery") or {}
     previous = Battery.from_dict(cached.get("battery"))
     if 0 <= now - cached.get("t", 0) < BATTERY_MAX_AGE:
