@@ -25,6 +25,7 @@ SCHED = "solar-scheduler@p.iam.gserviceaccount.com"
 class FakeSources:
     def __init__(self, jackery: bool = True, fail_index: bool = False, actuals: bool = True):
         self.with_jackery = jackery
+        self.device: dict | None = None
         self.fail_index = fail_index
         self.actuals = actuals
 
@@ -59,7 +60,8 @@ class FakeSources:
     def jackery(self, now):
         if not self.with_jackery:
             return None
-        return Reading(now, 81.0, 120.0, 0.0, 0.0, 90.0, {"rb": 81, "ip": 120, "op": 90}, 16.2)
+        raw = {"rb": 81, "ip": 120, "op": 90}
+        return Reading(now, 81.0, 120.0, 0.0, 0.0, 90.0, raw, 16.2, device=self.device)
 
 
 def verifier(token, audience):
@@ -147,6 +149,15 @@ def test_collect_archives_jackery_properties_only_when_they_change():
     for i in range(3):
         tasks.collect(store, FakeSources(), datetime.fromtimestamp(NOW + 60 * i, UTC))
     assert store.day(JACKERY, "2026-10-04") == [{"t": NOW, "rb": 81, "ip": 120, "op": 90}]
+
+
+def test_collect_keeps_the_jackery_online_status(caplog):
+    store = MemoryStore()
+    sources = FakeSources()
+    sources.device = {"onlineStatus": 0, "devSn": "X"}
+    tasks.collect(store, sources, datetime.fromtimestamp(NOW, UTC))
+    assert store.get_state("jackery_device") == {"t": NOW, "device": sources.device}
+    assert "jackery offline" in caplog.text
 
 
 def test_collect_keeps_going_when_a_source_fails():

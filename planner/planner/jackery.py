@@ -24,6 +24,13 @@ class Reading:
     runtime_h: float | None = None  # Jackery's estimate of hours left at the current draw.
     full_h: float | None = None  # Jackery's estimate of hours to full while charging.
     outlets_on: bool | None = None  # Whether the AC or DC outlets are switched on.
+    device: dict | None = None  # Cloud metadata; `onlineStatus` 1 means the device is connected.
+
+    @property
+    def online(self) -> bool | None:
+        """Report whether Jackery's cloud sees the device; offline properties are stale."""
+        status = (self.device or {}).get("onlineStatus")
+        return None if status is None else status == 1
 
     @property
     def solar_w(self) -> float | None:
@@ -34,8 +41,9 @@ class Reading:
         return max(0.0, self.input_w - other)
 
 
-def parse_properties(props: dict, now: datetime) -> Reading:
-    props = props.get("properties", props)
+def parse_properties(data: dict, now: datetime) -> Reading:
+    props = data.get("properties", data)
+    device = data.get("device") if isinstance(data.get("device"), dict) else None
 
     def num(key: str) -> float | None:
         v = props.get(key)
@@ -55,6 +63,7 @@ def parse_properties(props: dict, now: datetime) -> Reading:
         runtime_h=None if (ot := num("ot")) is None or ot >= RUNTIME_UNKNOWN else ot / 10,
         full_h=None if (it := num("it")) is None or it >= RUNTIME_UNKNOWN else it / 10,
         outlets_on=None if (ac := num("oac")) is None else bool(ac or num("odc")),
+        device=device,
     )
 
 

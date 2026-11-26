@@ -69,3 +69,10 @@ def test_csv_round_trip(tmp_path):
     telemetry.append(path, r)
     rows = telemetry.load(path)
     assert rows == [(START, 100.0), (START, 100.0)]
+
+
+def test_online_comes_from_the_cloud_device_metadata():
+    data = {"device": {"onlineStatus": 0, "devSn": "X"}, "properties": {"rb": 100}}
+    assert parse_properties(data, START).online is False
+    assert parse_properties({"device": {"onlineStatus": 1}}, START).online is True
+    assert parse_properties({"rb": 100}, START).online is None

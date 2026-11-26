@@ -69,6 +69,7 @@ def collect(store: Store, sources: Sources, now: datetime) -> dict:
                 outlets_on=r.outlets_on,
             )
             record_properties(store, t, r.raw)
+            record_device(store, t, r.device)
     except Exception as e:
         log.warning("jackery failed: %s", e)
     if len(sample) > 1:
@@ -90,6 +91,16 @@ def record_properties(store: Store, t: int, raw: dict) -> None:
     if props and props != last.get("props"):
         store.append(JACKERY, {"t": t, **props})
         store.put_state("jackery", {"t": t, "props": props})
+
+
+def record_device(store: Store, t: int, device: dict | None) -> None:
+    """Keep Jackery's cloud metadata, which says whether the device is online."""
+    meta = scalars(device or {})
+    last = store.get_state("jackery_device") or {}
+    if meta and meta != last.get("device"):
+        store.put_state("jackery_device", {"t": t, "device": meta})
+    if meta.get("onlineStatus") not in (None, 1):
+        log.warning("jackery offline: onlineStatus=%s", meta.get("onlineStatus"))
 
 
 WATTTIME_KEYS = ("moer", "moer_t", "index")
